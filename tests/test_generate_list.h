@@ -545,6 +545,21 @@ inline TestOutput test_enums() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_module_path_and_import() {
+
+    std::string src = """"
+    // Assumes run from build
+    "module_path(\"../tests/\")\n"
+    "module_path(\"tests/\")\n"
+    "module_path(\"../../tests/\")\n"
+    "import \"test_import.mylo\"\n"
+    "my_test()\n";
+    std::string expected = """"
+    "3\n";
+
+    return run_source_test(src, expected);
+}
+
 
 inline void test_generate_list() {
     ADD_TEST("Test Test", test_test);
@@ -576,6 +591,8 @@ inline void test_generate_list() {
     ADD_TEST("Test for len(array)", test_len);
     ADD_TEST("Test for contains(array)", test_contains);
     ADD_TEST("Test for Enums", test_enums);
+    ADD_TEST("Test for Module Path & Import", test_module_path_and_import);
+
 
 }
 

@@ -8,6 +8,7 @@
 // Defined in compiler.c
 void parse(char* source);
 void compile_to_c_source(const char* output_filename);
+void mylo_reset();
 void disassemble();
 
 void disassemble() {
@@ -63,6 +64,11 @@ int main(int argc, char** argv) {
     if(!fn) { printf("No input file provided.\n"); return 1; }
 
     char* content = read_file(fn);
+    if (!content) {
+        printf("Error: Cannot read file %s\n", fn);
+        return 1;
+    }
+
     mylo_reset();
     parse(content);
 

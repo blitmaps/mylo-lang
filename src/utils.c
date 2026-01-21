@@ -5,7 +5,10 @@
 
 char* read_file(const char* fn) {
     FILE* f = fopen(fn, "rb");
-    if(!f) { printf("Error: Cannot read file %s\n", fn); exit(1); }
+    if(!f) {
+        // Changed: Return NULL instead of exit(1) to allow search paths
+        return NULL;
+    }
 
     fseek(f, 0, SEEK_END);
     long len = ftell(f);

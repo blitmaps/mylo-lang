@@ -24,7 +24,8 @@ typedef enum {
     TK_COLON, TK_COMMA, TK_DOT,
     TK_SCOPE, TK_ARROW,
     TK_BREAK, TK_CONTINUE,
-    TK_ENUM // <--- NEW
+    TK_ENUM,
+    TK_MODULE_PATH // <--- NEW
 } MyloTokenType;
 
 typedef struct { MyloTokenType type; char text[MAX_IDENTIFIER]; double val_float; } Token;
@@ -50,6 +51,10 @@ static char* src;
 static Token curr;
 static bool inside_function = false;
 static char current_namespace[MAX_IDENTIFIER] = "";
+
+// Search Paths
+char search_paths[MAX_SEARCH_PATHS][MAX_STRING_LENGTH];
+int search_path_count = 0;
 
 // Loop Control Stack
 typedef struct {
@@ -201,7 +206,8 @@ void next_token() {
         else if (strcmp(curr.text, "import") == 0) curr.type = TK_IMPORT;
         else if (strcmp(curr.text, "break") == 0) curr.type = TK_BREAK;
         else if (strcmp(curr.text, "continue") == 0) curr.type = TK_CONTINUE;
-        else if (strcmp(curr.text, "enum") == 0) curr.type = TK_ENUM; // <--- NEW
+        else if (strcmp(curr.text, "enum") == 0) curr.type = TK_ENUM;
+        else if (strcmp(curr.text, "module_path") == 0) curr.type = TK_MODULE_PATH; // <--- NEW
         else curr.type = TK_ID;
         return;
     }
@@ -244,6 +250,7 @@ void match(MyloTokenType t) {
 void expression();
 void statement();
 
+// ... (parse_namespaced_id, factor, term, expression, alloc_var, for_statement, struct_decl, enum_decl, parse_struct_literal unchanged) ...
 bool parse_namespaced_id(char* out_name) {
     strcpy(out_name, curr.text);
     match(TK_ID);
@@ -529,11 +536,42 @@ void parse_struct_literal(int struct_idx) {
 
 void statement() {
     if (curr.type == TK_PRINT) { match(TK_PRINT); match(TK_LPAREN); if (curr.type == TK_STR) { int id = make_string(curr.text); emit(OP_PSH_STR); emit(id); match(TK_STR); } else expression(); match(TK_RPAREN); emit(OP_PRN); }
-    else if (curr.type == TK_IMPORT) { match(TK_IMPORT); char f[MAX_STRING_LENGTH]; strcpy(f, curr.text); match(TK_STR); char* c = read_file(f); if (c) parse_internal(c, true); }
+    else if (curr.type == TK_IMPORT) {
+        match(TK_IMPORT);
+        char f[MAX_STRING_LENGTH];
+        strcpy(f, curr.text);
+        match(TK_STR);
+
+        char* c = read_file(f);
+        if (!c) {
+            for(int i=0; i<search_path_count; i++) {
+                char tmp[MAX_STRING_LENGTH];
+                sprintf(tmp, "%s/%s", search_paths[i], f);
+                c = read_file(tmp);
+                if (c) break;
+            }
+        }
+
+        if (c) parse_internal(c, true);
+        else { printf("Error: Cannot find import '%s'\n", f); exit(1); }
+    }
     else if (curr.type == TK_MOD) { match(TK_MOD); char m[MAX_IDENTIFIER]; strcpy(m, curr.text); match(TK_ID); match(TK_LBRACE); char old[MAX_IDENTIFIER]; strcpy(old, current_namespace); if (strlen(current_namespace) > 0) sprintf(current_namespace, "%s_%s", old, m); else strcpy(current_namespace, m); while (curr.type != TK_RBRACE && curr.type != TK_EOF) { if (curr.type == TK_FN) { void function(); function(); } else statement(); } match(TK_RBRACE); strcpy(current_namespace, old); }
     else if (curr.type == TK_BREAK) { match(TK_BREAK); emit_break(); }
     else if (curr.type == TK_CONTINUE) { match(TK_CONTINUE); emit_continue(); }
-    else if (curr.type == TK_ENUM) { enum_decl(); } // <--- NEW
+    else if (curr.type == TK_ENUM) { enum_decl(); }
+    else if (curr.type == TK_MODULE_PATH) { // <--- NEW STATEMENT
+        match(TK_MODULE_PATH);
+        match(TK_LPAREN);
+        char path[MAX_STRING_LENGTH];
+        strcpy(path, curr.text);
+        match(TK_STR);
+        match(TK_RPAREN);
+        if (search_path_count < MAX_SEARCH_PATHS) {
+            strcpy(search_paths[search_path_count++], path);
+        } else {
+            printf("Warning: Max search paths reached\n");
+        }
+    }
     else if (curr.type == TK_VAR) {
         match(TK_VAR); char name[MAX_IDENTIFIER]; strcpy(name, curr.text); match(TK_ID); int st = -1; bool is_arr = false;
         if (curr.type == TK_COLON) {
@@ -790,6 +828,7 @@ void mylo_reset() {
     vm_init();
     global_count = 0; local_count = 0; func_count = 0; struct_count = 0; ffi_count = 0; inside_function = false; current_namespace[0] = '\0';
     enum_entry_count = 0; // <--- RESET ENUMS
+    search_path_count = 0; // <--- RESET PATHS
 
     // FIX: Register Standard Library for the Interpreter
     int i = 0;

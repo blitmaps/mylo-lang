@@ -339,6 +339,10 @@ print(MyFirstMod::a_big_number())
 // Prints 65556
 print(a_big_number())
 ```
+## Using other Mylo files
+Other files, containing modules can be imported into the program using `import`
+
+
 <!-- TOC --><a name="c-interoperability-foreign-function-interface-ffi"></a>
 ## C Interoperability Foreign Function Interface (FFI)
 
