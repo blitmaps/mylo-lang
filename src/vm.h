@@ -39,8 +39,8 @@ typedef enum {
     OP_ALLOC, OP_HSET, OP_HGET, OP_DUP,
     OP_POP,
     OP_NATIVE,
-    OP_ARR, OP_AGET, OP_ALEN,
-    OP_SLICE
+    OP_ARR, OP_AGET, OP_ALEN, OP_SLICE,
+    OP_MAP, OP_ASET // <--- NEW (Map Create, Item Set)
 } OpCode;
 
 extern const char* OP_NAMES[];

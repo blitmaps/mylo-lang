@@ -48,51 +48,42 @@ void std_len(VM* vm) {
 }
 
 void std_contains(VM* vm) {
-    // Pop args (reverse order)
-    double needle_val = vm_pop();
-    int needle_type = vm->stack_types[vm->sp + 1];
+    double needle_val = vm_pop(); int needle_type = vm->stack_types[vm->sp + 1];
+    double haystack_val = vm_pop(); int haystack_type = vm->stack_types[vm->sp + 1];
 
-    double haystack_val = vm_pop();
-    int haystack_type = vm->stack_types[vm->sp + 1];
-
-    // CASE 1: String contains Substring
     if (haystack_type == T_STR) {
-        if (needle_type != T_STR) {
-            printf("Runtime Error: contains() on string requires string needle.\n");
-            exit(1);
-        }
-        const char* hay = get_str(vm, haystack_val);
-        const char* ned = get_str(vm, needle_val);
-
-        if (strstr(hay, ned) != NULL) vm_push(1.0, T_NUM);
-        else vm_push(0.0, T_NUM);
+        if (needle_type != T_STR) { printf("Runtime Error: contains() string needle\n"); exit(1); }
+        if (strstr(get_str(vm, haystack_val), get_str(vm, needle_val)) != NULL) vm_push(1.0, T_NUM); else vm_push(0.0, T_NUM);
         return;
     }
 
-    // CASE 2: Array contains Element
     if (haystack_type == T_OBJ) {
         int ptr = (int)haystack_val;
-        if ((int)vm->heap[ptr + HEAP_OFFSET_TYPE] == TYPE_ARRAY) {
+        int objType = (int)vm->heap[ptr + HEAP_OFFSET_TYPE];
+
+        if (objType == TYPE_ARRAY) {
             int len = (int)vm->heap[ptr + HEAP_OFFSET_LEN];
             int found = 0;
-
             for(int i=0; i<len; i++) {
-                double el_val = vm->heap[ptr + HEAP_HEADER_ARRAY + i];
-                int el_type = vm->heap_types[ptr + HEAP_HEADER_ARRAY + i];
-
-                // Match Type AND Value
-                if (el_type == needle_type && el_val == needle_val) {
-                    found = 1;
-                    break;
-                }
+                if (vm->heap_types[ptr + HEAP_HEADER_ARRAY + i] == needle_type && vm->heap[ptr + HEAP_HEADER_ARRAY + i] == needle_val) { found = 1; break; }
+            }
+            vm_push(found ? 1.0 : 0.0, T_NUM);
+            return;
+        }
+        else if (objType == TYPE_MAP) {
+            // Check Keys
+            if (needle_type != T_STR) { printf("Runtime Error: contains() map check requires string key\n"); exit(1); }
+            int count = (int)vm->heap[ptr + HEAP_OFFSET_COUNT];
+            int dataPtr = (int)vm->heap[ptr + HEAP_OFFSET_DATA];
+            int found = 0;
+            for(int i=0; i<count; i++) {
+                if (vm->heap[dataPtr + i*2] == needle_val) { found = 1; break; } // Compare String IDs
             }
             vm_push(found ? 1.0 : 0.0, T_NUM);
             return;
         }
     }
-
-    printf("Runtime Error: contains() expects string or array.\n");
-    exit(1);
+    printf("Runtime Error: contains() type\n"); exit(1);
 }
 
 void std_read_lines(VM* vm) {

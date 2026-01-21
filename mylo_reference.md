@@ -19,6 +19,7 @@ It is fast to write, fast to run, and can run anywhere.
         + [Arrays of Structs](#arrays-of-structs)
         + [Adding to or Concatenating Arrays](#adding-to-or-concatenating-arrays)
         + [Sub-Arrays or Array-Slicing](#sub-arrays-or-array-slicing)
+    * [Maps](#maps)
     * [Control flow](#control-flow)
         + [Conditionals (If Statements)](#conditionals-if-statements)
         + [For loops](#for-loops)
@@ -154,6 +155,48 @@ my_list = my_list[1:3]
 for (x: Color in my_list) {
     print(x.rgba)
 }
+```
+
+<!-- TOC --><a name="maps"></a>
+
+## Maps (Dictionaries)
+
+Maps are key-value collections where keys are always strings and values can be any type. They are dynamic and will grow as new keys are added.
+You can create a map using the map literal syntax `{}`. Keys must be strings, and assignments use the `=` operator.
+
+```javascript
+// Empty Map
+var empty = {}
+
+// Map with initial values
+var user = {
+    "name" = "Alice",
+    "age" = 30,
+    "role" = "Admin"
+}
+```
+
+### Accessing Values
+
+Values are retrieved using the bracket syntax `["key"]`.
+
+**Note:** If a key does not exist, accessing it returns an empty string `""` (or default value depending on implementation context).
+
+```javascript
+var name = user["name"]
+print(name) // "Alice"
+```
+
+### Modifying and Inserting
+
+Maps are mutable. You can update existing keys or add new ones using the bracket assignment syntax.
+
+```javascript
+// Update existing
+user["age"] = 31
+
+// Insert new key
+user["status"] = "Active"
 ```
 
 <!-- TOC --><a name="control-flow"></a>

@@ -25,7 +25,7 @@ typedef enum {
     TK_SCOPE, TK_ARROW,
     TK_BREAK, TK_CONTINUE,
     TK_ENUM,
-    TK_MODULE_PATH // <--- NEW
+    TK_MODULE_PATH
 } MyloTokenType;
 
 typedef struct { MyloTokenType type; char text[MAX_IDENTIFIER]; double val_float; } Token;
@@ -85,6 +85,7 @@ int enum_entry_count = 0;
 // --- Forward Declarations ---
 void parse_internal(char* source, bool is_import);
 void parse_struct_literal(int struct_idx);
+void parse_map_literal(); // Forward declaration for Map Literals
 
 // --- Helper Prototypes ---
 void emit(int op) { if(vm.code_size >= MAX_CODE) { printf("Error: Code overflow\n"); exit(1); } vm.bytecode[vm.code_size++] = op; }
@@ -207,7 +208,7 @@ void next_token() {
         else if (strcmp(curr.text, "break") == 0) curr.type = TK_BREAK;
         else if (strcmp(curr.text, "continue") == 0) curr.type = TK_CONTINUE;
         else if (strcmp(curr.text, "enum") == 0) curr.type = TK_ENUM;
-        else if (strcmp(curr.text, "module_path") == 0) curr.type = TK_MODULE_PATH; // <--- NEW
+        else if (strcmp(curr.text, "module_path") == 0) curr.type = TK_MODULE_PATH;
         else curr.type = TK_ID;
         return;
     }
@@ -250,7 +251,6 @@ void match(MyloTokenType t) {
 void expression();
 void statement();
 
-// ... (parse_namespaced_id, factor, term, expression, alloc_var, for_statement, struct_decl, enum_decl, parse_struct_literal unchanged) ...
 bool parse_namespaced_id(char* out_name) {
     strcpy(out_name, curr.text);
     match(TK_ID);
@@ -285,17 +285,28 @@ void factor() {
     }
 
     else if (curr.type == TK_LBRACE) {
+        // Lookahead to distinguish Struct vs Map
         char* safe_src = src; Token safe_curr = curr;
-        match(TK_LBRACE); char first_field[MAX_IDENTIFIER]; strcpy(first_field, curr.text);
-        src = safe_src; curr = safe_curr;
-        int st_idx = -1;
-        for(int s=0; s<struct_count; s++) { if (find_field(s, first_field) != -1) { st_idx = s; break; } }
-        if (st_idx != -1) parse_struct_literal(st_idx);
-        else { printf("Error: Could not infer struct type from field '%s'\n", first_field); exit(1); }
+        match(TK_LBRACE);
+
+        bool is_map = (curr.type == TK_STR); // If first token is string, it's a map {"k"="v"}
+
+        src = safe_src; curr = safe_curr; // Restore
+
+        if (is_map) {
+            parse_map_literal();
+        } else {
+            // Struct Literal logic
+            match(TK_LBRACE); char first_field[MAX_IDENTIFIER]; strcpy(first_field, curr.text);
+            src = safe_src; curr = safe_curr;
+            int st_idx = -1;
+            for(int s=0; s<struct_count; s++) { if (find_field(s, first_field) != -1) { st_idx = s; break; } }
+            if (st_idx != -1) parse_struct_literal(st_idx);
+            else { printf("Error: Could not infer struct type from field '%s'\n", first_field); exit(1); }
+        }
     }
 
     else if (curr.type == TK_ID && strcmp(curr.text, "C") == 0) {
-        // ... (C Block Parsing Unchanged) ...
         match(TK_ID); int ffi_idx = ffi_count++; ffi_blocks[ffi_idx].id = ffi_idx;
         ffi_blocks[ffi_idx].arg_count = 0; ffi_blocks[ffi_idx].return_type[0] = '\0';
         if (curr.type == TK_LPAREN) {
@@ -432,7 +443,6 @@ int alloc_var(bool is_loc, char* name, int type_id, bool is_array) {
 }
 
 void for_statement() {
-    // ... (For Loop Logic Unchanged) ...
     match(TK_FOR); match(TK_LPAREN); char name[MAX_IDENTIFIER] = {0}; bool is_iter = false;
     int explicit_type = -1;
 
@@ -505,7 +515,6 @@ void enum_decl() {
     int val = 0;
     while (curr.type != TK_RBRACE && curr.type != TK_EOF) {
         char entry_name[MAX_IDENTIFIER * 2];
-        // Create MyEnum_Member name
         sprintf(entry_name, "%s_%s", enum_name, curr.text);
 
         if (enum_entry_count >= MAX_ENUM_MEMBERS) {
@@ -529,6 +538,32 @@ void parse_struct_literal(int struct_idx) {
         int offset = find_field(struct_idx, field_name);
         if (curr.type == TK_COLON) match(TK_COLON); else match(TK_EQ_ASSIGN);
         expression(); emit(OP_HSET); emit(offset); emit(struct_idx);
+        if (curr.type == TK_COMMA) match(TK_COMMA);
+    }
+    match(TK_RBRACE);
+}
+
+// --- NEW: Map Literal Parsing ---
+void parse_map_literal() {
+    match(TK_LBRACE);
+    emit(OP_MAP); // Create map
+
+    while (curr.type != TK_RBRACE && curr.type != TK_EOF) {
+        emit(OP_DUP); // Keep Map Ref on stack for next set
+
+        // Key
+        if (curr.type != TK_STR) { printf("Error: Map keys must be strings\n"); exit(1); }
+        int id = make_string(curr.text); emit(OP_PSH_STR); emit(id);
+        match(TK_STR);
+
+        match(TK_EQ_ASSIGN);
+
+        // Value
+        expression();
+
+        emit(OP_ASET); // Map[Key] = Value
+        emit(OP_POP);  // ASET returns Value, but we are in literal init, discard it.
+
         if (curr.type == TK_COMMA) match(TK_COMMA);
     }
     match(TK_RBRACE);
@@ -559,7 +594,7 @@ void statement() {
     else if (curr.type == TK_BREAK) { match(TK_BREAK); emit_break(); }
     else if (curr.type == TK_CONTINUE) { match(TK_CONTINUE); emit_continue(); }
     else if (curr.type == TK_ENUM) { enum_decl(); }
-    else if (curr.type == TK_MODULE_PATH) { // <--- NEW STATEMENT
+    else if (curr.type == TK_MODULE_PATH) {
         match(TK_MODULE_PATH);
         match(TK_LPAREN);
         char path[MAX_STRING_LENGTH];
@@ -588,6 +623,14 @@ void statement() {
         }
         else if (st != -1 && curr.type == TK_LBRACKET) { parse_struct_literal(st); }
         else if (st != -1 && curr.type == TK_LBRACE) { parse_struct_literal(st); }
+        // NEW: Map Support
+        else if (curr.type == TK_LBRACE) {
+             char* safe_src = src; Token safe_curr = curr;
+             match(TK_LBRACE); bool is_map = (curr.type == TK_STR);
+             src = safe_src; curr = safe_curr;
+             if (is_map) parse_map_literal();
+             else { printf("Error: Struct literal without type\n"); exit(1); }
+        }
         else { expression(); }
 
         alloc_var(inside_function, name, st, is_arr); if (!inside_function) { emit(OP_SET); emit(global_count - 1); }
@@ -596,8 +639,8 @@ void statement() {
     else if (curr.type == TK_ID) {
         char name[MAX_IDENTIFIER]; parse_namespaced_id(name);
 
-        // Function Call
-        if (curr.type == TK_LPAREN) {
+        if (curr.type == TK_EQ_ASSIGN) { match(TK_EQ_ASSIGN); expression(); int loc = find_local(name); if (loc != -1) { emit(OP_SVAR); emit(locals[loc].offset); } else { int glob = -1; char m[MAX_IDENTIFIER*2]; get_mangled_name(m, name); if ((glob = find_global(m)) != -1) {} else if ((glob = find_global(name)) != -1) {} if (glob == -1) exit(1); emit(OP_SET); emit(globals[glob].addr); } }
+        else if (curr.type == TK_LPAREN) {
              match(TK_LPAREN); int arg_count = 0; if (curr.type != TK_RPAREN) { expression(); arg_count++; while(curr.type == TK_COMMA) { match(TK_COMMA); expression(); arg_count++; } } match(TK_RPAREN);
              int faddr = find_func(name);
              if (faddr != -1) { emit(OP_CALL); emit(faddr); emit(arg_count); emit(OP_POP); return; }
@@ -610,7 +653,6 @@ void statement() {
              if (faddr != -1) { emit(OP_CALL); emit(faddr); emit(arg_count); emit(OP_POP); return; }
              printf("Error: Undefined function '%s'\n", name); exit(1);
         }
-        else if (curr.type == TK_EQ_ASSIGN) { match(TK_EQ_ASSIGN); expression(); int loc = find_local(name); if (loc != -1) { emit(OP_SVAR); emit(locals[loc].offset); } else { int glob = -1; char m[MAX_IDENTIFIER*2]; get_mangled_name(m, name); if ((glob = find_global(m)) != -1) {} else if ((glob = find_global(name)) != -1) {} if (glob == -1) exit(1); emit(OP_SET); emit(globals[glob].addr); } }
         else if (curr.type == TK_DOT || curr.type == TK_LBRACKET) {
             int loc = find_local(name);
             int type_id = -1; bool is_array = false;
@@ -637,9 +679,24 @@ void statement() {
                         emit(OP_HGET); emit(offset); emit(type_id); type_id = -1;
                     }
                 } else if (curr.type == TK_LBRACKET) {
-                    match(TK_LBRACKET); expression();
-                    if (curr.type == TK_COLON) { match(TK_COLON); expression(); match(TK_RBRACKET); emit(OP_SLICE); }
-                    else { match(TK_RBRACKET); emit(OP_AGET); if(is_array) is_array=false; else type_id=-1; }
+                    match(TK_LBRACKET);
+                    expression(); // Key/Index
+
+                    if (curr.type == TK_COLON) {
+                        match(TK_COLON); expression(); match(TK_RBRACKET); emit(OP_SLICE);
+                    }
+                    else {
+                        match(TK_RBRACKET);
+                        if (curr.type == TK_EQ_ASSIGN) {
+                            match(TK_EQ_ASSIGN); expression();
+                            emit(OP_ASET); emit(OP_POP);
+                            break;
+                        } else {
+                            emit(OP_AGET);
+                            if(is_array) is_array=false;
+                            else type_id = -1;
+                        }
+                    }
                 }
             }
         }
@@ -815,8 +872,6 @@ void compile_to_c_source(const char* output_filename) {
     fprintf(fp, "    run_vm(false);\n    return 0;\n}\n");
     fclose(fp);
     printf("Build complete. Source generated at %s\n", output_filename);
-    //printf("Compile with: gcc %s vm.c mylolib.c utils.c -o mylo_app\n", output_filename);
-    //gcc out.c ../src/vm.c ../src/mylolib.c -o mylo_app -I../src -lm
     printf("To build the application you need the Mylo VM (.h, .c), Mylo utils and MyloLib\n");
     printf("------------------------------------------------------------------------------\n");
     printf("From the mylo-lang root directory, you can run this command to build a binary.\n");
@@ -827,8 +882,8 @@ void compile_to_c_source(const char* output_filename) {
 void mylo_reset() {
     vm_init();
     global_count = 0; local_count = 0; func_count = 0; struct_count = 0; ffi_count = 0; inside_function = false; current_namespace[0] = '\0';
-    enum_entry_count = 0; // <--- RESET ENUMS
-    search_path_count = 0; // <--- RESET PATHS
+    enum_entry_count = 0;
+    search_path_count = 0;
 
     // FIX: Register Standard Library for the Interpreter
     int i = 0;

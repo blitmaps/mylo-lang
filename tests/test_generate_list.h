@@ -230,6 +230,45 @@ inline TestOutput test_struct() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_maps() {
+
+    std::string src = """"
+    // 1. Creation: Map literal syntax
+    "var my_map = { \"name\"=\"foo\", \"age\"=32 }\n"
+
+    // Print the map object (should be Ref: 0 if it's the first allocation)
+    "print(my_map)\n"
+
+    // 2. Read: Access by key
+    "print(my_map[\"name\"])\n"
+    "print(my_map[\"age\"])\n"
+
+    // 3. Update: Change existing value
+    "my_map[\"name\"] = \"bar\"\n"
+    "print(my_map[\"name\"])\n"
+
+    // 4. Insert: Add new key-value pair
+    "my_map[\"city\"] = \"London\"\n"
+    "print(my_map[\"city\"])\n"
+
+    // 5. Contains check
+    "if (contains(my_map, \"city\")) {\n"
+        "print(\"Found\")\n"
+    "}\n";
+
+    std::string expected = """"
+    "[Ref: 0]\n"
+    "foo\n"
+    "32\n"
+    "bar\n"
+    "London\n"
+    "Found\n";
+
+    return run_source_test(src, expected);
+}
+
+
+
 inline TestOutput test_string_interp() {
 
     std::string src = """"
@@ -592,6 +631,7 @@ inline void test_generate_list() {
     ADD_TEST("Test for contains(array)", test_contains);
     ADD_TEST("Test for Enums", test_enums);
     ADD_TEST("Test for Module Path & Import", test_module_path_and_import);
+    ADD_TEST("Test for Maps", test_maps);
 
 
 }

@@ -22,18 +22,26 @@
 #define MAX_LOOP_NESTING 32
 #define MAX_JUMPS_PER_LOOP 64
 #define MAX_ENUM_MEMBERS 1024
-#define MAX_SEARCH_PATHS 16 // <--- NEW
+#define MAX_SEARCH_PATHS 16
 
 // Output
 #define OUTPUT_BUFFER_SIZE 128000
 
 // Types
 #define TYPE_ARRAY -1
+#define TYPE_MAP -3 // <--- NEW
 
 // Heap Layout Constants
 #define HEAP_OFFSET_TYPE 0
 #define HEAP_OFFSET_LEN 1     // For Arrays
+#define HEAP_OFFSET_CAP 1     // For Maps
+#define HEAP_OFFSET_COUNT 2   // For Maps
+#define HEAP_OFFSET_DATA 3    // For Maps (Pointer to Buffer)
+
 #define HEAP_HEADER_STRUCT 1  // Size of struct header (TypeID)
 #define HEAP_HEADER_ARRAY 2   // Size of array header (TypeID + Length)
+#define HEAP_HEADER_MAP 4     // Type, Cap, Count, DataPtr
+
+#define MAP_INITIAL_CAP 16
 
 #endif
