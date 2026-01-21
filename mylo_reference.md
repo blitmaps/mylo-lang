@@ -29,6 +29,7 @@ It is fast to write, fast to run, and can run anywhere.
     * [Functions](#functions)
         - [Passing own types](#passing-own-types)
     * [Scope & Modules](#scope-modules)
+    * [Import & Module Path](#import)
     * [C Interoperability Foreign Function Interface (FFI)](#c-interoperability-foreign-function-interface-ffi)
         + [Source example.mylo](#source-examplemylo)
         + [Passing variables to C](#passing-variables-to-c)
@@ -339,9 +340,34 @@ print(MyFirstMod::a_big_number())
 // Prints 65556
 print(a_big_number())
 ```
-## Using other Mylo files
-Other files, containing modules can be imported into the program using `import`
 
+<!-- TOC --><a name="import"></a>
+## Import - Using other Mylo files
+Other files, containing modules can be imported into the program using `import`, and search path can be added with
+`module_path()`.
+
+Here is an example, see `test_import.mylo`
+
+```javascript
+fn my_test() {
+    print("3")
+}
+```
+
+Now in our main.mylo:
+```javascript
+    // The mylo file is in tests, and we usually would run from either the 
+    // top level or build directory, so I've added some relative module paths
+    // to search
+    module_path("../tests/")
+    module_path("tests/")
+    module_path("../../tests/")
+    // my_test is imported here
+    import "test_import.mylo"
+    
+    // This prints 3
+    my_test()
+```
 
 <!-- TOC --><a name="c-interoperability-foreign-function-interface-ffi"></a>
 ## C Interoperability Foreign Function Interface (FFI)
