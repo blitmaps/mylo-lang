@@ -510,4 +510,4 @@ var result: num = C(val: int = a, val2 : str = b) {
 The standard functions are still rather limited, but can do file manipulation, array insights and some maths.
 This is actively being developed to add more power to the VM.
 
-Check out the [Standard Library Reference](docs/standardlib_reference.md).
+Check out the [Standard Library Reference](standardlib_reference.md).
