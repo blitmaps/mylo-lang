@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 4.1)
+cmake_minimum_required(VERSION 3.5)
 project(mylo LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 11)
@@ -14,6 +14,11 @@ add_executable(tests tests/tests.cpp src/compiler.c src/vm.h src/vm.c
         src/utils.c
         src/mylolib.h
         src/mylolib.c)
+IF (WIN32)
+  # Math not needed on Windows
+ELSE()
+  # Math needed on other plats
+  target_link_libraries(mylo m)
+  target_link_libraries(tests m)
+ENDIF()
 
-target_link_libraries(mylo m)
-target_link_libraries(tests m)
