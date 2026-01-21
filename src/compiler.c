@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <stdarg.h> // Required for error()
 #include <stdbool.h>
 #include "mylolib.h"
 #include "vm.h"
@@ -37,6 +38,7 @@ typedef struct {
     MyloTokenType type;
     char text[MAX_IDENTIFIER];
     double val_float;
+    int line; // New: Track line number for this token
 } Token;
 
 typedef struct {
@@ -60,6 +62,7 @@ static char *src;
 static Token curr;
 static bool inside_function = false;
 static char current_namespace[MAX_IDENTIFIER] = "";
+static int line = 1; // Global line counter
 
 // Search Paths
 char search_paths[MAX_SEARCH_PATHS][MAX_STRING_LENGTH];
@@ -125,12 +128,20 @@ void parse_struct_literal(int struct_idx);
 
 void parse_map_literal();
 
+// --- Error Handling ---
+void error(const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    fprintf(stderr, "[Line %d] Error: ", curr.line > 0 ? curr.line : line);
+    vfprintf(stderr, fmt, args);
+    fprintf(stderr, "\n");
+    va_end(args);
+    exit(1);
+}
+
 // --- Helper Prototypes ---
 void emit(int op) {
-    if (vm.code_size >= MAX_CODE) {
-        printf("Error: Code overflow\n");
-        exit(1);
-    }
+    if (vm.code_size >= MAX_CODE) error("Code overflow");
     vm.bytecode[vm.code_size++] = op;
 }
 
@@ -186,10 +197,7 @@ void get_mangled_name(char *out, char *raw_name) {
 
 // --- Loop Control Helpers ---
 void push_loop() {
-    if (loop_depth >= MAX_LOOP_NESTING) {
-        printf("Error: Loop nesting too deep\n");
-        exit(1);
-    }
+    if (loop_depth >= MAX_LOOP_NESTING) error("Loop nesting too deep");
     loop_stack[loop_depth].break_count = 0;
     loop_stack[loop_depth].continue_count = 0;
     loop_depth++;
@@ -207,30 +215,18 @@ void pop_loop(int continue_addr, int break_addr) {
 }
 
 void emit_break() {
-    if (loop_depth == 0) {
-        printf("Error: 'break' outside of loop\n");
-        exit(1);
-    }
+    if (loop_depth == 0) error("'break' outside of loop");
     LoopControl *loop = &loop_stack[loop_depth - 1];
-    if (loop->break_count >= MAX_JUMPS_PER_LOOP) {
-        printf("Error: Too many 'break' statements\n");
-        exit(1);
-    }
+    if (loop->break_count >= MAX_JUMPS_PER_LOOP) error("Too many 'break' statements");
     emit(OP_JMP);
     loop->break_patches[loop->break_count++] = vm.code_size;
     emit(0);
 }
 
 void emit_continue() {
-    if (loop_depth == 0) {
-        printf("Error: 'continue' outside of loop\n");
-        exit(1);
-    }
+    if (loop_depth == 0) error("'continue' outside of loop");
     LoopControl *loop = &loop_stack[loop_depth - 1];
-    if (loop->continue_count >= MAX_JUMPS_PER_LOOP) {
-        printf("Error: Too many 'continue' statements\n");
-        exit(1);
-    }
+    if (loop->continue_count >= MAX_JUMPS_PER_LOOP) error("Too many 'continue' statements");
     emit(OP_JMP);
     loop->continue_patches[loop->continue_count++] = vm.code_size;
     emit(0);
@@ -241,12 +237,19 @@ void emit_continue() {
 void next_token() {
     while (1) {
         unsigned char c = (unsigned char) *src;
-        while (isspace(c)) {
+        if (isspace(c)) {
+            if (c == '\n') line++;
             src++;
-            c = (unsigned char) *src;
+            continue;
         }
-        if (*src == '/' && *(src + 1) == '/') { while (*src != '\n' && *src != '\0') src++; } else break;
+        if (*src == '/' && *(src + 1) == '/') {
+            while (*src != '\n' && *src != '\0') src++;
+            continue;
+        }
+        break;
     }
+
+    curr.line = line; // Record line number for the new token
 
     if (*src == 'f' && *(src + 1) == '"') {
         src += 2;
@@ -254,6 +257,7 @@ void next_token() {
         int brace_depth = 0;
         while (*src) {
             if (*src == '"' && brace_depth == 0) break;
+            if (*src == '\n') line++; // Handle multiline F-strings
             if (*src == '{') brace_depth++;
             else if (*src == '}') { if (brace_depth > 0) brace_depth--; }
             src++;
@@ -315,7 +319,10 @@ void next_token() {
     if (*src == '"') {
         src++;
         char *start = src;
-        while (*src != '"' && *src != 0) src++;
+        while (*src != '"' && *src != 0) {
+            if (*src == '\n') line++;
+            src++;
+        }
         int len = (int) (src - start);
         if (len > MAX_IDENTIFIER - 1) len = MAX_IDENTIFIER - 1;
         strncpy(curr.text, start, len);
@@ -329,7 +336,6 @@ void next_token() {
         curr.type = TK_RANGE;
         return;
     }
-    // --- KEY FIX: Check scope '::' BEFORE single char switch to avoid matching ':' ---
     if (strncmp(src, "::", 2) == 0) {
         src += 2;
         curr.type = TK_SCOPE;
@@ -363,7 +369,7 @@ void next_token() {
         case '/': curr.type = TK_DIV;
             break;
         case '%': curr.type = TK_MOD_OP;
-            break; // Use separate token for Operator
+            break;
         case ':': curr.type = TK_COLON;
             break;
         case ',': curr.type = TK_COMMA;
@@ -385,27 +391,20 @@ void next_token() {
         case '!': if (*src == '=') {
                 src++;
                 curr.type = TK_NEQ;
-            } else {
-                printf("Error: Unexpected char '!'\n");
-                exit(1);
-            }
+            } else error("Unexpected char '!'");
             break;
         case '=': if (*src == '=') {
                 src++;
                 curr.type = TK_EQ;
             } else curr.type = TK_EQ_ASSIGN;
             break;
-        default: printf("Error: Unknown char %c\n", *(src - 1));
-            exit(1);
+        default: error("Unknown char '%c'", *(src - 1));
     }
 }
 
 void match(MyloTokenType t) {
     if (curr.type == t) next_token();
-    else {
-        printf("Error: Expected token type %d, got %d (Text: %s)\n", t, curr.type, curr.text);
-        exit(1);
-    }
+    else error("Expected token type %d, got %d ('%s')", t, curr.type, curr.text);
 }
 
 void expression();
@@ -479,10 +478,12 @@ void factor() {
     } else if (curr.type == TK_LBRACE) {
         char *safe_src = src;
         Token safe_curr = curr;
+        int safe_line = line;
         match(TK_LBRACE);
         bool is_map = (curr.type == TK_STR);
         src = safe_src;
         curr = safe_curr;
+        line = safe_line;
 
         if (is_map) { parse_map_literal(); } else {
             match(TK_LBRACE);
@@ -490,6 +491,7 @@ void factor() {
             strcpy(first_field, curr.text);
             src = safe_src;
             curr = safe_curr;
+            line = safe_line;
             int st_idx = -1;
             for (int s = 0; s < struct_count; s++) {
                 if (find_field(s, first_field) != -1) {
@@ -498,10 +500,7 @@ void factor() {
                 }
             }
             if (st_idx != -1) parse_struct_literal(st_idx);
-            else {
-                printf("Error: Could not infer struct type from field '%s'\n", first_field);
-                exit(1);
-            }
+            else error("Could not infer struct type from field '%s'", first_field);
         }
     } else if (curr.type == TK_ID && strcmp(curr.text, "C") == 0) {
         match(TK_ID);
@@ -539,6 +538,7 @@ void factor() {
         while (*end && braces > 0) {
             if (*end == '{') braces++;
             if (*end == '}') braces--;
+            if (*end == '\n') line++; // Track lines in C blocks
             if (braces > 0) end++;
         }
         int len = (int) (end - start);
@@ -581,11 +581,13 @@ void factor() {
                     expr_code[len] = '\0';
                     char *old_src = src;
                     Token old_token = curr;
+                    int old_line = line;
                     src = expr_code;
                     next_token();
                     expression();
                     src = old_src;
                     curr = old_token;
+                    line = old_line;
                     emit(OP_CAT);
                     ptr++;
                     start = ptr;
@@ -636,10 +638,8 @@ void factor() {
             }
             int std_idx = find_stdlib_func(name);
             if (std_idx != -1) {
-                if (std_library[std_idx].arg_count != arg_count) {
-                    printf("Error: StdLib function '%s' expects %d args\n", name, std_library[std_idx].arg_count);
-                    exit(1);
-                }
+                if (std_library[std_idx].arg_count != arg_count) error("StdLib function '%s' expects %d args", name,
+                                                                       std_library[std_idx].arg_count);
                 emit(OP_NATIVE);
                 emit(std_idx);
                 return;
@@ -653,8 +653,7 @@ void factor() {
                 emit(arg_count);
                 return;
             }
-            printf("Error: Undefined function '%s'\n", name);
-            exit(1);
+            error("Undefined function '%s'", name);
         } else {
             int loc = find_local(name);
             int type_id = -1;
@@ -671,10 +670,7 @@ void factor() {
                     get_mangled_name(m, name);
                     glob = find_global(m);
                 }
-                if (glob == -1) {
-                    printf("Error: Undefined var '%s'\n", name);
-                    exit(1);
-                }
+                if (glob == -1) error("Undefined var '%s'", name);
                 emit(OP_GET);
                 emit(globals[glob].addr);
                 type_id = globals[glob].type_id;
@@ -686,15 +682,9 @@ void factor() {
                     char f[MAX_IDENTIFIER];
                     strcpy(f, curr.text);
                     match(TK_ID);
-                    if (type_id == -1) {
-                        printf("Error: Accessing member '%s' of untyped var.\n", f);
-                        exit(1);
-                    }
+                    if (type_id == -1) error("Accessing member '%s' of untyped var.", f);
                     int offset = find_field(type_id, f);
-                    if (offset == -1) {
-                        printf("Error: Struct '%s' has no field '%s'\n", struct_defs[type_id].name, f);
-                        exit(1);
-                    }
+                    if (offset == -1) error("Struct '%s' has no field '%s'", struct_defs[type_id].name, f);
                     emit(OP_HGET);
                     emit(offset);
                     emit(type_id);
@@ -721,8 +711,7 @@ void factor() {
         expression();
         match(TK_RPAREN);
     } else {
-        printf("Error: Unexpected token '%s' in expression.\n", curr.text);
-        exit(1);
+        error("Unexpected token '%s' in expression", curr.text);
     }
 }
 
@@ -848,6 +837,7 @@ void for_statement() {
     } else if (curr.type == TK_ID) {
         char *safe_src = src;
         Token safe_curr = curr;
+        int safe_line = line;
         char temp_name[MAX_IDENTIFIER];
         strcpy(temp_name, curr.text);
         match(TK_ID);
@@ -863,6 +853,7 @@ void for_statement() {
         } else {
             src = safe_src;
             curr = safe_curr;
+            line = safe_line;
         }
     }
 
@@ -1039,10 +1030,7 @@ void enum_decl() {
         char entry_name[MAX_IDENTIFIER * 2];
         sprintf(entry_name, "%s_%s", enum_name, curr.text);
 
-        if (enum_entry_count >= MAX_ENUM_MEMBERS) {
-            printf("Error: Too many enum members\n");
-            exit(1);
-        }
+        if (enum_entry_count >= MAX_ENUM_MEMBERS) error("Too many enum members");
 
         strcpy(enum_entries[enum_entry_count].name, entry_name);
         enum_entries[enum_entry_count].value = val++;
@@ -1083,10 +1071,7 @@ void parse_map_literal() {
         emit(OP_DUP); // Keep Map Ref on stack for next set
 
         // Key
-        if (curr.type != TK_STR) {
-            printf("Error: Map keys must be strings\n");
-            exit(1);
-        }
+        if (curr.type != TK_STR) error("Map keys must be strings");
         int id = make_string(curr.text);
         emit(OP_PSH_STR);
         emit(id);
@@ -1134,10 +1119,7 @@ void statement() {
         }
 
         if (c) parse_internal(c, true);
-        else {
-            printf("Error: Cannot find import '%s'\n", f);
-            exit(1);
-        }
+        else error("Cannot find import '%s'", f);
     } else if (curr.type == TK_MOD) {
         match(TK_MOD);
         char m[MAX_IDENTIFIER];
@@ -1172,7 +1154,7 @@ void statement() {
         if (search_path_count < MAX_SEARCH_PATHS) {
             strcpy(search_paths[search_path_count++], path);
         } else {
-            printf("Warning: Max search paths reached\n");
+            fprintf(stderr, "Warning: Max search paths reached\n");
         }
     } else if (curr.type == TK_VAR) {
         match(TK_VAR);
@@ -1217,15 +1199,14 @@ void statement() {
             st != -1 && curr.type == TK_LBRACE) { parse_struct_literal(st); } else if (curr.type == TK_LBRACE) {
             char *safe_src = src;
             Token safe_curr = curr;
+            int safe_line = line;
             match(TK_LBRACE);
             bool is_map = (curr.type == TK_STR);
             src = safe_src;
             curr = safe_curr;
+            line = safe_line;
             if (is_map) parse_map_literal();
-            else {
-                printf("Error: Struct literal without type\n");
-                exit(1);
-            }
+            else error("Struct literal without type");
         } else { expression(); }
 
         alloc_var(inside_function, name, st, is_arr);
@@ -1251,7 +1232,7 @@ void statement() {
                 if ((glob = find_global(m)) != -1) {
                 } else if ((glob = find_global(name)) != -1) {
                 }
-                if (glob == -1) exit(1);
+                if (glob == -1) error("Undefined var '%s'", name);
                 emit(OP_SET);
                 emit(globals[glob].addr);
             }
@@ -1278,10 +1259,8 @@ void statement() {
             }
             int std_idx = find_stdlib_func(name);
             if (std_idx != -1) {
-                if (std_library[std_idx].arg_count != arg_count) {
-                    printf("Error: StdLib function '%s' expects %d args\n", name, std_library[std_idx].arg_count);
-                    exit(1);
-                }
+                if (std_library[std_idx].arg_count != arg_count) error("StdLib function '%s' expects %d args", name,
+                                                                       std_library[std_idx].arg_count);
                 emit(OP_NATIVE);
                 emit(std_idx);
                 emit(OP_POP);
@@ -1297,8 +1276,7 @@ void statement() {
                 emit(OP_POP);
                 return;
             }
-            printf("Error: Undefined function '%s'\n", name);
-            exit(1);
+            error("Undefined function '%s'", name);
         } else if (curr.type == TK_DOT || curr.type == TK_LBRACKET) {
             int loc = find_local(name);
             int type_id = -1;
@@ -1315,10 +1293,7 @@ void statement() {
                     get_mangled_name(m, name);
                     glob = find_global(m);
                 }
-                if (glob == -1) {
-                    printf("Error: Undefined var '%s'\n", name);
-                    exit(1);
-                }
+                if (glob == -1) error("Undefined var '%s'", name);
                 emit(OP_GET);
                 emit(globals[glob].addr);
                 type_id = globals[glob].type_id;
@@ -1331,19 +1306,10 @@ void statement() {
                     char f[MAX_IDENTIFIER];
                     strcpy(f, curr.text);
                     match(TK_ID);
-                    if (type_id == -1) {
-                        printf("Error: Accessing member '%s' of untyped var.\n", f);
-                        exit(1);
-                    }
-                    if (is_array) {
-                        printf("Error: Accessing member '%s' on array.\n", f);
-                        exit(1);
-                    }
+                    if (type_id == -1) error("Accessing member '%s' of untyped var.", f);
+                    if (is_array) error("Accessing member '%s' on array.", f);
                     int offset = find_field(type_id, f);
-                    if (offset == -1) {
-                        printf("Error: Struct '%s' has no field '%s'\n", struct_defs[type_id].name, f);
-                        exit(1);
-                    }
+                    if (offset == -1) error("Struct '%s' has no field '%s'", struct_defs[type_id].name, f);
 
                     if (curr.type == TK_EQ_ASSIGN) {
                         match(TK_EQ_ASSIGN);
@@ -1406,8 +1372,13 @@ void statement() {
             match(TK_RBRACE);
             vm.bytecode[p2] = vm.code_size;
         } else { vm.bytecode[p1] = vm.code_size; }
-    } else if (curr.type == TK_RET) {
+    }
+
+    // --- UPDATED: Allow empty return (ret) ---
+    else if (curr.type == TK_RET) {
         match(TK_RET);
+        // If next is '}' or start of new statement/block, push 0 (void)
+        // Simple heuristic: If it's a closing brace, it's definitely void return.
         if (curr.type == TK_RBRACE) {
             emit(OP_PSH_NUM);
             emit(make_const(0.0));
@@ -1488,10 +1459,7 @@ void parse(char *source) { parse_internal(source, false); }
 
 void compile_to_c_source(const char *output_filename) {
     FILE *fp = fopen(output_filename, "w");
-    if (!fp) {
-        printf("Failed to open output file %s\n", output_filename);
-        exit(1);
-    }
+    if (!fp) error("Failed to open output file %s", output_filename);
 
     fprintf(fp, "// Generated by Mylo Compiler\n");
     fprintf(fp, "#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n#include <math.h>\n");
@@ -1653,6 +1621,7 @@ void mylo_reset() {
     current_namespace[0] = '\0';
     enum_entry_count = 0;
     search_path_count = 0;
+    line = 1; // Reset line number for new parse
 
     // FIX: Register Standard Library for the Interpreter
     int i = 0;
