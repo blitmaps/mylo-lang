@@ -61,6 +61,7 @@ my_var = "Oh no!"
 
 <!-- TOC --><a name="types"></a>
 ## Types
+### Structs
 You can make your own types using the `struct` keyword.
 The type is specified after var using the `:` operator
 ```javascript
@@ -72,6 +73,20 @@ struct Color {
 
 // Very red
 var my_colour: Colour = { r=255, g=0, b=0 }
+```
+### Enums
+You can also define your own enumerated variations on types like this:
+
+```javascript
+enum Transport {
+    car,
+    bus,
+    bike
+}
+var myvar = Transport::car
+if (myvar == Transport::car) {
+    print("He's in a car!")
+}
 ```
 
 <!-- TOC --><a name="listsarrays"></a>
