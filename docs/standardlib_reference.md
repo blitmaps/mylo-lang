@@ -11,6 +11,9 @@ The Mylo Standard Library provides essential functions for file I/O, math, and d
   * [Utility Functions](#utility-functions)
     + [`len(collection: any) -> num`](#lencollection-any-num)
     + [`contains(haystack: any, needle: any) -> num`](#containshaystack-any-needle-any-num)
+  * [Type Conversion](#type-conversion)
+    + [`to_string(value: any) -> str`](#to_string)
+    + [`to_num(value: any) -> num`](#to_num)
   * [File I/O (Text)](#file-io-text)
     + [`read_lines(path: str) -> arr`](#read_linespath-str-arr)
     + [`write_file(path: str, content: str, mode: str) -> num`](#write_filepath-str-content-str-mode-str-num)
@@ -89,6 +92,42 @@ if (contains(list, "banana")) {
 if (contains("Teamwork", "work")) {
     print("Found substring!")
 }
+```
+<!-- TOC --><a name="type-conversion"></a>
+## Type Conversion
+<!-- TOC --><a name="to_string"></a>
+### `to_string(value: any) -> str`
+
+Converts a value to its string representation.
+
+**Arguments:**
+* `value`: The value to convert.
+
+**Returns:**
+* The string representation of the value.
+
+**Example:**
+```javascript
+var n = 123
+var s = to_string(n) 
+print(s + "4") // "1234" (concatenation, not math)
+```
+<!-- TOC --><a name="to_num"></a>
+### `to_num(value: any) -> num`
+
+Converts a value (usually a string) to a number.
+
+**Arguments:**
+* `value`: The string to convert.
+
+**Returns:**
+* The numeric value. Returns `0` if the conversion fails.
+
+**Example:**
+```javascript
+var s = "45.5"
+var n = to_num(s)
+print(n + 10) // 55.5
 ```
 
 <!-- TOC --><a name="file-io-text"></a>
