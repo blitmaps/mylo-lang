@@ -25,6 +25,7 @@ It is fast to write, fast to run, and can run anywhere.
             - [Range Based](#range-based)
             - [Checked](#checked)
             - [Iterated](#iterated)
+            - [Break & Continue](#break-and-continue)
     * [Functions](#functions)
         - [Passing own types](#passing-own-types)
     * [Scope & Modules](#scope-modules)
@@ -216,6 +217,25 @@ var my_pets = ["dog", "cat", "fish"]
 for (x in my_pets) {
     // This will print dog, then cat, then fish
     // each on a new line.
+    print(x)
+}
+```
+<!-- TOC --><a name="break-continue"></a>
+#### Break and Continue
+You can exit a loop early or jump back and begin the next iteration with `break` and `continue`
+
+```javascript
+for (var x in 0...5) {
+    if (x == 1) {
+        break
+    }
+    print(x)
+}
+
+for (var x in 0...100) {
+    if (x < 50) {
+        continue
+    }
     print(x)
 }
 ```
