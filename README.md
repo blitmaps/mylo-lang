@@ -6,7 +6,7 @@ Like a sausage dog, it is not serious, but it is cool.
 
 #### 🦗 Mylo is alpha, so expect bugs.
 
-Check out the [Language Reference](https://github.com/blitmaps/mylo-lang/blob/main/mylo_reference.md).
+Check out the [Language Reference](docs/mylo_reference.md).
 
 ## Hello Mylo
 Here is `hello.mylo`:

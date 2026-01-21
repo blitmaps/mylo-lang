@@ -6,7 +6,7 @@
 Mylo uses familiar programming concepts: variables, loops, conditional statements, functions, modules etc.
 It is fast to write, fast to run, and can run anywhere.
 
-<!-- TOC start (generated with https://github.com/derlin/bitdowntoc) -->
+<!-- TOC start -->
 
 ### Contents
 - [Mylo Reference](#mylo-reference)
@@ -510,4 +510,4 @@ var result: num = C(val: int = a, val2 : str = b) {
 The standard functions are still rather limited, but can do file manipulation, array insights and some maths.
 This is actively being developed to add more power to the VM.
 
-Check out the [Standard Library Reference](https://github.com/blitmaps/mylo-lang/blob/main/standardlib_reference.md).
+Check out the [Standard Library Reference](docs/standardlib_reference.md).
