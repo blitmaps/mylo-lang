@@ -16,16 +16,20 @@ typedef struct {
 // Implementation functions
 void std_sqrt(VM* vm);
 void std_len(VM* vm);
-void std_contains(VM* vm); // <--- NEW
+void std_contains(VM* vm);
 void std_read_lines(VM* vm);
 void std_write_file(VM* vm);
 void std_read_bytes(VM* vm);
 void std_write_bytes(VM* vm);
+void std_to_string(VM* vm); // <--- NEW
+void std_to_num(VM* vm);    // <--- NEW
 
 // The Registry
 static const StdLibDef std_library[] = {
-    { "len",         std_len,         "num",  1, { "arr" } },
-    { "contains",    std_contains,    "num",  2, { "any", "any" } }, // <--- NEW
+    { "len",         std_len,         "num",  1, { "any" } }, // Relaxed type check for doc
+    { "contains",    std_contains,    "num",  2, { "any", "any" } },
+    { "to_string",   std_to_string,   "str",  1, { "any" } }, // <--- NEW
+    { "to_num",      std_to_num,      "num",  1, { "any" } }, // <--- NEW
     { "sqrt",        std_sqrt,        "num",  1, { "num" } },
     { "read_lines",  std_read_lines,  "arr",  1, { "str" } },
     { "write_file",  std_write_file,  "num",  3, { "str", "str", "str" } },

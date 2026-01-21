@@ -86,6 +86,56 @@ void std_contains(VM* vm) {
     printf("Runtime Error: contains() type\n"); exit(1);
 }
 
+void std_to_string(VM* vm) {
+    double val = vm_pop();
+    int type = vm->stack_types[vm->sp + 1];
+
+    if (type == T_NUM) {
+        char buf[64];
+        // Print integer-like floats as integers, others as floats
+        if (val == (int)val) snprintf(buf, 64, "%d", (int)val);
+        else snprintf(buf, 64, "%g", val);
+
+        int str_id = make_string(buf);
+        vm_push((double)str_id, T_STR);
+    }
+    else if (type == T_STR) {
+        vm_push(val, T_STR); // Already a string
+    }
+    else if (type == T_OBJ) {
+        // For Objects, we just print the reference ID for now
+        char buf[64];
+        snprintf(buf, 64, "[Ref: %d]", (int)val);
+        int str_id = make_string(buf);
+        vm_push((double)str_id, T_STR);
+    }
+    else {
+        // Fallback
+        int str_id = make_string("");
+        vm_push((double)str_id, T_STR);
+    }
+}
+
+void std_to_num(VM* vm) {
+    double val = vm_pop();
+    int type = vm->stack_types[vm->sp + 1];
+
+    if (type == T_NUM) {
+        vm_push(val, T_NUM); // Already a number
+    }
+    else if (type == T_STR) {
+        const char* s = get_str(vm, val);
+        char* end;
+        double d = strtod(s, &end);
+        // If conversion fails, strtod returns 0.0 (or original if no digits)
+        vm_push(d, T_NUM);
+    }
+    else {
+        // Objects/Maps -> 0
+        vm_push(0.0, T_NUM);
+    }
+}
+
 void std_read_lines(VM* vm) {
     double path_id = vm_pop();
     const char* path = get_str(vm, path_id);

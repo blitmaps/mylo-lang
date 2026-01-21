@@ -267,6 +267,48 @@ inline TestOutput test_maps() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_to_num() {
+
+    std::string src = """"
+    // 1. Creation: Map literal syntax
+    "var x = \"1\"\n"
+    "if (to_num(x) == 1) {\n"
+    "print(x)\n"
+    "}"
+    "var y = \"2.8\"\n"
+    "if (to_num(y) == 2.8) {\n"
+    "print(y)\n"
+    "}";
+
+    std::string expected = """"
+    "1\n"
+    "2.8\n";
+
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_to_str() {
+
+    std::string src = """"
+    // 1. Creation: Map literal syntax
+    "var x = 1\n"
+    "if (to_string(x) == \"1\") {\n"
+        "print(x)\n"
+    "}"
+    "var y = 2.8\n"
+    "if (to_string(y) == \"2.8\") {\n"
+    "print(y)\n"
+    "}";
+
+    std::string expected = """"
+    "1\n"
+    "2.8\n";
+
+    return run_source_test(src, expected);
+}
+
+
+
 
 
 inline TestOutput test_string_interp() {
@@ -632,6 +674,9 @@ inline void test_generate_list() {
     ADD_TEST("Test for Enums", test_enums);
     ADD_TEST("Test for Module Path & Import", test_module_path_and_import);
     ADD_TEST("Test for Maps", test_maps);
+    ADD_TEST("Test to_num", test_to_num);
+    ADD_TEST("Test to_str", test_to_str);
+
 
 
 }
