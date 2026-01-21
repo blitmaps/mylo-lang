@@ -1,3 +1,4 @@
 fn my_test() {
     print("3")
 }
+print(812+"32")

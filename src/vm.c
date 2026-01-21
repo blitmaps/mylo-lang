@@ -12,7 +12,7 @@ MyloConfigType MyloConfig = {false};
 
 const char *OP_NAMES[] = {
     "PSH_NUM", "PSH_STR",
-    "ADD", "SUB", "MUL", "DIV", "MOD", // <--- Added DIV, MOD
+    "ADD", "SUB", "MUL", "DIV", "MOD",
     "LT", "EQ", "GT", "GE", "LE", "NEQ",
     "SET", "GET", "LVAR", "SVAR",
     "JMP", "JZ", "JNZ",
@@ -31,12 +31,19 @@ void vm_init() {
     memset(natives, 0, sizeof(natives));
 }
 
-#define CHECK_STACK(count) if (vm.sp < (count) - 1) { printf("Error: Stack Underflow at IP %d\n", vm.ip); exit(1); }
-#define CHECK_OBJ(depth) if (vm.stack_types[vm.sp - (depth)] != T_OBJ) { printf("Runtime Error: Expected Object/Array, got %s\n", vm.stack_types[vm.sp - (depth)] == T_NUM ? "Number" : "String"); exit(1); }
+// --- ERROR HELPER ---
+#define RUNTIME_ERROR(fmt, ...) { \
+    printf("[Line %d] Runtime Error: " fmt "\n", vm.lines[vm.ip - 1], ##__VA_ARGS__); \
+    exit(1); \
+}
+
+#define CHECK_STACK(count) if (vm.sp < (count) - 1) RUNTIME_ERROR("Stack Underflow")
+#define CHECK_OBJ(depth) if (vm.stack_types[vm.sp - (depth)] != T_OBJ) RUNTIME_ERROR("Expected Object/Array, got %s", vm.stack_types[vm.sp - (depth)] == T_NUM ? "Number" : "String")
 
 void vm_push(double val, int type) {
     if (vm.sp >= STACK_SIZE - 1) {
         printf("Error: Stack Overflow\n");
+        // Overflow isn't tied to a specific line usually, but could use vm.lines[vm.ip]
         exit(1);
     }
     vm.sp++;
@@ -94,7 +101,7 @@ void run_vm(bool debug_trace) {
         if (debug_trace) {
             int op = vm.bytecode[vm.ip];
             if (op >= 0 && op <= OP_ASET) {
-                printf("[TRACE] IP:%04d SP:%2d OP:%s\n", vm.ip, vm.sp, OP_NAMES[op]);
+                printf("[TRACE] IP:%04d Line:%d SP:%2d OP:%s\n", vm.ip, vm.lines[vm.ip], vm.sp, OP_NAMES[op]);
             }
         }
 
@@ -121,12 +128,10 @@ void run_vm(bool debug_trace) {
                     vm.stack[vm.sp] = valA + valB;
                     vm.stack_types[vm.sp] = T_NUM;
                 } else if (typeA == T_OBJ && typeB == T_OBJ) {
-                    // (Concatenation Logic Unchanged)
                     int ptrA = (int) valA;
                     int ptrB = (int) valB;
                     if ((int) vm.heap[ptrA] != TYPE_ARRAY || (int) vm.heap[ptrB] != TYPE_ARRAY) {
-                        printf("Runtime Error: Concatenation invalid\n");
-                        exit(1);
+                        RUNTIME_ERROR("Concatenation invalid (not arrays)");
                     }
                     int lenA = (int) vm.heap[ptrA + HEAP_OFFSET_LEN];
                     int lenB = (int) vm.heap[ptrB + HEAP_OFFSET_LEN];
@@ -145,8 +150,7 @@ void run_vm(bool debug_trace) {
                     vm.stack[vm.sp] = (double) newPtr;
                     vm.stack_types[vm.sp] = T_OBJ;
                 } else {
-                    printf("Runtime Error: Invalid types for ADD\n");
-                    exit(1);
+                    RUNTIME_ERROR("Invalid types for ADD (Operands must be NUM or ARRAY)");
                 }
                 break;
             }
@@ -166,12 +170,11 @@ void run_vm(bool debug_trace) {
                 vm.stack_types[vm.sp] = T_NUM;
                 break;
             }
-
-            // --- NEW: Division and Modulo ---
             case OP_DIV: {
                 CHECK_STACK(2);
                 double b = vm_pop();
                 double a = vm.stack[vm.sp];
+                if (b == 0) RUNTIME_ERROR("Division by zero");
                 vm.stack[vm.sp] = a / b;
                 vm.stack_types[vm.sp] = T_NUM;
                 break;
@@ -180,11 +183,11 @@ void run_vm(bool debug_trace) {
                 CHECK_STACK(2);
                 double b = vm_pop();
                 double a = vm.stack[vm.sp];
+                if (b == 0) RUNTIME_ERROR("Modulo by zero");
                 vm.stack[vm.sp] = fmod(a, b);
                 vm.stack_types[vm.sp] = T_NUM;
                 break;
             }
-            // -------------------------------
 
             case OP_LT: {
                 CHECK_STACK(2);
@@ -309,19 +312,22 @@ void run_vm(bool debug_trace) {
                 vm.sp--;
                 if (t == T_STR) {
                     if (!MyloConfig.print_to_memory) printf("%s\n", vm.string_pool[(int) v]);
-                    else vm.output_mem_pos += sprintf(vm.output_char_buffer + vm.output_mem_pos, "%s\n",
-                                                      vm.string_pool[(int) v]);
+                    else
+                        vm.output_mem_pos += sprintf(vm.output_char_buffer + vm.output_mem_pos, "%s\n",
+                                                     vm.string_pool[(int) v]);
                 } else if (t == T_OBJ) {
                     if (!MyloConfig.print_to_memory) printf("[Ref: %d]\n", (int) v);
-                    else vm.output_mem_pos +=
-                         sprintf(vm.output_char_buffer + vm.output_mem_pos, "[Ref: %d]\n", (int) v);
+                    else
+                        vm.output_mem_pos +=
+                                sprintf(vm.output_char_buffer + vm.output_mem_pos, "[Ref: %d]\n", (int) v);
                 } else {
                     if (!MyloConfig.print_to_memory) {
                         if (v == (int) v) printf("%d\n", (int) v);
                         else printf("%g\n", v);
                     } else {
-                        if (v == (int) v) vm.output_mem_pos += sprintf(vm.output_char_buffer + vm.output_mem_pos,
-                                                                       "%d\n", (int) v);
+                        if (v == (int) v)
+                            vm.output_mem_pos += sprintf(vm.output_char_buffer + vm.output_mem_pos,
+                                                         "%d\n", (int) v);
                         else vm.output_mem_pos += sprintf(vm.output_char_buffer + vm.output_mem_pos, "%g\n", v);
                     }
                 }
@@ -364,7 +370,8 @@ void run_vm(bool debug_trace) {
                 double v = vm_pop();
                 int t = vm.stack_types[vm.sp + 1];
                 int p = (int) vm.stack[vm.sp];
-                if ((int) vm.heap[p] != eid) exit(1);
+                if ((int) vm.heap[p] != eid) RUNTIME_ERROR("Type Mismatch in HSET (expected %d, got %d)", eid,
+                                                           (int)vm.heap[p]);
                 vm.heap[p + 1 + off] = v;
                 vm.heap_types[p + 1 + off] = t;
                 break;
@@ -374,7 +381,8 @@ void run_vm(bool debug_trace) {
                 int eid = vm.bytecode[vm.ip++];
                 CHECK_STACK(1);
                 int p = (int) vm.stack[vm.sp];
-                if ((int) vm.heap[p] != eid) exit(1);
+                if ((int) vm.heap[p] != eid) RUNTIME_ERROR("Type Mismatch in HGET (expected %d, got %d)", eid,
+                                                           (int)vm.heap[p]);
                 vm.stack[vm.sp] = vm.heap[p + 1 + off];
                 vm.stack_types[vm.sp] = vm.heap_types[p + 1 + off];
                 break;
@@ -384,7 +392,7 @@ void run_vm(bool debug_trace) {
             case OP_NATIVE: {
                 int id = vm.bytecode[vm.ip++];
                 if (natives[id]) natives[id](&vm);
-                else exit(1);
+                else RUNTIME_ERROR("Unknown Native Function ID: %d", id);
                 break;
             }
             case OP_ARR: {
@@ -409,23 +417,14 @@ void run_vm(bool debug_trace) {
                 int ptr = (int) vm_pop();
                 int objType = (int) vm.heap[ptr + HEAP_OFFSET_TYPE];
                 if (objType == TYPE_ARRAY) {
-                    if (keyType != T_NUM) {
-                        printf("Runtime Error: Array index\n");
-                        exit(1);
-                    }
+                    if (keyType != T_NUM) RUNTIME_ERROR("Array index must be a number");
                     int idx = (int) keyVal;
                     int len = (int) vm.heap[ptr + HEAP_OFFSET_LEN];
                     if (idx < 0) idx += len;
-                    if (idx < 0 || idx >= len) {
-                        printf("Runtime Error: Index out of bounds\n");
-                        exit(1);
-                    }
+                    if (idx < 0 || idx >= len) RUNTIME_ERROR("Array Index out of bounds: %d (len: %d)", idx, len);
                     vm_push(vm.heap[ptr + HEAP_HEADER_ARRAY + idx], vm.heap_types[ptr + HEAP_HEADER_ARRAY + idx]);
                 } else if (objType == TYPE_MAP) {
-                    if (keyType != T_STR) {
-                        printf("Runtime Error: Map key\n");
-                        exit(1);
-                    }
+                    if (keyType != T_STR) RUNTIME_ERROR("Map key must be a string");
                     int count = (int) vm.heap[ptr + HEAP_OFFSET_COUNT];
                     int dataPtr = (int) vm.heap[ptr + HEAP_OFFSET_DATA];
                     bool found = false;
@@ -441,8 +440,7 @@ void run_vm(bool debug_trace) {
                         vm_push((double) emptyId, T_STR);
                     }
                 } else {
-                    printf("Runtime Error: Expected Array or Map\n");
-                    exit(1);
+                    RUNTIME_ERROR("Expected Array or Map for indexing");
                 }
                 break;
             }
@@ -498,15 +496,15 @@ void run_vm(bool debug_trace) {
                 vm_pop();
                 int objType = (int) vm.heap[ptr + HEAP_OFFSET_TYPE];
                 if (objType == TYPE_ARRAY) {
-                    if (keyType != T_NUM) exit(1);
+                    if (keyType != T_NUM) RUNTIME_ERROR("Array index must be a number");
                     int idx = (int) key;
                     int len = (int) vm.heap[ptr + HEAP_OFFSET_LEN];
                     if (idx < 0) idx += len;
-                    if (idx < 0 || idx >= len) exit(1);
+                    if (idx < 0 || idx >= len) RUNTIME_ERROR("Index out of bounds");
                     vm.heap[ptr + HEAP_HEADER_ARRAY + idx] = val;
                     vm.heap_types[ptr + HEAP_HEADER_ARRAY + idx] = valType;
                 } else if (objType == TYPE_MAP) {
-                    if (keyType != T_STR) exit(1);
+                    if (keyType != T_STR) RUNTIME_ERROR("Map key must be a string");
                     int cap = (int) vm.heap[ptr + HEAP_OFFSET_CAP];
                     int count = (int) vm.heap[ptr + HEAP_OFFSET_COUNT];
                     int dataPtr = (int) vm.heap[ptr + HEAP_OFFSET_DATA];
@@ -537,7 +535,7 @@ void run_vm(bool debug_trace) {
                         vm.heap_types[dataPtr + count * 2 + 1] = valType;
                         vm.heap[ptr + HEAP_OFFSET_COUNT] = (double) (count + 1);
                     }
-                } else exit(1);
+                } else RUNTIME_ERROR("Assignment expected Array or Map");
                 vm_push(val, valType);
                 break;
             }

@@ -30,7 +30,7 @@ extern MyloConfigType MyloConfig;
 
 typedef enum {
     OP_PSH_NUM, OP_PSH_STR,
-    OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_MOD, // <--- Added DIV, MOD
+    OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_MOD,
     OP_LT, OP_EQ, OP_GT, OP_GE, OP_LE, OP_NEQ,
     OP_SET, OP_GET, OP_LVAR, OP_SVAR,
     OP_JMP, OP_JZ, OP_JNZ,
@@ -52,6 +52,7 @@ typedef struct {
     double heap[MAX_HEAP];
 
     int bytecode[MAX_CODE];
+    int lines[MAX_CODE]; // <--- NEW: Map bytecode index to source line
 
     // Type tracking
     int stack_types[STACK_SIZE];
@@ -79,19 +80,12 @@ typedef void (*NativeFunc)(VM *);
 extern NativeFunc natives[MAX_NATIVES];
 
 void vm_init();
-
 void vm_push(double val, int type);
-
 double vm_pop();
-
 int make_string(const char *s);
-
 int make_const(double val);
-
 int heap_alloc(int size);
-
 void run_vm(bool debug_trace);
-
 void mylo_reset();
 
 #endif
