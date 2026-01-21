@@ -523,6 +523,28 @@ inline TestOutput test_contains() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_enums() {
+
+    std::string src = """"
+    "enum Transport {\n"
+        "car,\n"
+        "bike,\n"
+        "truck,\n"
+    "}\n"
+    "var myvar = Transport::car\n"
+    "if (myvar == Transport::bike) {\n"
+        "print(\"A\")\n"
+    "}\n"
+
+    "if (myvar == Transport::car) {\n"
+        "print(\"B\")\n"
+    "}\n";
+    std::string expected = """"
+    "B\n";
+
+    return run_source_test(src, expected);
+}
+
 
 inline void test_generate_list() {
     ADD_TEST("Test Test", test_test);
@@ -553,6 +575,7 @@ inline void test_generate_list() {
     ADD_TEST("Test For File IO (bin)", test_file_bin_io);
     ADD_TEST("Test for len(array)", test_len);
     ADD_TEST("Test for contains(array)", test_contains);
+    ADD_TEST("Test for Enums", test_enums);
 
 }
 

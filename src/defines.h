@@ -21,6 +21,7 @@
 #define MAX_C_BLOCK_SIZE 1024
 #define MAX_LOOP_NESTING 32
 #define MAX_JUMPS_PER_LOOP 64
+#define MAX_ENUM_MEMBERS 1024 // <--- NEW
 
 // Output
 #define OUTPUT_BUFFER_SIZE 128000

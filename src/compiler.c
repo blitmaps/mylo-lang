@@ -23,7 +23,8 @@ typedef enum {
     TK_EOF, TK_FSTR,
     TK_COLON, TK_COMMA, TK_DOT,
     TK_SCOPE, TK_ARROW,
-    TK_BREAK, TK_CONTINUE
+    TK_BREAK, TK_CONTINUE,
+    TK_ENUM // <--- NEW
 } MyloTokenType;
 
 typedef struct { MyloTokenType type; char text[MAX_IDENTIFIER]; double val_float; } Token;
@@ -72,6 +73,10 @@ int func_count = 0;
 struct StructDef { char name[MAX_IDENTIFIER]; char fields[MAX_FIELDS][MAX_IDENTIFIER]; int field_count; } struct_defs[MAX_STRUCTS];
 int struct_count = 0;
 
+// Enum Table
+struct { char name[MAX_IDENTIFIER]; int value; } enum_entries[MAX_ENUM_MEMBERS];
+int enum_entry_count = 0;
+
 // --- Forward Declarations ---
 void parse_internal(char* source, bool is_import);
 void parse_struct_literal(int struct_idx);
@@ -85,6 +90,13 @@ int find_global(char* name) { for(int i=0; i<global_count; i++) if(strcmp(global
 int find_func(char* name) { for(int i=0; i<func_count; i++) if(strcmp(funcs[i].name, name)==0) return funcs[i].addr; return -1; }
 int find_struct(char* name) { for(int i=0; i<struct_count; i++) if(strcmp(struct_defs[i].name, name)==0) return i; return -1; }
 int find_field(int struct_idx, char* field) { for(int i=0; i<struct_defs[struct_idx].field_count; i++) if(strcmp(struct_defs[struct_idx].fields[i], field)==0) return i; return -1; }
+
+int find_enum_val(char* name) {
+    for(int i=0; i<enum_entry_count; i++) {
+        if(strcmp(enum_entries[i].name, name) == 0) return enum_entries[i].value;
+    }
+    return -1;
+}
 
 int find_stdlib_func(char* name) {
     int i = 0;
@@ -189,6 +201,7 @@ void next_token() {
         else if (strcmp(curr.text, "import") == 0) curr.type = TK_IMPORT;
         else if (strcmp(curr.text, "break") == 0) curr.type = TK_BREAK;
         else if (strcmp(curr.text, "continue") == 0) curr.type = TK_CONTINUE;
+        else if (strcmp(curr.text, "enum") == 0) curr.type = TK_ENUM; // <--- NEW
         else curr.type = TK_ID;
         return;
     }
@@ -251,7 +264,6 @@ void factor() {
     if (curr.type == TK_NUM) { int idx = make_const(curr.val_float); emit(OP_PSH_NUM); emit(idx); match(TK_NUM); }
     else if (curr.type == TK_STR) { int id = make_string(curr.text); emit(OP_PSH_STR); emit(id); match(TK_STR); }
 
-    // Unary Minus
     else if (curr.type == TK_MINUS) {
         match(TK_MINUS);
         if (curr.type == TK_NUM) { int idx = make_const(-curr.val_float); emit(OP_PSH_NUM); emit(idx); match(TK_NUM); }
@@ -265,7 +277,6 @@ void factor() {
         match(TK_RBRACKET); emit(OP_ARR); emit(count);
     }
 
-    // Struct Literal in Expression Context
     else if (curr.type == TK_LBRACE) {
         char* safe_src = src; Token safe_curr = curr;
         match(TK_LBRACE); char first_field[MAX_IDENTIFIER]; strcpy(first_field, curr.text);
@@ -277,17 +288,15 @@ void factor() {
     }
 
     else if (curr.type == TK_ID && strcmp(curr.text, "C") == 0) {
+        // ... (C Block Parsing Unchanged) ...
         match(TK_ID); int ffi_idx = ffi_count++; ffi_blocks[ffi_idx].id = ffi_idx;
         ffi_blocks[ffi_idx].arg_count = 0; ffi_blocks[ffi_idx].return_type[0] = '\0';
-
-        // Parse Arguments: (name: type = val)
         if (curr.type == TK_LPAREN) {
             match(TK_LPAREN);
             while (curr.type != TK_RPAREN) {
                 if(ffi_blocks[ffi_idx].arg_count >= MAX_FFI_ARGS) exit(1);
                 strcpy(ffi_blocks[ffi_idx].args[ffi_blocks[ffi_idx].arg_count].name, curr.text);
                 match(TK_ID);
-
                 if (curr.type == TK_COLON) {
                     match(TK_COLON);
                     strcpy(ffi_blocks[ffi_idx].args[ffi_blocks[ffi_idx].arg_count].type, curr.text);
@@ -295,14 +304,12 @@ void factor() {
                 } else {
                     strcpy(ffi_blocks[ffi_idx].args[ffi_blocks[ffi_idx].arg_count].type, "num");
                 }
-
                 match(TK_EQ_ASSIGN); expression();
                 ffi_blocks[ffi_idx].arg_count++;
                 if (curr.type == TK_COMMA) match(TK_COMMA);
             }
             match(TK_RPAREN);
         }
-
         if (curr.type == TK_ARROW) { match(TK_ARROW); strcpy(ffi_blocks[ffi_idx].return_type, curr.text); match(TK_ID); }
         if (curr.type != TK_LBRACE) exit(1);
         char* start = src + 1; int braces = 1; char* end = start;
@@ -312,7 +319,6 @@ void factor() {
         strncpy(ffi_blocks[ffi_idx].code_body, start, len); ffi_blocks[ffi_idx].code_body[len] = '\0';
         src = end + 1; next_token();
         emit(OP_NATIVE);
-        // Offset user native index by StdLib size
         int std_count = 0; while(std_library[std_count].name != NULL) std_count++;
         emit(std_count + ffi_idx);
     }
@@ -339,21 +345,27 @@ void factor() {
     }
     else if (curr.type == TK_ID) {
         char name[MAX_IDENTIFIER]; parse_namespaced_id(name);
+
+        // CHECK ENUM
+        int enum_val = find_enum_val(name);
+        if (enum_val != -1) {
+             int idx = make_const((double)enum_val);
+             emit(OP_PSH_NUM); emit(idx);
+             return;
+        }
+
         if (curr.type == TK_LPAREN) {
             match(TK_LPAREN); int arg_count = 0; if (curr.type != TK_RPAREN) { expression(); arg_count++; while(curr.type == TK_COMMA) { match(TK_COMMA); expression(); arg_count++; } } match(TK_RPAREN);
 
-            // 1. User Function
             int faddr = find_func(name);
             if (faddr != -1) { emit(OP_CALL); emit(faddr); emit(arg_count); return; }
 
-            // 2. StdLib Function
             int std_idx = find_stdlib_func(name);
             if (std_idx != -1) {
                 if (std_library[std_idx].arg_count != arg_count) { printf("Error: StdLib function '%s' expects %d args\n", name, std_library[std_idx].arg_count); exit(1); }
                 emit(OP_NATIVE); emit(std_idx); return;
             }
 
-            // 3. Mangled User Function
             char m[MAX_IDENTIFIER*2]; get_mangled_name(m, name); faddr = find_func(m);
             if (faddr != -1) { emit(OP_CALL); emit(faddr); emit(arg_count); return; }
 
@@ -413,6 +425,7 @@ int alloc_var(bool is_loc, char* name, int type_id, bool is_array) {
 }
 
 void for_statement() {
+    // ... (For Loop Logic Unchanged) ...
     match(TK_FOR); match(TK_LPAREN); char name[MAX_IDENTIFIER] = {0}; bool is_iter = false;
     int explicit_type = -1;
 
@@ -431,10 +444,8 @@ void for_statement() {
 
     if (is_iter) {
         push_loop();
-
         int var_addr = -1; bool is_local = inside_function;
         bool created = false;
-
         if (is_local) {
             int loc = find_local(name);
             if (loc != -1) var_addr = loc;
@@ -444,49 +455,65 @@ void for_statement() {
             if (glob != -1) var_addr = glob;
             else var_addr = alloc_var(false, name, explicit_type, false);
         }
-
         if (created) { emit(OP_PSH_NUM); emit(make_const(0.0)); }
 
         match(TK_IN); expression();
 
         if (curr.type == TK_RANGE) {
             if (!is_local) { emit(OP_SET); emit(var_addr); } else { EMIT_SET(is_local, var_addr); }
-
             match(TK_RANGE); int t = make_const(curr.val_float); match(TK_NUM); int s = alloc_var(is_local, "_step", -1, false);
             EMIT_GET(is_local, var_addr); emit(OP_PSH_NUM); emit(t); emit(OP_LT); emit(OP_JZ); int p1 = vm.code_size; emit(0); emit(OP_PSH_NUM); emit(make_const(1.0)); emit(OP_JMP); int p2 = vm.code_size; emit(0); vm.bytecode[p1] = vm.code_size;
             EMIT_GET(is_local, var_addr); emit(OP_PSH_NUM); emit(t); emit(OP_GT); emit(OP_JZ); int p3 = vm.code_size; emit(0); emit(OP_PSH_NUM); emit(make_const(-1.0)); emit(OP_JMP); int p4 = vm.code_size; emit(0); vm.bytecode[p3] = vm.code_size; emit(OP_PSH_NUM); emit(make_const(0.0)); vm.bytecode[p2] = vm.code_size; vm.bytecode[p4] = vm.code_size;
             if (!is_local) { emit(OP_SET); emit(s); }
-
-            int loop = vm.code_size;
-            match(TK_RPAREN); match(TK_LBRACE); while(curr.type != TK_RBRACE && curr.type != TK_EOF) statement(); match(TK_RBRACE);
-
+            int loop = vm.code_size; match(TK_RPAREN); match(TK_LBRACE); while(curr.type != TK_RBRACE && curr.type != TK_EOF) statement(); match(TK_RBRACE);
             int continue_dest = vm.code_size;
             EMIT_GET(is_local, var_addr); EMIT_GET(is_local, s); emit(OP_ADD); EMIT_SET(is_local, var_addr); emit(OP_PSH_NUM); emit(t); EMIT_GET(is_local, var_addr); emit(OP_SUB); emit(OP_JNZ); emit(loop);
-
             pop_loop(continue_dest, vm.code_size);
         } else {
-            // Array Iteration
             int a = alloc_var(is_local, "_arr", -1, true);
             if (!is_local) { emit(OP_SET); emit(a); }
             int i = alloc_var(is_local, "_idx", -1, false);
             emit(OP_PSH_NUM); emit(make_const(0.0));
             if (!is_local) { emit(OP_SET); emit(i); }
-
             int loop = vm.code_size;
             EMIT_GET(is_local, i); EMIT_GET(is_local, a); emit(OP_ALEN); emit(OP_LT); emit(OP_JZ); int exit = vm.code_size; emit(0);
             EMIT_GET(is_local, a); EMIT_GET(is_local, i); emit(OP_AGET); EMIT_SET(is_local, var_addr);
-
             match(TK_RPAREN); match(TK_LBRACE); while(curr.type != TK_RBRACE && curr.type != TK_EOF) statement(); match(TK_RBRACE);
-
             int continue_dest = vm.code_size;
             EMIT_GET(is_local, i); emit(OP_PSH_NUM); emit(make_const(1.0)); emit(OP_ADD); EMIT_SET(is_local, i); emit(OP_JMP); emit(loop); vm.bytecode[exit] = vm.code_size;
-
             pop_loop(continue_dest, vm.code_size);
         }
     } else { int loop = vm.code_size; expression(); match(TK_RPAREN); emit(OP_JZ); int exit = vm.code_size; emit(0); match(TK_LBRACE); while(curr.type != TK_RBRACE && curr.type != TK_EOF) statement(); match(TK_RBRACE); emit(OP_JMP); emit(loop); vm.bytecode[exit] = vm.code_size; }
 }
 
 void struct_decl() { match(TK_STRUCT); char name[MAX_IDENTIFIER]; parse_namespaced_id(name); char m[MAX_IDENTIFIER*2]; get_mangled_name(m, name); match(TK_LBRACE); int idx = struct_count++; strcpy(struct_defs[idx].name, m); struct_defs[idx].field_count = 0; while (curr.type == TK_VAR) { match(TK_VAR); strcpy(struct_defs[idx].fields[struct_defs[idx].field_count++], curr.text); match(TK_ID); } match(TK_RBRACE); }
+
+void enum_decl() {
+    match(TK_ENUM);
+    char enum_name[MAX_IDENTIFIER];
+    strcpy(enum_name, curr.text);
+    match(TK_ID);
+    match(TK_LBRACE);
+
+    int val = 0;
+    while (curr.type != TK_RBRACE && curr.type != TK_EOF) {
+        char entry_name[MAX_IDENTIFIER * 2];
+        // Create MyEnum_Member name
+        sprintf(entry_name, "%s_%s", enum_name, curr.text);
+
+        if (enum_entry_count >= MAX_ENUM_MEMBERS) {
+            printf("Error: Too many enum members\n"); exit(1);
+        }
+
+        strcpy(enum_entries[enum_entry_count].name, entry_name);
+        enum_entries[enum_entry_count].value = val++;
+        enum_entry_count++;
+
+        match(TK_ID);
+        if (curr.type == TK_COMMA) match(TK_COMMA);
+    }
+    match(TK_RBRACE);
+}
 
 void parse_struct_literal(int struct_idx) {
     match(TK_LBRACE); emit(OP_ALLOC); emit(struct_defs[struct_idx].field_count); emit(struct_idx);
@@ -506,6 +533,7 @@ void statement() {
     else if (curr.type == TK_MOD) { match(TK_MOD); char m[MAX_IDENTIFIER]; strcpy(m, curr.text); match(TK_ID); match(TK_LBRACE); char old[MAX_IDENTIFIER]; strcpy(old, current_namespace); if (strlen(current_namespace) > 0) sprintf(current_namespace, "%s_%s", old, m); else strcpy(current_namespace, m); while (curr.type != TK_RBRACE && curr.type != TK_EOF) { if (curr.type == TK_FN) { void function(); function(); } else statement(); } match(TK_RBRACE); strcpy(current_namespace, old); }
     else if (curr.type == TK_BREAK) { match(TK_BREAK); emit_break(); }
     else if (curr.type == TK_CONTINUE) { match(TK_CONTINUE); emit_continue(); }
+    else if (curr.type == TK_ENUM) { enum_decl(); } // <--- NEW
     else if (curr.type == TK_VAR) {
         match(TK_VAR); char name[MAX_IDENTIFIER]; strcpy(name, curr.text); match(TK_ID); int st = -1; bool is_arr = false;
         if (curr.type == TK_COLON) {
@@ -520,7 +548,7 @@ void statement() {
             if (curr.type != TK_RBRACKET) { do { parse_struct_literal(st); count++; if (curr.type == TK_COMMA) match(TK_COMMA); } while(curr.type != TK_RBRACKET && curr.type != TK_EOF); }
             match(TK_RBRACKET); emit(OP_ARR); emit(count); is_arr = true;
         }
-        else if (st != -1 && curr.type == TK_LBRACKET) { parse_struct_literal(st); } // Should be LBRACE? No, struct literals handled in LBRACE
+        else if (st != -1 && curr.type == TK_LBRACKET) { parse_struct_literal(st); }
         else if (st != -1 && curr.type == TK_LBRACE) { parse_struct_literal(st); }
         else { expression(); }
 
@@ -534,7 +562,7 @@ void statement() {
         if (curr.type == TK_LPAREN) {
              match(TK_LPAREN); int arg_count = 0; if (curr.type != TK_RPAREN) { expression(); arg_count++; while(curr.type == TK_COMMA) { match(TK_COMMA); expression(); arg_count++; } } match(TK_RPAREN);
              int faddr = find_func(name);
-             if (faddr != -1) { emit(OP_CALL); emit(faddr); emit(arg_count); emit(OP_POP); return; } // Statement call -> pop return
+             if (faddr != -1) { emit(OP_CALL); emit(faddr); emit(arg_count); emit(OP_POP); return; }
              int std_idx = find_stdlib_func(name);
              if (std_idx != -1) {
                  if (std_library[std_idx].arg_count != arg_count) { printf("Error: StdLib function '%s' expects %d args\n", name, std_library[std_idx].arg_count); exit(1); }
@@ -761,6 +789,7 @@ void compile_to_c_source(const char* output_filename) {
 void mylo_reset() {
     vm_init();
     global_count = 0; local_count = 0; func_count = 0; struct_count = 0; ffi_count = 0; inside_function = false; current_namespace[0] = '\0';
+    enum_entry_count = 0; // <--- RESET ENUMS
 
     // FIX: Register Standard Library for the Interpreter
     int i = 0;
