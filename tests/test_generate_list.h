@@ -24,8 +24,7 @@ inline TestOutput test_test() {
     return {true};
 }
 
-inline TestOutput test_simple_math() {
-    //printf("Running test_simple_math...\n");
+inline TestOutput test_simple_math_addition() {
     mylo_reset(); // Ensure clean state
 
     std::string src = "var x = 10 + 5\n";
@@ -36,6 +35,36 @@ inline TestOutput test_simple_math() {
     // Global 'x' should be at index 0 and equal 15
     TestOutput output;
     output.result = vm.globals[0] == 15.0;
+    output.result_string = output.result ? "" : "Expected 15.0 and got " + std::to_string(vm.globals[0]);
+    return output;
+}
+
+inline TestOutput test_simple_math_subtraction() {
+    mylo_reset(); // Ensure clean state
+
+    std::string src = "var x = 10 - 5\n";
+    parse(const_cast<char *>(src.c_str()));
+    run_vm(false);
+
+    // Inspect VM state directly
+    // Global 'x' should be at index 0 and equal 15
+    TestOutput output;
+    output.result = vm.globals[0] == 5.0;
+    output.result_string = output.result ? "" : "Expected 15.0 and got " + std::to_string(vm.globals[0]);
+    return output;
+}
+
+inline TestOutput test_simple_math_division() {
+    mylo_reset(); // Ensure clean state
+
+    std::string src = "var x = 10 / 2\n";
+    parse(const_cast<char *>(src.c_str()));
+    run_vm(false);
+
+    // Inspect VM state directly
+    // Global 'x' should be at index 0 and equal 15
+    TestOutput output;
+    output.result = vm.globals[0] == 5.0;
     output.result_string = output.result ? "" : "Expected 15.0 and got " + std::to_string(vm.globals[0]);
     return output;
 }
@@ -306,10 +335,6 @@ inline TestOutput test_to_str() {
 
     return run_source_test(src, expected);
 }
-
-
-
-
 
 inline TestOutput test_string_interp() {
 
@@ -641,10 +666,35 @@ inline TestOutput test_module_path_and_import() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_bool() {
+
+    std::string src = """"
+    "if (true == false) {\n"
+    "print(true)\n"
+    "}\n"
+    "else {\n"
+    "print(false)\n"
+    "}\n"
+    "if (true == true) {\n"
+    "print(true)\n"
+    "}\n"
+    "else {\n"
+    "print(false)\n"
+    "}\n";
+
+
+    std::string expected = """"
+    "0\n1\n";
+
+    return run_source_test(src, expected);
+}
+
 
 inline void test_generate_list() {
     ADD_TEST("Test Test", test_test);
-    ADD_TEST("Test Math", test_simple_math);
+    ADD_TEST("Test Math +", test_simple_math_addition);
+    ADD_TEST("Test Math -", test_simple_math_subtraction);
+    ADD_TEST("Test Math /", test_simple_math_division);
     ADD_TEST("Test Strings Init", test_strings_init);
     ADD_TEST("Test Print", test_hello_world);
     ADD_TEST("Test Change Types", test_change_types);
@@ -676,9 +726,7 @@ inline void test_generate_list() {
     ADD_TEST("Test for Maps", test_maps);
     ADD_TEST("Test to_num", test_to_num);
     ADD_TEST("Test to_str", test_to_str);
-
-
-
+    ADD_TEST("Test bool", test_bool);
 }
 
 #endif //MYLO_TEST_GENERATE_LIST_H
