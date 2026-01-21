@@ -50,7 +50,7 @@ supports compiling to a binary, with embedded VM code, as well as interfacing wi
 ## Variables
 <!-- TOC --><a name="numbers-and-strings"></a>
 ### Numbers and Strings
-Mylo is strongly typed, but types are inferred for numbers and strings.
+Mylo is strongly typed, but types are inferred for numbers, strings, bools, enums, maps and lists. Here is how to define variables.
 ```javascript
 var a_number = 42
 var a_string = "Hi"
@@ -90,6 +90,19 @@ var myvar = Transport::car
 if (myvar == Transport::car) {
     print("He's in a car!")
 }
+```
+
+### Bools
+Truth statements evaluate to 0 for false and 1 for true. These are also codified as `true` and `false`
+
+```javascript
+var a = "foo"
+if (true == false) { // Never true
+    // never executes
+    a = "bar"
+}
+// "foo"
+print(a)
 ```
 
 <!-- TOC --><a name="listsarrays"></a>
