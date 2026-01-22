@@ -562,6 +562,24 @@ inline TestOutput test_for_var_break() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_forever() {
+
+    std::string src = """"
+    "var x = 0\n"
+    "forever {\n"
+        "print(x)\n"
+        "x = x + 1\n"
+        "if (x > 2) {\n"
+            "break\n"
+        "}\n"
+    "}\n";
+
+    std::string expected = """"
+    "0\n1\n2\n";
+
+    return run_source_test(src, expected);
+}
+
 inline TestOutput test_for_continue() {
 
     std::string src = """"
@@ -746,6 +764,7 @@ inline void test_generate_list() {
     ADD_TEST("Test to_num", test_to_num);
     ADD_TEST("Test to_str", test_to_str);
     ADD_TEST("Test bool", test_bool);
+    ADD_TEST("TEST_FOREVER", test_forever);
 }
 
 #endif //MYLO_TEST_GENERATE_LIST_H

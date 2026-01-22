@@ -16,6 +16,7 @@ typedef enum {
     TK_FN, TK_VAR, TK_IF, TK_FOR, TK_RET, TK_PRINT, TK_IN, TK_STRUCT, TK_ELSE,
     TK_MOD, // 'mod' keyword
     TK_IMPORT,
+    TK_FOREVER,
     TK_ID, TK_NUM, TK_STR, TK_RANGE,
     TK_LPAREN, TK_RPAREN, TK_LBRACE, TK_RBRACE,
     TK_LBRACKET, TK_RBRACKET,
@@ -325,6 +326,7 @@ void next_token() {
         else if (strcmp(curr.text, "module_path") == 0) curr.type = TK_MODULE_PATH;
         else if (strcmp(curr.text, "true") == 0) curr.type = TK_TRUE;
         else if (strcmp(curr.text, "false") == 0) curr.type = TK_FALSE;
+        else if (strcmp(curr.text, "forever") == 0) curr.type = TK_FOREVER;
         else curr.type = TK_ID;
         return;
     }
@@ -1184,8 +1186,7 @@ void statement() {
         } else {
             fprintf(stderr, "Warning: Max search paths reached\n");
         }
-    } // --- START CHANGE ---
-    else if (curr.type == TK_ID && strcmp(curr.text, "C") == 0) {
+    } else if (curr.type == TK_ID && strcmp(curr.text, "C") == 0) {
         match(TK_ID); // Consume 'C'
 
         int ffi_idx = ffi_count++;
@@ -1239,8 +1240,7 @@ void statement() {
         while (std_library[std_count].name != NULL) std_count++;
         emit(std_count + ffi_idx);
         emit(OP_POP); // Discard the dummy return value
-    }
-    else if (curr.type == TK_VAR) {
+    } else if (curr.type == TK_VAR) {
         match(TK_VAR);
         char name[MAX_IDENTIFIER];
         strcpy(name, curr.text);
@@ -1457,8 +1457,27 @@ void statement() {
             match(TK_RBRACE);
             vm.bytecode[p2] = vm.code_size;
         } else { vm.bytecode[p1] = vm.code_size; }
-    }
+    } else if (curr.type == TK_FOREVER) {
+        match(TK_FOREVER);
+        match(TK_LBRACE);
 
+        push_loop(); // 1. Register loop for break/continue
+
+        int loop_start = vm.code_size; // 2. Remember where we started
+
+        // 3. Compile Body
+        while (curr.type != TK_RBRACE && curr.type != TK_EOF) {
+            statement();
+        }
+        match(TK_RBRACE);
+
+        // 4. Jump back to start
+        emit(OP_JMP);
+        emit(loop_start);
+
+        // 5. Patch breaks (to end) and continues (to start)
+        pop_loop(loop_start, vm.code_size);
+    }
     // --- UPDATED: Allow empty return (ret) ---
     else if (curr.type == TK_RET) {
         match(TK_RET);
@@ -1559,7 +1578,7 @@ void compile_to_c_source(const char *output_filename) {
     // --- USER C IMPORTS ---
     // Injects headers captured from 'import C "header.h"'
     fprintf(fp, "\n// --- USER C IMPORTS ---\n");
-    for(int i = 0; i < c_header_count; i++) {
+    for (int i = 0; i < c_header_count; i++) {
         // If it starts with '<', assume system header (e.g. <time.h>), otherwise quote it
         if (c_headers[i][0] == '<') {
             fprintf(fp, "#include %s\n", c_headers[i]);
