@@ -519,6 +519,41 @@ var result: num = C(val: int = a, val2 : str = b) {
 }
 ````
 
+#### Getting Type Handles !
+
+Libraries have custom types in C. Mylo has memory handlers which
+allow a 'Handle' to those objects to be passed around in Mylo. In this example
+Raylib's Image object is utilised.
+
+```javascript
+import C "raylib.h"
+
+// 1. Return an ID (num)
+var img_id: num = C() -> num {
+    Image raw = LoadImage("cat.png");
+    // "Image" is hashed automatically
+    // and is used to remember the type.
+    return MYLO_STORE(raw, "Image");
+}
+
+// Back in Mylo ...
+// img_id is just a handle (num), and is only meaningful to C.
+print(img_id)
+
+// img_id is now passed back to C
+C(id: num = img_id) {
+    // 2. Retrieve it safely
+    // Checks if ID exists AND if the stored hash matches hash("Image")
+    Image* img = MYLO_RETRIEVE(id, Image, "Image");
+    
+    // Null if not found
+    if (img) {
+        // Here we can use the object again
+        printf("Image size: %d x %d\n", img->width, img->height);
+    }
+}
+```
+
 #### Void blocks
 
 Running C code can return no values
