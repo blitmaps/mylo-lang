@@ -26,6 +26,7 @@ It is fast to write, fast to run, and can run anywhere.
             - [Range Based](#range-based)
             - [Checked](#checked)
             - [Iterated](#iterated)
+            - [Forever](#forever)
             - [Break & Continue](#break-and-continue)
     * [Functions](#functions)
         - [Passing own types](#passing-own-types)
@@ -275,6 +276,20 @@ for (x in my_pets) {
     // This will print dog, then cat, then fish
     // each on a new line.
     print(x)
+}
+```
+<!-- TOC --><a name="forever"></a>
+#### Forever
+You can just keep executing a block forever, or until you break out.
+```javascript
+var i = 0
+forever {
+    print(i)
+    i = i + 1
+    
+    if (i > 10) {
+        break
+    }
 }
 ```
 <!-- TOC --><a name="break-continue"></a>
