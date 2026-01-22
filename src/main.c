@@ -42,6 +42,7 @@ void disassemble() {
     }
     printf("-------------------\n\n");
 }
+extern int ffi_count; // Access the counter from compiler.c
 
 int main(int argc, char** argv) {
     vm_init();
@@ -71,6 +72,14 @@ int main(int argc, char** argv) {
 
     mylo_reset();
     parse(content);
+
+    // If we are NOT in build mode, but we found C blocks, stop.
+    if (!build_mode && ffi_count > 0) {
+        printf("Error: This program contains Native C blocks and cannot be interpreted.\n");
+        printf("Please compile it using: mylo --build %s\n", fn);
+        free(content);
+        return 1;
+    }
 
     if (dump) disassemble();
 
