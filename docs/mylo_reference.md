@@ -519,6 +519,40 @@ var result: num = C(val: int = a, val2 : str = b) {
 }
 ````
 
+#### Void blocks
+
+Running C code can return no values
+```javascript
+// This works as a statement
+C() {
+    printf("I am a void C block!\n");
+}
+
+// Arguments still work
+var x = 10
+C(v: num = x) {
+    printf("Value is: %f\n", v);
+}
+
+// This will now throw an error, you can't have a function 
+// called C.
+fn C() {
+    print("Cannot do this")
+}
+```
+
+### Including C Headers
+
+To include C header code (to define functions to call in native blocks) you use 
+the 'C' identifier in import statements
+```javascript
+import C "cool_func.h"
+
+C() {
+    cool_func();
+}
+```
+
 ### Standard Library
 The standard functions are still rather limited, but can do file manipulation, array insights and some maths.
 This is actively being developed to add more power to the VM.
