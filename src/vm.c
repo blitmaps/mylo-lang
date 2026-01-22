@@ -25,6 +25,90 @@ const char *OP_NAMES[] = {
     "MAP", "ASET"
 };
 
+// ... existing includes ...
+
+// Reference Storage
+typedef struct {
+    void* ptr;
+    unsigned long type_hash; // Store the hash, not the string
+    bool is_copy;
+} RefEntry;
+
+#define MAX_REFS 1024
+static RefEntry ref_store[MAX_REFS];
+static int ref_next_id = 0;
+
+// Simple String Hash (djb2) - Fast and effective for short type names
+unsigned long vm_hash_str(const char *str) {
+    unsigned long hash = 5381;
+    int c;
+    while ((c = *str++))
+        hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
+    return hash;
+}
+
+// Implementation: Store Copy
+double vm_store_copy(void* data, size_t size, const char* type_name) {
+    if (ref_next_id >= MAX_REFS) {
+        printf("Runtime Error: Reference limit reached\n");
+        return -1.0;
+    }
+    void* copy = malloc(size);
+    if (!copy) return -1.0;
+
+    memcpy(copy, data, size);
+
+    int id = ref_next_id++;
+    ref_store[id].ptr = copy;
+    ref_store[id].type_hash = vm_hash_str(type_name); // Hash it here
+    ref_store[id].is_copy = true;
+    return (double)id;
+}
+
+// Implementation: Store Pointer
+double vm_store_ptr(void* ptr, const char* type_name) {
+    if (ref_next_id >= MAX_REFS) return -1.0;
+    int id = ref_next_id++;
+    ref_store[id].ptr = ptr;
+    ref_store[id].type_hash = vm_hash_str(type_name); // Hash it here
+    ref_store[id].is_copy = false;
+    return (double)id;
+}
+
+// Implementation: Retrieve with String Type Check
+void* vm_get_ref(int id, const char* expected_type_name) {
+    if (id < 0 || id >= ref_next_id) {
+        printf("Runtime Error: Invalid Reference ID %d\n", id);
+        return NULL;
+    }
+
+    unsigned long expected_hash = vm_hash_str(expected_type_name);
+
+    if (ref_store[id].type_hash != expected_hash) {
+        printf("Runtime Error: Ref Type Mismatch (ID: %d). Expected '%s' (%lu), got Hash %lu\n",
+               id, expected_type_name, expected_hash, ref_store[id].type_hash);
+        return NULL;
+    }
+
+    if (ref_store[id].ptr == NULL) {
+        printf("Runtime Error: Reference %d is null (freed?)\n", id);
+        return NULL;
+    }
+
+    return ref_store[id].ptr;
+}
+
+void vm_free_ref(int id) {
+    if (id >= 0 && id < ref_next_id) {
+        if (ref_store[id].is_copy && ref_store[id].ptr) {
+            free(ref_store[id].ptr);
+        }
+        ref_store[id].ptr = NULL;
+        ref_store[id].type_hash = 0;
+    }
+}
+
+// ... existing vm_init / run_vm ...
 void vm_init() {
     memset(&vm, 0, sizeof(VM));
     vm.sp = -1;

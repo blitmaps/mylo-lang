@@ -6,7 +6,7 @@
 
 #include <stdbool.h>
 #include "defines.h"
-
+#include <stddef.h>
 // --- Types ---
 #define T_NUM 0
 #define T_STR 1
@@ -88,5 +88,22 @@ int heap_alloc(int size);
 void run_vm(bool debug_trace);
 void mylo_reset();
 
+// Persist a Value (Struct): Allocates heap, copies data, tags it with a hashed string type.
+// Usage: return MYLO_STORE(my_struct, "Image");
+#define MYLO_STORE(val, type_name) vm_store_copy(&(val), sizeof(val), type_name)
+
+// Retrieve a Value: Returns a typed pointer if the ID and Type Name match.
+// Usage: Image* img = MYLO_RETRIEVE(id, Image, "Image");
+#define MYLO_RETRIEVE(id, c_type, type_name) (c_type*)vm_get_ref((int)(id), type_name)
+
+// Register a Pointer: Stores an existing pointer (no copy).
+// Usage: return MYLO_REGISTER(my_ptr, "WindowHandle");
+#define MYLO_REGISTER(ptr, type_name) vm_store_ptr((void*)(ptr), type_name)
+
+// Prototypes
+double vm_store_copy(void* data, size_t size, const char* type_name);
+double vm_store_ptr(void* ptr, const char* type_name);
+void* vm_get_ref(int id, const char* expected_type_name);
+void vm_free_ref(int id);
 #endif
 #endif
