@@ -544,6 +544,24 @@ inline TestOutput test_for_break() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_for_var_break() {
+
+    std::string src = """"
+    "var x = 0\n"
+    "for (x < 5) {\n"
+        "print(x)\n"
+        "if (x > 2) {\n"
+            "break\n"
+        "}\n"
+        "x = x + 1"
+    "}\n";
+
+    std::string expected = """"
+    "0\n1\n2\n3\n";
+
+    return run_source_test(src, expected);
+}
+
 inline TestOutput test_for_continue() {
 
     std::string src = """"
@@ -716,6 +734,7 @@ inline void test_generate_list() {
     ADD_TEST("Test List Slicing", test_list_slices);
     ADD_TEST("Test Func. Iter. Passing", test_func_iterator_passing);
     ADD_TEST("Test For Loop Break", test_for_break);
+    ADD_TEST("Test For Var Loop Break", test_for_var_break);
     ADD_TEST("Test For Loop Continue", test_for_continue);
     ADD_TEST("Test For File IO (str)", test_file_str_io);
     ADD_TEST("Test For File IO (bin)", test_file_bin_io);

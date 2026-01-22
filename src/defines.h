@@ -11,7 +11,7 @@
 // String Limits
 #define MAX_STRINGS 1024
 #define MAX_STRING_LENGTH 1024
-
+#define MAX_C_HEADERS 32
 // Compilation Limits
 #define MAX_IDENTIFIER 64
 #define MAX_STRUCTS 64
