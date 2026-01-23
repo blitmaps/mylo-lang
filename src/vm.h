@@ -40,7 +40,8 @@ typedef enum {
     OP_POP,
     OP_NATIVE,
     OP_ARR, OP_AGET, OP_ALEN, OP_SLICE,
-    OP_MAP, OP_ASET
+    OP_MAP, OP_ASET,
+    OP_MK_BYTES
 } OpCode;
 
 extern const char *OP_NAMES[];

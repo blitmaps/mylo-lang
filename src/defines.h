@@ -29,7 +29,8 @@
 
 // Types
 #define TYPE_ARRAY -1
-#define TYPE_MAP -3 // <--- NEW
+#define TYPE_BYTES -2
+#define TYPE_MAP -3
 
 // Heap Layout Constants
 #define HEAP_OFFSET_TYPE 0

@@ -267,20 +267,17 @@ void std_read_bytes(VM *vm) {
     fread(buf, 1, file_len, f);
     fclose(f);
 
-    int element_count = file_len / stride;
-    int addr = heap_alloc(element_count + HEAP_HEADER_ARRAY);
-    vm->heap[addr + HEAP_OFFSET_TYPE] = TYPE_ARRAY;
+    // ALLOCATE BYTES OBJECT
+    int element_count = file_len;
+    int doubles_needed = (element_count + 7) / 8;
+    int addr = heap_alloc(doubles_needed + HEAP_HEADER_ARRAY);
+
+    vm->heap[addr + HEAP_OFFSET_TYPE] = TYPE_BYTES;
     vm->heap[addr + HEAP_OFFSET_LEN] = (double) element_count;
 
-    for (int i = 0; i < element_count; i++) {
-        if (stride == 1) {
-            vm->heap[addr + HEAP_HEADER_ARRAY + i] = (double) buf[i];
-        } else {
-            unsigned int val = buf[i * 4] | (buf[i * 4 + 1] << 8) | (buf[i * 4 + 2] << 16) | (buf[i * 4 + 3] << 24);
-            vm->heap[addr + HEAP_HEADER_ARRAY + i] = (double) val;
-        }
-        vm->heap_types[addr + HEAP_HEADER_ARRAY + i] = T_NUM;
-    }
+    // COPY FAST
+    char* heap_bytes = (char*)&vm->heap[addr + HEAP_HEADER_ARRAY];
+    memcpy(heap_bytes, buf, element_count);
 
     free(buf);
     vm_push((double) addr, T_OBJ);

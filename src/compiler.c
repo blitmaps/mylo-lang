@@ -24,6 +24,7 @@ typedef enum {
     TK_LT, TK_GT, TK_LE, TK_GE, TK_EQ, TK_NEQ,
     TK_EQ_ASSIGN, TK_QUESTION,
     TK_EOF, TK_FSTR,
+    TK_BSTR,
     TK_COLON, TK_COMMA, TK_DOT,
     TK_SCOPE, // ::
     TK_ARROW, // ->
@@ -263,7 +264,22 @@ void next_token() {
     }
 
     curr.line = line; // Record line number for the new token
-
+    //  byte string
+    if (*src == 'b' && *(src + 1) == '"') {
+        src += 2;
+        char *start = src;
+        while (*src != '"' && *src != 0) {
+            if (*src == '\n') line++;
+            src++;
+        }
+        int len = (int) (src - start);
+        if (len > MAX_IDENTIFIER - 1) len = MAX_IDENTIFIER - 1;
+        strncpy(curr.text, start, len);
+        curr.text[len] = '\0';
+        if (*src == '"') src++;
+        curr.type = TK_BSTR;
+        return;
+    }
     if (*src == 'f' && *(src + 1) == '"') {
         src += 2;
         char *start = src;
@@ -620,7 +636,15 @@ void factor() {
             emit(OP_CAT);
         }
         match(TK_FSTR);
-    } else if (curr.type == TK_ID) {
+    }
+    else if (curr.type == TK_BSTR) {
+        int id = make_string(curr.text);
+        emit(OP_PSH_STR);
+        emit(id);
+        emit(OP_MK_BYTES);
+        match(TK_BSTR);
+    }
+    else if (curr.type == TK_ID) {
         char name[MAX_IDENTIFIER];
         parse_namespaced_id(name);
         int enum_val = find_enum_val(name);

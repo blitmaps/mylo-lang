@@ -725,6 +725,30 @@ inline TestOutput test_bool() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_bytes_print() {
+
+    std::string src = """"
+    "var header = b\"PNG\"\n"
+    "print(header)\n";
+
+    std::string expected = """"
+    "b\"PNG\"\n";
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_byte_iterator() {
+
+    std::string src = """"
+    "var header = b\"1298\"\n"
+    "for (x in header) {\n"
+    "print(x)\n"
+    "}";
+    std::string expected = """"
+    "49\n50\n57\n56\n";
+    return run_source_test(src, expected);
+}
+
+
 
 inline void test_generate_list() {
     ADD_TEST("Test Test", test_test);
@@ -765,6 +789,10 @@ inline void test_generate_list() {
     ADD_TEST("Test to_str", test_to_str);
     ADD_TEST("Test bool", test_bool);
     ADD_TEST("Test forever", test_forever);
+    ADD_TEST("Test bytes (print)", test_bytes_print);
+    ADD_TEST("Test bytes (for)", test_byte_iterator);
+
+
 }
 
 #endif //MYLO_TEST_GENERATE_LIST_H
