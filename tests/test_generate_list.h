@@ -764,7 +764,7 @@ inline void test_generate_list() {
     ADD_TEST("Test to_num", test_to_num);
     ADD_TEST("Test to_str", test_to_str);
     ADD_TEST("Test bool", test_bool);
-    ADD_TEST("TEST_FOREVER", test_forever);
+    ADD_TEST("Test forever", test_forever);
 }
 
 #endif //MYLO_TEST_GENERATE_LIST_H
