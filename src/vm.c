@@ -1,9 +1,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include <stdbool.h>
 #include "vm.h"
-#include "simple_math_lib.h"
+
 // Global Instance
 VM vm;
 NativeFunc natives[MAX_NATIVES];
@@ -286,7 +287,7 @@ void run_vm(bool debug_trace) {
                 double b = vm_pop();
                 double a = vm.stack[vm.sp];
                 if (b == 0) RUNTIME_ERROR("Modulo by zero");
-                vm.stack[vm.sp] = simple_fmod(a, b);
+                vm.stack[vm.sp] = fmod(a, b);
                 vm.stack_types[vm.sp] = T_NUM;
                 break;
             }
