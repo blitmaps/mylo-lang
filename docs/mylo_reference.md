@@ -115,6 +115,19 @@ using the `[]` syntax.
 var my_list = ["a", "b", "c"]
 var my_list = [1, 2, 3]
 ```
+<!-- TOC --><a name="bytes"></a>
+## Bytes
+
+Bytes can be defined like so:
+
+```javascript
+    var byte = b"0"
+    "print(byte)\n";
+    var byte_array = b"PNG"
+    for (B in byte_array) {
+        print(B)
+    }
+```
 
 <!-- TOC --><a name="arrays-of-structs"></a>
 ### Arrays of Structs
