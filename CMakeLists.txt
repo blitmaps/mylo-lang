@@ -9,16 +9,18 @@ add_executable(mylo src/main.c src/compiler.c src/vm.h src/vm.c
         src/utils.c
         src/defines.h
         src/mylolib.h
-        src/mylolib.c)
+        src/mylolib.c
+        src/simple_math_lib.c)
 add_executable(tests tests/tests.cpp src/compiler.c src/vm.h src/vm.c
         src/utils.c
         src/mylolib.h
-        src/mylolib.c)
+        src/mylolib.c
+        src/simple_math_lib.c)
 IF (WIN32)
   # Math not needed on Windows
 ELSE()
   # Math needed on other plats
-  target_link_libraries(mylo m)
-  target_link_libraries(tests m)
+  #target_link_libraries(mylo m)
+  #target_link_libraries(tests m)
 ENDIF()
 

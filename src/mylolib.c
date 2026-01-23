@@ -2,11 +2,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <math.h>
 #include "mylolib.h"
 #include "vm.h"
 #include "defines.h"
-
+#include "simple_math_lib.h"
 // --- Helpers ---
 
 static const char *get_str(VM *vm, double val) {
@@ -21,36 +20,34 @@ void trim_newline(char *str) {
     if (len > 1 && str[len - 2] == '\r') str[len - 2] = '\0';
 }
 
-// --- Standard Library Functions ---
 
 void std_sqrt(VM *vm) {
     double val = vm_pop();
-    vm_push(sqrt(val), T_NUM);
+    vm_push(simple_sqrt(val), T_NUM);
 }
 
 void std_sin(VM *vm) {
     double val = vm_pop();
-    vm_push(sin(val), T_NUM);
+    vm_push(simple_sin(val), T_NUM);
 }
 
 void std_cos(VM *vm) {
     double val = vm_pop();
-    vm_push(cos(val), T_NUM);
+    vm_push(simple_cos(val), T_NUM);
 }
 
 void std_tan(VM *vm) {
     double val = vm_pop();
-    vm_push(tan(val), T_NUM);
+    vm_push(simple_sin(val) / simple_cos(val), T_NUM);
 }
 
 void std_floor(VM *vm) {
     double val = vm_pop();
-    vm_push(floor(val), T_NUM);
+    vm_push(simple_floor(val), T_NUM);
 }
-
 void std_ceil(VM *vm) {
     double val = vm_pop();
-    vm_push(ceil(val), T_NUM);
+    vm_push(simple_ceil(val), T_NUM);
 }
 
 void std_len(VM *vm) {

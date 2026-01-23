@@ -725,6 +725,51 @@ inline TestOutput test_bool() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_std_sin() {
+
+    std::string src = """"
+    "print(sin(3))\n";
+
+    std::string expected = """"
+    "0.14112\n";
+
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_std_cos() {
+
+    std::string src = """"
+    "print(cos(3))\n";
+
+    std::string expected = """"
+    "-0.989992\n";
+
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_std_floor() {
+
+    std::string src = """"
+    "print(floor(3.49))\n";
+
+    std::string expected = """"
+    "3\n";
+
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_std_ceil() {
+
+    std::string src = """"
+    "print(ceil(3.01))\n";
+
+    std::string expected = """"
+    "4\n";
+
+    return run_source_test(src, expected);
+}
+
+
 
 inline void test_generate_list() {
     ADD_TEST("Test Test", test_test);
@@ -764,7 +809,11 @@ inline void test_generate_list() {
     ADD_TEST("Test to_num", test_to_num);
     ADD_TEST("Test to_str", test_to_str);
     ADD_TEST("Test bool", test_bool);
-    ADD_TEST("TEST_FOREVER", test_forever);
+    ADD_TEST("Test for..ever", test_forever);
+    ADD_TEST("Test sin()", test_std_sin);
+    ADD_TEST("Test cos()", test_std_cos);
+    ADD_TEST("Test floor()", test_std_floor);
+    ADD_TEST("Test ceil()", test_std_ceil);
 }
 
 #endif //MYLO_TEST_GENERATE_LIST_H

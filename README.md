@@ -64,7 +64,7 @@ This will show every VM transaction.
 ### The simple way
 ```bash
  # Call the c compiler with source, and link math.
-> cc main.c utils.c compiler.c mylolib.c vm.c -o mylo -lm
+> cc src/*.c -o mylo
 ```
 ### Using CMake (also builds tests)
 ```bash
@@ -100,7 +100,7 @@ We then just compile it, like any other C file, but we need to include
 the Mylo VM source and headers.
 ```shell
 # This produces mylo_app
->  gcc out.c src/vm.c src/mylolib.c -o mylo_app -Isrc -lm  
+>  gcc out.c src/vm.c src/mylolib.c -o mylo_app -Isrc
 ```
 
 Our application can then be executed (without a runtime):
