@@ -45,13 +45,17 @@ result : 55
 ## Running a Mylo program
 ```bash
 > mylo
-  Usage: mylo [--run|--build] <file> [--dump] [--trace]
+  Usage: mylo [--run|--build|--bind] <file> [--dump] [--trace]
 ```
 #### --run
 This option will run a mylo source file (like hello.mylo). It is the default.
 
 #### --build
 This will compile the mylo and inline C code, and produce out.c, for further compilation using a c-compiler.
+
+#### --bind
+This will produce a shared library binding for a Mylo file containing inline C. See the language reference for 
+detailed information on creating a binding.
 
 #### --dump
 This will dump the VM assembly, as well as run the code.
@@ -64,7 +68,7 @@ This will show every VM transaction.
 ### The simple way
 ```bash
  # Call the c compiler with source, and link math.
-> cc main.c utils.c compiler.c mylolib.c vm.c -o mylo -lm
+> cc src/*.c -o mylo -lm
 ```
 ### Using CMake (also builds tests)
 ```bash
