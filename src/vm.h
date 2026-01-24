@@ -24,7 +24,12 @@ typedef struct {
 #define MYLO_RET_OBJ(v) (MyloReturn){ .value = (double)(v), .type = T_OBJ }
 
 typedef struct {
+    // Sprintf to internal memory
     bool print_to_memory;
+    // DAP mode
+    bool debug_mode;
+    // Function pointer for printer overloading
+    void (*print_callback)(const char *);
 } MyloConfigType;
 
 extern MyloConfigType MyloConfig;

@@ -10,6 +10,7 @@
 #include "utils.h"
 #include "defines.h"
 #include "loader.h"
+#include "compiler.h"
 
 // --- Tokenizer & Structures ---
 
@@ -90,23 +91,10 @@ typedef struct {
 LoopControl loop_stack[MAX_LOOP_NESTING];
 int loop_depth = 0;
 
-// Symbol Tables
-struct {
-    char name[MAX_IDENTIFIER];
-    int addr;
-    int type_id;
-    bool is_array;
-} globals[MAX_GLOBALS];
-
+Symbol globals[MAX_GLOBALS];
 int global_count = 0;
 
-struct {
-    char name[MAX_IDENTIFIER];
-    int offset;
-    int type_id;
-    bool is_array;
-} locals[MAX_GLOBALS];
-
+LocalSymbol locals[MAX_GLOBALS];
 int local_count = 0;
 
 struct {
