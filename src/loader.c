@@ -28,13 +28,15 @@ void get_lib_name(char* out, const char* base_name) {
 void* load_library(const char* path) {
 #ifdef _WIN32
     HMODULE h = LoadLibraryA(path);
-    if (!h) printf("Failed to load library %s (Error: %lu)\n", path, GetLastError());
+    if (!h) //printf("Failed to load library %s (Error: %lu)\n", path, GetLastError());
+        fprintf(stderr, "Failed to load library %s (Error: %lu)\n", path, GetLastError());
     return (void*)h;
 #else
     // RTLD_GLOBAL allows the plugin to see symbols if we exported them,
     // but we are using the struct method now, so standard load is fine.
     void* h = dlopen(path, RTLD_NOW);
-    if (!h) printf("Failed to load library %s (%s)\n", path, dlerror());
+    if (!h) //printf("Failed to load library %s (%s)\n", path, dlerror());
+        fprintf(stderr, "Failed to load library %s (%s)\n", path, dlerror());
     return h;
 #endif
 }
