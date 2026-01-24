@@ -1,20 +1,25 @@
 #ifndef MYLO_VM_H
 #define MYLO_VM_H
 
+#ifndef VM_H
+#define VM_H
+
 #include <stdbool.h>
 #include "defines.h"
 #include <stddef.h>
 
-// --- Types (ALWAYS VISIBLE) ---
+// --- Types ---
 #define T_NUM 0
 #define T_STR 1
 #define T_OBJ 2
 
+// Return type for C-Blocks
 typedef struct {
     double value;
     int type;
 } MyloReturn;
 
+// Helper Macros for C-Blocks
 #define MYLO_RET_NUM(v) (MyloReturn){ .value = (double)(v), .type = T_NUM }
 #define MYLO_RET_OBJ(v) (MyloReturn){ .value = (double)(v), .type = T_OBJ }
 
@@ -42,7 +47,6 @@ typedef enum {
 
 extern const char *OP_NAMES[];
 
-// struct VM definition
 typedef struct {
     double stack[STACK_SIZE];
     double globals[MAX_GLOBALS];
@@ -79,6 +83,13 @@ typedef struct {
     double (*pop)();
     int (*make_string)(const char*);
     int (*heap_alloc)(int);
+
+    // NEW: Reference Management Bridge
+    double (*store_copy)(void*, size_t, const char*);
+    double (*store_ptr)(void*, const char*);
+    void* (*get_ref)(int, const char*);
+    void (*free_ref)(int);
+
     NativeFunc* natives_array;
     char (*string_pool)[MAX_STRING_LENGTH];
     double* heap;
@@ -99,17 +110,18 @@ int heap_alloc(int size);
 void run_vm(bool debug_trace);
 void mylo_reset();
 
-#endif // End MYLO_BINDING_MODE
-
-// Macros rely on functions that might be macros themselves in binding mode,
-// so we keep these helper macros always visible.
+// Prototypes for Ref counting
 double vm_store_copy(void* data, size_t size, const char* type_name);
 double vm_store_ptr(void* ptr, const char* type_name);
 void* vm_get_ref(int id, const char* expected_type_name);
 void vm_free_ref(int id);
 
+#endif // End MYLO_BINDING_MODE
+
+// Macros for usage in User Code
 #define MYLO_STORE(val, type_name) vm_store_copy(&(val), sizeof(val), type_name)
 #define MYLO_RETRIEVE(id, c_type, type_name) (c_type*)vm_get_ref((int)(id), type_name)
 #define MYLO_REGISTER(ptr, type_name) vm_store_ptr((void*)(ptr), type_name)
 
+#endif
 #endif
