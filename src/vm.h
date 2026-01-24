@@ -1,24 +1,20 @@
 #ifndef MYLO_VM_H
 #define MYLO_VM_H
 
-#ifndef VM_H
-#define VM_H
-
 #include <stdbool.h>
 #include "defines.h"
 #include <stddef.h>
-// --- Types ---
+
+// --- Types (ALWAYS VISIBLE) ---
 #define T_NUM 0
 #define T_STR 1
 #define T_OBJ 2
 
-// Return type for C-Blocks
 typedef struct {
     double value;
     int type;
 } MyloReturn;
 
-// Helper Macros for C-Blocks
 #define MYLO_RET_NUM(v) (MyloReturn){ .value = (double)(v), .type = T_NUM }
 #define MYLO_RET_OBJ(v) (MyloReturn){ .value = (double)(v), .type = T_OBJ }
 
@@ -46,6 +42,7 @@ typedef enum {
 
 extern const char *OP_NAMES[];
 
+// struct VM definition
 typedef struct {
     double stack[STACK_SIZE];
     double globals[MAX_GLOBALS];
@@ -53,9 +50,8 @@ typedef struct {
     double heap[MAX_HEAP];
 
     int bytecode[MAX_CODE];
-    int lines[MAX_CODE]; // <--- NEW: Map bytecode index to source line
+    int lines[MAX_CODE];
 
-    // Type tracking
     int stack_types[STACK_SIZE];
     int global_types[MAX_GLOBALS];
     int heap_types[MAX_HEAP];
@@ -74,10 +70,24 @@ typedef struct {
     int output_mem_pos;
 } VM;
 
-extern VM vm;
-
+// Typedef for NativeFunc
 typedef void (*NativeFunc)(VM *);
 
+// --- API STRUCT ---
+typedef struct {
+    void (*push)(double, int);
+    double (*pop)();
+    int (*make_string)(const char*);
+    int (*heap_alloc)(int);
+    NativeFunc* natives_array;
+    char (*string_pool)[MAX_STRING_LENGTH];
+    double* heap;
+} MyloAPI;
+
+// --- EXPORTED FUNCTIONS (HIDDEN IN BINDING MODE) ---
+#ifndef MYLO_BINDING_MODE
+
+extern VM vm;
 extern NativeFunc natives[MAX_NATIVES];
 
 void vm_init();
@@ -89,22 +99,17 @@ int heap_alloc(int size);
 void run_vm(bool debug_trace);
 void mylo_reset();
 
-// Persist a Value (Struct): Allocates heap, copies data, tags it with a hashed string type.
-// Usage: return MYLO_STORE(my_struct, "Image");
-#define MYLO_STORE(val, type_name) vm_store_copy(&(val), sizeof(val), type_name)
+#endif // End MYLO_BINDING_MODE
 
-// Retrieve a Value: Returns a typed pointer if the ID and Type Name match.
-// Usage: Image* img = MYLO_RETRIEVE(id, Image, "Image");
-#define MYLO_RETRIEVE(id, c_type, type_name) (c_type*)vm_get_ref((int)(id), type_name)
-
-// Register a Pointer: Stores an existing pointer (no copy).
-// Usage: return MYLO_REGISTER(my_ptr, "WindowHandle");
-#define MYLO_REGISTER(ptr, type_name) vm_store_ptr((void*)(ptr), type_name)
-
-// Prototypes
+// Macros rely on functions that might be macros themselves in binding mode,
+// so we keep these helper macros always visible.
 double vm_store_copy(void* data, size_t size, const char* type_name);
 double vm_store_ptr(void* ptr, const char* type_name);
 void* vm_get_ref(int id, const char* expected_type_name);
 void vm_free_ref(int id);
-#endif
+
+#define MYLO_STORE(val, type_name) vm_store_copy(&(val), sizeof(val), type_name)
+#define MYLO_RETRIEVE(id, c_type, type_name) (c_type*)vm_get_ref((int)(id), type_name)
+#define MYLO_REGISTER(ptr, type_name) vm_store_ptr((void*)(ptr), type_name)
+
 #endif

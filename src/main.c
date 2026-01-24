@@ -8,15 +8,20 @@
 // Defined in compiler.c
 void parse(char* source);
 void compile_to_c_source(const char* output_filename);
+void generate_binding_c_source(const char* output_filename);
 void mylo_reset();
 void disassemble();
+
+// NEW: extern the counters
+extern int ffi_count;
+extern int bound_ffi_count;
 
 void disassemble() {
     printf("\n--- Disassembly ---\n");
     int i = 0;
     while (i < vm.code_size) {
         int op = vm.bytecode[i];
-        if (op < 0 || op > OP_NATIVE) { printf("%04d UNKNOWN %d\n", i, op); i++; continue; }
+        if (op < 0 || op > OP_MK_BYTES) { printf("%04d UNKNOWN %d\n", i, op); i++; continue; }
 
         printf("%04d %-10s ", i, OP_NAMES[op]);
         i++;
@@ -36,26 +41,28 @@ void disassemble() {
             case OP_HSET:
             case OP_HGET: { int off = vm.bytecode[i++]; printf("Offset: %d", off); break; }
             case OP_NATIVE: { int id = vm.bytecode[i++]; printf("Native[%d]", id); break; }
+            case OP_ARR: { int count = vm.bytecode[i++]; printf("(count: %d)", count); break; }
             default: break;
         }
         printf("\n");
     }
     printf("-------------------\n\n");
 }
-extern int ffi_count; // Access the counter from compiler.c
 
 int main(int argc, char** argv) {
     vm_init();
 
-    if (argc < 2) { printf("Usage: mylo [--run|--build] <file> [--dump] [--trace]\n"); return 1; }
+    if (argc < 2) { printf("Usage: mylo [--run|--build|--bind] <file> [--dump] [--trace]\n"); return 1; }
 
     bool build_mode = false;
+    bool bind_mode = false;
     bool dump = false;
     bool trace = false;
     char* fn = NULL;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--build") == 0) build_mode = true;
+        else if (strcmp(argv[i], "--bind") == 0) bind_mode = true;
         else if (strcmp(argv[i], "--run") == 0) build_mode = false;
         else if (strcmp(argv[i], "--dump") == 0) dump = true;
         else if (strcmp(argv[i], "--trace") == 0) trace = true;
@@ -73,8 +80,26 @@ int main(int argc, char** argv) {
     mylo_reset();
     parse(content);
 
-    // If we are NOT in build mode, but we found C blocks, stop.
-    if (!build_mode && ffi_count > 0) {
+    // --- MODE HANDLING ---
+
+    if (bind_mode) {
+        // Generate binding C file (e.g. test_lib.mylo -> test_lib.mylo_bind.c)
+        char out_name[1024];
+        snprintf(out_name, 1024, "%s_bind.c", fn);
+        generate_binding_c_source(out_name);
+        free(content);
+        return 0;
+    }
+
+    if (build_mode) {
+        compile_to_c_source("out.c");
+        free(content);
+        return 0;
+    }
+
+    // --- INTERPRETER SAFETY CHECK ---
+    // If we have C blocks that were NOT bound via native modules, we must stop.
+    if ((ffi_count - bound_ffi_count) > 0) {
         printf("Error: This program contains Native C blocks and cannot be interpreted.\n");
         printf("Please compile it using: mylo --build %s\n", fn);
         free(content);
@@ -83,11 +108,7 @@ int main(int argc, char** argv) {
 
     if (dump) disassemble();
 
-    if (build_mode) {
-        compile_to_c_source("out.c");
-    } else {
-        run_vm(trace);
-    }
+    run_vm(trace);
 
     free(content);
     return 0;

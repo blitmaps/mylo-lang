@@ -63,7 +63,6 @@ void std_len(VM *vm) {
         double length = vm->heap[ptr + HEAP_OFFSET_LEN];
         vm_push(length, T_NUM);
     } else if (vm->stack_types[vm->sp + 1] == T_STR) {
-        // Optional: Support string length
         const char *s = get_str(vm, val);
         vm_push((double) strlen(s), T_NUM);
     } else {
@@ -105,7 +104,6 @@ void std_contains(VM *vm) {
             vm_push(found ? 1.0 : 0.0, T_NUM);
             return;
         } else if (objType == TYPE_MAP) {
-            // Check Keys
             if (needle_type != T_STR) {
                 printf("Runtime Error: contains() map check requires string key\n");
                 exit(1);
@@ -117,7 +115,7 @@ void std_contains(VM *vm) {
                 if (vm->heap[dataPtr + i * 2] == needle_val) {
                     found = 1;
                     break;
-                } // Compare String IDs
+                }
             }
             vm_push(found ? 1.0 : 0.0, T_NUM);
             return;
@@ -133,22 +131,19 @@ void std_to_string(VM *vm) {
 
     if (type == T_NUM) {
         char buf[64];
-        // Print integer-like floats as integers, others as floats
         if (val == (int) val) snprintf(buf, 64, "%d", (int) val);
         else snprintf(buf, 64, "%g", val);
 
         int str_id = make_string(buf);
         vm_push((double) str_id, T_STR);
     } else if (type == T_STR) {
-        vm_push(val, T_STR); // Already a string
+        vm_push(val, T_STR);
     } else if (type == T_OBJ) {
-        // For Objects, we just print the reference ID for now
         char buf[64];
         snprintf(buf, 64, "[Ref: %d]", (int) val);
         int str_id = make_string(buf);
         vm_push((double) str_id, T_STR);
     } else {
-        // Fallback
         int str_id = make_string("");
         vm_push((double) str_id, T_STR);
     }
@@ -159,15 +154,13 @@ void std_to_num(VM *vm) {
     int type = vm->stack_types[vm->sp + 1];
 
     if (type == T_NUM) {
-        vm_push(val, T_NUM); // Already a number
+        vm_push(val, T_NUM);
     } else if (type == T_STR) {
         const char *s = get_str(vm, val);
         char *end;
         double d = strtod(s, &end);
-        // If conversion fails, strtod returns 0.0 (or original if no digits)
         vm_push(d, T_NUM);
     } else {
-        // Objects/Maps -> 0
         vm_push(0.0, T_NUM);
     }
 }
@@ -214,6 +207,7 @@ void std_read_lines(VM *vm) {
     vm_push((double) arr_addr, T_OBJ);
 }
 
+// Fixed: 3 Arguments (Mode, Content, Path)
 void std_write_file(VM *vm) {
     double mode_id = vm_pop();
     double content_id = vm_pop();
@@ -239,6 +233,7 @@ void std_write_file(VM *vm) {
     vm_push(1.0, T_NUM);
 }
 
+// Fixed: 2 Arguments (Stride, Path)
 void std_read_bytes(VM *vm) {
     double stride_val = vm_pop();
     double path_id = vm_pop();
@@ -267,7 +262,6 @@ void std_read_bytes(VM *vm) {
     fread(buf, 1, file_len, f);
     fclose(f);
 
-    // ALLOCATE BYTES OBJECT
     int element_count = file_len;
     int doubles_needed = (element_count + 7) / 8;
     int addr = heap_alloc(doubles_needed + HEAP_HEADER_ARRAY);
@@ -275,7 +269,6 @@ void std_read_bytes(VM *vm) {
     vm->heap[addr + HEAP_OFFSET_TYPE] = TYPE_BYTES;
     vm->heap[addr + HEAP_OFFSET_LEN] = (double) element_count;
 
-    // COPY FAST
     char* heap_bytes = (char*)&vm->heap[addr + HEAP_HEADER_ARRAY];
     memcpy(heap_bytes, buf, element_count);
 
@@ -310,3 +303,24 @@ void std_write_bytes(VM *vm) {
     fclose(f);
     vm_push(1.0, T_NUM);
 }
+
+// --- Registry Definition ---
+// Moved from header to here
+const StdLibDef std_library[] = {
+    {"len", std_len, "num", 1, {"any"}},
+    {"contains", std_contains, "num", 2, {"any", "any"}},
+    {"to_string", std_to_string, "str", 1, {"any"}},
+    {"to_num", std_to_num, "num", 1, {"any"}},
+    {"sqrt", std_sqrt, "num", 1, {"num"}},
+    {"sin", std_sin, "num", 1, {"num"}},
+    {"cos", std_cos, "num", 1, {"num"}},
+    {"tan", std_tan, "num", 1, {"num"}},
+    {"floor", std_floor, "num", 1, {"num"}},
+    {"ceil", std_ceil, "num", 1, {"num"}},
+    {"read_lines", std_read_lines, "arr", 1, {"str"}},
+    // Updated arg counts to match your tests
+    {"write_file", std_write_file, "num", 3, {"str", "str", "str"}},
+    {"read_bytes", std_read_bytes, "arr", 2, {"str", "num"}},
+    {"write_bytes", std_write_bytes, "num", 2, {"str", "arr"}},
+    {NULL, NULL, NULL, 0, {NULL}}
+};

@@ -1,0 +1,4 @@
+// app.mylo
+import native "test_lib.mylo"
+
+print(add(10, 20))

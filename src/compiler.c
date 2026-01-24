@@ -3,18 +3,19 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
-#include <stdarg.h> // Required for error()
+#include <stdarg.h>
 #include <stdbool.h>
 #include "mylolib.h"
 #include "vm.h"
 #include "utils.h"
 #include "defines.h"
+#include "loader.h"
 
 // --- Tokenizer & Structures ---
 
 typedef enum {
     TK_FN, TK_VAR, TK_IF, TK_FOR, TK_RET, TK_PRINT, TK_IN, TK_STRUCT, TK_ELSE,
-    TK_MOD, // 'mod' keyword
+    TK_MOD,
     TK_IMPORT,
     TK_FOREVER,
     TK_ID, TK_NUM, TK_STR, TK_RANGE,
@@ -40,7 +41,7 @@ typedef struct {
     MyloTokenType type;
     char text[MAX_IDENTIFIER];
     double val_float;
-    int line; // New: Track line number for this token
+    int line;
 } Token;
 
 typedef struct {
@@ -59,12 +60,16 @@ typedef struct {
 FFIBlock ffi_blocks[MAX_NATIVES];
 int ffi_count = 0;
 
+// --- NEW: Track bound natives ---
+int bound_ffi_count = 0;
+// --------------------------------
+
 // Internal Compiler State
 static char *src;
 static Token curr;
 static bool inside_function = false;
 static char current_namespace[MAX_IDENTIFIER] = "";
-static int line = 1; // Global line counter
+static int line = 1;
 
 // Search Paths
 char search_paths[MAX_SEARCH_PATHS][MAX_STRING_LENGTH];
@@ -152,7 +157,6 @@ void emit(int op) {
         exit(1);
     }
     vm.bytecode[vm.code_size] = op;
-    // Store the line number for this bytecode instruction
     vm.lines[vm.code_size] = curr.line > 0 ? curr.line : line;
     vm.code_size++;
 }
@@ -179,9 +183,7 @@ int find_struct(char *name) {
 
 int find_field(int struct_idx, char *field) {
     for (int i = 0; i < struct_defs[struct_idx].field_count; i++)
-        if (
-            strcmp(struct_defs[struct_idx].fields[i], field) == 0)
-            return i;
+        if (strcmp(struct_defs[struct_idx].fields[i], field) == 0) return i;
     return -1;
 }
 
@@ -263,7 +265,7 @@ void next_token() {
         break;
     }
 
-    curr.line = line; // Record line number for the new token
+    curr.line = line;
     //  byte string
     if (*src == 'b' && *(src + 1) == '"') {
         src += 2;
@@ -286,7 +288,7 @@ void next_token() {
         int brace_depth = 0;
         while (*src) {
             if (*src == '"' && brace_depth == 0) break;
-            if (*src == '\n') line++; // Handle multiline F-strings
+            if (*src == '\n') line++;
             if (*src == '{') brace_depth++;
             else if (*src == '}') { if (brace_depth > 0) brace_depth--; }
             src++;
@@ -346,6 +348,7 @@ void next_token() {
         else curr.type = TK_ID;
         return;
     }
+    // ... string/char handling ...
     if (*src == '"') {
         src++;
         char *start = src;
@@ -457,6 +460,7 @@ bool parse_namespaced_id(char *out_name) {
     return false;
 }
 
+// ... factor, term, additive_expr, relation_expr, expression implementation omitted for brevity (unchanged) ...
 void factor() {
     if (curr.type == TK_NUM) {
         int idx = make_const(curr.val_float);
@@ -568,7 +572,7 @@ void factor() {
         while (*end && braces > 0) {
             if (*end == '{') braces++;
             if (*end == '}') braces--;
-            if (*end == '\n') line++; // Track lines in C blocks
+            if (*end == '\n') line++;
             if (braces > 0) end++;
         }
         int len = (int) (end - start);
@@ -636,15 +640,13 @@ void factor() {
             emit(OP_CAT);
         }
         match(TK_FSTR);
-    }
-    else if (curr.type == TK_BSTR) {
+    } else if (curr.type == TK_BSTR) {
         int id = make_string(curr.text);
         emit(OP_PSH_STR);
         emit(id);
         emit(OP_MK_BYTES);
         match(TK_BSTR);
-    }
-    else if (curr.type == TK_ID) {
+    } else if (curr.type == TK_ID) {
         char name[MAX_IDENTIFIER];
         parse_namespaced_id(name);
         int enum_val = find_enum_val(name);
@@ -754,7 +756,6 @@ void factor() {
     }
 }
 
-// --- Term (Multiplicative) ---
 void term() {
     factor();
     while (curr.type == TK_MUL || curr.type == TK_DIV || curr.type == TK_MOD_OP) {
@@ -773,7 +774,6 @@ void term() {
     }
 }
 
-// --- Additive (Additive) ---
 void additive_expr() {
     term();
     while (curr.type == TK_PLUS || curr.type == TK_MINUS) {
@@ -790,11 +790,9 @@ void additive_expr() {
     }
 }
 
-// --- Relation (Comparisons) ---
 void relation_expr() {
     additive_expr();
     while (curr.type >= TK_LT && curr.type <= TK_NEQ) {
-        // Relational Ops
         MyloTokenType op = curr.type;
         next_token();
         additive_expr();
@@ -1106,10 +1104,10 @@ void parse_struct_literal(int struct_idx) {
 
 void parse_map_literal() {
     match(TK_LBRACE);
-    emit(OP_MAP); // Create map
+    emit(OP_MAP);
 
     while (curr.type != TK_RBRACE && curr.type != TK_EOF) {
-        emit(OP_DUP); // Keep Map Ref on stack for next set
+        emit(OP_DUP);
 
         // Key
         if (curr.type != TK_STR) error("Map keys must be strings");
@@ -1123,8 +1121,8 @@ void parse_map_literal() {
         // Value
         expression();
 
-        emit(OP_ASET); // Map[Key] = Value
-        emit(OP_POP); // ASET returns Value, but we are in literal init, discard it.
+        emit(OP_ASET);
+        emit(OP_POP);
 
         if (curr.type == TK_COMMA) match(TK_COMMA);
     }
@@ -1145,8 +1143,73 @@ void statement() {
         emit(OP_PRN);
     } else if (curr.type == TK_IMPORT) {
         match(TK_IMPORT);
+
+        // --- NATIVE IMPORT HANDLING ---
+        if (curr.type == TK_ID && strcmp(curr.text, "native") == 0) {
+            match(TK_ID);
+
+            if (curr.type != TK_STR) error("Expected filename after 'import native'");
+            char filename[MAX_STRING_LENGTH];
+            strcpy(filename, curr.text);
+            match(TK_STR);
+
+            int std_count = 0;
+            while (std_library[std_count].name != NULL) std_count++;
+
+            int start_ffi_index = ffi_count;
+
+            char *c = read_file(filename);
+            if (!c) {
+                for (int i = 0; i < search_path_count; i++) {
+                    char tmp[MAX_STRING_LENGTH];
+                    sprintf(tmp, "%s/%s", search_paths[i], filename);
+                    c = read_file(tmp);
+                    if (c) break;
+                }
+            }
+            if (!c) error("Cannot find native import '%s'", filename);
+
+            parse_internal(c, true);
+
+            int added_natives = ffi_count - start_ffi_index;
+
+            char lib_name[MAX_STRING_LENGTH];
+            get_lib_name(lib_name, filename);
+
+            printf("Mylo: Loading Native Module '%s'...\n", lib_name);
+            void *lib = load_library(lib_name);
+            if (!lib) {
+                error("Could not load native binary '%s'. Did you compile it with --bind?", lib_name);
+            }
+
+            // Updated Binder Signature: Now takes API struct
+            typedef void (*BindFunc)(VM *, int, MyloAPI *);
+            BindFunc binder = (BindFunc) get_symbol(lib, "mylo_bind_lib");
+
+            if (!binder) {
+                error("Native module '%s' is invalid (missing mylo_bind_lib).", lib_name);
+            }
+
+            // Construct API Bridge
+            MyloAPI api;
+            api.push = vm_push;
+            api.pop = vm_pop;
+            api.make_string = make_string;
+            api.heap_alloc = heap_alloc;
+            api.natives_array = natives; // The HOST natives array
+            api.string_pool = vm.string_pool; // The HOST string pool (for reads)
+            api.heap = vm.heap; // The HOST heap
+
+            // Pass &vm (though mostly unused now due to API), index, and API
+            binder(&vm, std_count + start_ffi_index, &api);
+
+            bound_ffi_count += added_natives;
+
+            return;
+        }
+
         if (curr.type == TK_ID && strcmp(curr.text, "C") == 0) {
-            match(TK_ID); // Consume 'C'
+            match(TK_ID);
 
             if (curr.type != TK_STR) error("Expected string literal after 'import C'");
 
@@ -1156,7 +1219,7 @@ void statement() {
 
             strcpy(c_headers[c_header_count++], curr.text);
             match(TK_STR);
-            return; // Return early, do not proceed to Mylo module import
+            return;
         }
         char f[MAX_STRING_LENGTH];
         strcpy(f, curr.text);
@@ -1211,16 +1274,14 @@ void statement() {
             fprintf(stderr, "Warning: Max search paths reached\n");
         }
     } else if (curr.type == TK_ID && strcmp(curr.text, "C") == 0) {
-        match(TK_ID); // Consume 'C'
+        match(TK_ID);
 
         int ffi_idx = ffi_count++;
         ffi_blocks[ffi_idx].id = ffi_idx;
         ffi_blocks[ffi_idx].arg_count = 0;
 
-        // Force return type to void for statements
         strcpy(ffi_blocks[ffi_idx].return_type, "void");
 
-        // 1. Parse Arguments (Identical to factor logic)
         if (curr.type == TK_LPAREN) {
             match(TK_LPAREN);
             while (curr.type != TK_RPAREN) {
@@ -1240,7 +1301,6 @@ void statement() {
             match(TK_RPAREN);
         }
 
-        // 2. Parse Code Body
         if (curr.type != TK_LBRACE) error("Expected '{' after C arguments");
         char *start = src + 1;
         int braces = 1;
@@ -1258,12 +1318,11 @@ void statement() {
         src = end + 1;
         next_token();
 
-        // 3. Emit
         emit(OP_NATIVE);
         int std_count = 0;
         while (std_library[std_count].name != NULL) std_count++;
         emit(std_count + ffi_idx);
-        emit(OP_POP); // Discard the dummy return value
+        emit(OP_POP);
     } else if (curr.type == TK_VAR) {
         match(TK_VAR);
         char name[MAX_IDENTIFIER];
@@ -1436,7 +1495,7 @@ void statement() {
                     }
                 } else if (curr.type == TK_LBRACKET) {
                     match(TK_LBRACKET);
-                    expression(); // Key/Index
+                    expression();
 
                     if (curr.type == TK_COLON) {
                         match(TK_COLON);
@@ -1485,28 +1544,21 @@ void statement() {
         match(TK_FOREVER);
         match(TK_LBRACE);
 
-        push_loop(); // 1. Register loop for break/continue
+        push_loop();
 
-        int loop_start = vm.code_size; // 2. Remember where we started
+        int loop_start = vm.code_size;
 
-        // 3. Compile Body
         while (curr.type != TK_RBRACE && curr.type != TK_EOF) {
             statement();
         }
         match(TK_RBRACE);
 
-        // 4. Jump back to start
         emit(OP_JMP);
         emit(loop_start);
 
-        // 5. Patch breaks (to end) and continues (to start)
         pop_loop(loop_start, vm.code_size);
-    }
-    // --- UPDATED: Allow empty return (ret) ---
-    else if (curr.type == TK_RET) {
+    } else if (curr.type == TK_RET) {
         match(TK_RET);
-        // If next is '}' or start of new statement/block, push 0 (void)
-        // Simple heuristic: If it's a closing brace, it's definitely void return.
         if (curr.type == TK_RBRACE) {
             emit(OP_PSH_NUM);
             emit(make_const(0.0));
@@ -1519,7 +1571,6 @@ void statement() {
 
 void function() {
     match(TK_FN);
-    // Check if we are calling C
     if (curr.type == TK_ID && strcmp(curr.text, "C") == 0) {
         error("'C' is reserved for executing C Programming language functions");
     }
@@ -1589,6 +1640,161 @@ void parse_internal(char *source, bool is_import) {
 
 void parse(char *source) { parse_internal(source, false); }
 
+// ... generate_binding_c_source and compile_to_c_source omitted for brevity ...
+// (Assume generate_binding_c_source is included from previous turn)
+void generate_binding_c_source(const char *output_filename) {
+    FILE *fp = fopen(output_filename, "w");
+    if (!fp) {
+        printf("Failed to open output file %s\n", output_filename);
+        exit(1);
+    }
+
+    fprintf(fp, "// Generated by Mylo Binding Generator\n");
+    fprintf(fp, "#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n#include <math.h>\n");
+
+    // 1. Enable Binding Mode (Hides VM globals/prototypes)
+    fprintf(fp, "#define MYLO_BINDING_MODE\n");
+
+    // 2. Include Headers
+    fprintf(fp, "\n// --- USER IMPORTS ---\n");
+    for (int i = 0; i < c_header_count; i++) {
+        if (c_headers[i][0] == '<') fprintf(fp, "#include %s\n", c_headers[i]);
+        else fprintf(fp, "#include \"%s\"\n", c_headers[i]);
+    }
+
+    fprintf(fp, "#include \"vm.h\"\n");
+    fprintf(fp, "#include \"mylolib.h\"\n\n");
+
+    // 3. Define the Bridge Pointers
+    fprintf(fp, "// --- HOST API BRIDGE ---\n");
+    fprintf(fp, "void (*host_vm_push)(double, int);\n");
+    fprintf(fp, "double (*host_vm_pop)();\n");
+    fprintf(fp, "int (*host_make_string)(const char*);\n");
+    fprintf(fp, "int (*host_heap_alloc)(int);\n");
+    fprintf(fp, "NativeFunc* host_natives_array;\n");
+    fprintf(fp, "double* host_heap_ptr;\n");
+
+    // 4. Define Redirect Macros (So user code uses the pointers)
+    fprintf(fp, "#define vm_push (*host_vm_push)\n");
+    fprintf(fp, "#define vm_pop (*host_vm_pop)\n");
+    fprintf(fp, "#define make_string (*host_make_string)\n");
+    fprintf(fp, "#define heap_alloc (*host_heap_alloc)\n");
+    fprintf(fp, "#define natives host_natives_array\n");
+
+    // Structs
+    for (int i = 0; i < struct_count; i++) {
+        fprintf(fp, "typedef struct { ");
+        for (int j = 0; j < struct_defs[i].field_count; j++) {
+            fprintf(fp, "double %s; ", struct_defs[i].fields[j]);
+        }
+        fprintf(fp, "} c_%s;\n", struct_defs[i].name);
+    }
+    fprintf(fp, "\n");
+
+    // User Functions (FFI Blocks)
+    for (int i = 0; i < ffi_count; i++) {
+        char *ret_type = ffi_blocks[i].return_type;
+        if (strcmp(ret_type, "num") == 0) fprintf(fp, "double");
+        else if (strcmp(ret_type, "string") == 0) fprintf(fp, "char*");
+        else if (strcmp(ret_type, "void") == 0) fprintf(fp, "void");
+        else if (strlen(ret_type) > 0) fprintf(fp, "c_%s", ret_type);
+        else fprintf(fp, "MyloReturn");
+
+        fprintf(fp, " __mylo_user_%d(", i);
+        for (int a = 0; a < ffi_blocks[i].arg_count; a++) {
+             char *type = ffi_blocks[i].args[a].type;
+             if (strcmp(type, "str") == 0 || strcmp(type, "string") == 0) fprintf(fp, "char* %s", ffi_blocks[i].args[a].name);
+             else fprintf(fp, "double %s", ffi_blocks[i].args[a].name);
+             if (a < ffi_blocks[i].arg_count - 1) fprintf(fp, ", ");
+        }
+        fprintf(fp, ") {\n%s\n}\n\n", ffi_blocks[i].code_body);
+    }
+
+    // Wrappers
+    for (int i = 0; i < ffi_count; i++) {
+        fprintf(fp, "void __wrapper_%d(VM* vm) {\n", i);
+        // Arguments
+        for (int a = ffi_blocks[i].arg_count - 1; a >= 0; a--) {
+            fprintf(fp, "    double _raw_%s = vm_pop();\n", ffi_blocks[i].args[a].name);
+        }
+
+        char *ret_type = ffi_blocks[i].return_type;
+        if (strcmp(ret_type, "num") == 0) fprintf(fp, "    double res = __mylo_user_%d(", i);
+        else if (strcmp(ret_type, "void") == 0) fprintf(fp, "    __mylo_user_%d(", i);
+        else if (strcmp(ret_type, "string") == 0) fprintf(fp, "    char* s = __mylo_user_%d(", i);
+        else if (strlen(ret_type) > 0) fprintf(fp, "    c_%s val = __mylo_user_%d(", ret_type, i);
+        else fprintf(fp, "    MyloReturn res = __mylo_user_%d(", i);
+
+        // Call User Func
+        for (int a = 0; a < ffi_blocks[i].arg_count; a++) {
+            char *type = ffi_blocks[i].args[a].type;
+            if (strcmp(type, "str") == 0 || strcmp(type, "string") == 0)
+                fprintf(fp, "vm->string_pool[(int)_raw_%s]", ffi_blocks[i].args[a].name);
+            else fprintf(fp, "_raw_%s", ffi_blocks[i].args[a].name);
+            if (a < ffi_blocks[i].arg_count - 1) fprintf(fp, ", ");
+        }
+        fprintf(fp, ");\n");
+
+        // Return Values
+        if (strcmp(ret_type, "num") == 0) fprintf(fp, "    vm_push(res, T_NUM);\n");
+        else if (strcmp(ret_type, "void") == 0) fprintf(fp, "    vm_push(0.0, T_NUM);\n");
+        else if (strcmp(ret_type, "string") == 0) fprintf(fp, "    int id = make_string(s);\n    vm_push((double)id, T_STR);\n");
+        else if (strlen(ret_type) > 0) {
+            int st_idx = -1;
+            for (int s = 0; s < struct_count; s++) if (strcmp(struct_defs[s].name, ret_type) == 0) st_idx = s;
+            if (st_idx != -1) {
+                // Use host_heap_ptr directly
+                fprintf(fp, "    int ptr = heap_alloc(%d + HEAP_HEADER_STRUCT);\n", struct_defs[st_idx].field_count);
+                fprintf(fp, "    host_heap_ptr[ptr + HEAP_OFFSET_TYPE] = %d.0;\n", st_idx);
+                for (int f = 0; f < struct_defs[st_idx].field_count; f++) {
+                    fprintf(fp, "    host_heap_ptr[ptr + HEAP_HEADER_STRUCT + %d] = val.%s;\n", f, struct_defs[st_idx].fields[f]);
+                }
+                fprintf(fp, "    vm_push((double)ptr, T_OBJ);\n");
+            }
+        } else fprintf(fp, "    vm_push(res.value, res.type);\n");
+
+        fprintf(fp, "}\n");
+    }
+
+    // 5. Undefine Macros before binder to prevent 'api->make_string' expansion errors
+    fprintf(fp, "\n// --- CLEANUP MACROS ---\n");
+    fprintf(fp, "#undef vm_push\n");
+    fprintf(fp, "#undef vm_pop\n");
+    fprintf(fp, "#undef make_string\n");
+    fprintf(fp, "#undef heap_alloc\n");
+    fprintf(fp, "#undef natives\n");
+
+    // 6. Binder Function
+    fprintf(fp, "\n#ifdef _WIN32\n");
+    fprintf(fp, "__declspec(dllexport) void mylo_bind_lib(VM* vm, int start_index, MyloAPI* api) {\n");
+    fprintf(fp, "#else\n");
+    fprintf(fp, "void mylo_bind_lib(VM* vm, int start_index, MyloAPI* api) {\n");
+    fprintf(fp, "#endif\n");
+
+    // Initialize Bridges
+    fprintf(fp, "    host_vm_push = api->push;\n");
+    fprintf(fp, "    host_vm_pop = api->pop;\n");
+    fprintf(fp, "    host_make_string = api->make_string;\n");
+    fprintf(fp, "    host_heap_alloc = api->heap_alloc;\n");
+    fprintf(fp, "    host_natives_array = api->natives_array;\n");
+    fprintf(fp, "    host_heap_ptr = api->heap;\n");
+
+    // Bind Functions using the pointer directly (macro is undefined now)
+    for(int i=0; i<ffi_count; i++) {
+        fprintf(fp, "    host_natives_array[start_index + %d] = __wrapper_%d;\n", i, i);
+    }
+
+    fprintf(fp, "    printf(\"Mylo: Bound %d native functions starting at ID %%d\\n\", start_index);\n", ffi_count);
+    fprintf(fp, "}\n");
+
+    fclose(fp);
+    printf("Binding source generated at %s\n", output_filename);
+
+    printf("\nIMPORTANT: Compile the binding WITHOUT linking vm.c or mylolib.c!\n");
+    printf("Example:\n");
+    printf("cc -shared -fPIC %s -I. -o test_lib.so\n", output_filename);
+}
+
 void compile_to_c_source(const char *output_filename) {
     FILE *fp = fopen(output_filename, "w");
     if (!fp) {
@@ -1599,11 +1805,8 @@ void compile_to_c_source(const char *output_filename) {
     fprintf(fp, "// Generated by Mylo Compiler\n");
     fprintf(fp, "#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n#include <math.h>\n");
 
-    // --- USER C IMPORTS ---
-    // Injects headers captured from 'import C "header.h"'
     fprintf(fp, "\n// --- USER C IMPORTS ---\n");
     for (int i = 0; i < c_header_count; i++) {
-        // If it starts with '<', assume system header (e.g. <time.h>), otherwise quote it
         if (c_headers[i][0] == '<') {
             fprintf(fp, "#include %s\n", c_headers[i]);
         } else {
@@ -1615,7 +1818,6 @@ void compile_to_c_source(const char *output_filename) {
     fprintf(fp, "#include \"vm.h\"\n");
     fprintf(fp, "#include \"mylolib.h\"\n\n");
 
-    // GENERATE C STRUCTS FROM MYLO STRUCTS
     fprintf(fp, "// --- GENERATED C STRUCTS ---\n");
     for (int i = 0; i < struct_count; i++) {
         fprintf(fp, "typedef struct { ");
@@ -1626,15 +1828,13 @@ void compile_to_c_source(const char *output_filename) {
     }
     fprintf(fp, "\n");
 
-    // EMIT USER BLOCKS
     fprintf(fp, "// --- USER INLINE C BLOCKS ---\n");
     for (int i = 0; i < ffi_count; i++) {
         char *ret_type = ffi_blocks[i].return_type;
 
-        // Determine C return type
         if (strcmp(ret_type, "num") == 0) fprintf(fp, "double");
         else if (strcmp(ret_type, "string") == 0) fprintf(fp, "char*");
-        else if (strcmp(ret_type, "void") == 0) fprintf(fp, "void"); // Handle void
+        else if (strcmp(ret_type, "void") == 0) fprintf(fp, "void");
         else if (strlen(ret_type) > 0) fprintf(fp, "c_%s", ret_type);
         else fprintf(fp, "MyloReturn");
 
@@ -1651,21 +1851,18 @@ void compile_to_c_source(const char *output_filename) {
         fprintf(fp, ") {\n%s\n}\n\n", ffi_blocks[i].code_body);
     }
 
-    // EMIT WRAPPERS
     fprintf(fp, "\n// --- NATIVE WRAPPERS ---\n");
     int std_count = 0;
     while (std_library[std_count].name != NULL) std_count++;
 
     for (int i = 0; i < ffi_count; i++) {
         fprintf(fp, "void __wrapper_%d(VM* vm) {\n", i);
-        // Pop args in reverse order
         for (int a = ffi_blocks[i].arg_count - 1; a >= 0; a--) {
             fprintf(fp, "    double _raw_%s = vm_pop();\n", ffi_blocks[i].args[a].name);
         }
 
         char *ret_type = ffi_blocks[i].return_type;
 
-        // Call the user function (handle void explicitly to avoid assignment errors)
         if (strcmp(ret_type, "num") == 0) {
             fprintf(fp, "    double res = __mylo_user_%d(", i);
         } else if (strcmp(ret_type, "void") == 0) {
@@ -1678,7 +1875,6 @@ void compile_to_c_source(const char *output_filename) {
             fprintf(fp, "    MyloReturn res = __mylo_user_%d(", i);
         }
 
-        // Pass arguments
         for (int a = 0; a < ffi_blocks[i].arg_count; a++) {
             char *type = ffi_blocks[i].args[a].type;
             if (strcmp(type, "str") == 0 || strcmp(type, "string") == 0) {
@@ -1690,11 +1886,10 @@ void compile_to_c_source(const char *output_filename) {
         }
         fprintf(fp, ");\n");
 
-        // Push result back to VM stack
         if (strcmp(ret_type, "num") == 0) {
             fprintf(fp, "    vm_push(res, T_NUM);\n");
         } else if (strcmp(ret_type, "void") == 0) {
-            fprintf(fp, "    vm_push(0.0, T_NUM);\n"); // Push dummy for OP_POP
+            fprintf(fp, "    vm_push(0.0, T_NUM);\n");
         } else if (strcmp(ret_type, "string") == 0) {
             fprintf(fp, "    int id = make_string(s);\n    vm_push((double)id, T_STR);\n");
         } else if (strlen(ret_type) > 0) {
@@ -1717,7 +1912,6 @@ void compile_to_c_source(const char *output_filename) {
         fprintf(fp, "}\n");
     }
 
-    // --- STATIC DATA ---
     fprintf(fp, "\n// --- STATIC DATA ---\n");
     fprintf(fp, "int static_bytecode[] = {");
     for (int i = 0; i < vm.code_size; i++) fprintf(fp, "%d,", vm.bytecode[i]);
@@ -1747,7 +1941,6 @@ void compile_to_c_source(const char *output_filename) {
         fprintf(fp, "const char** static_strings = NULL;\n");
     }
 
-    // --- MAIN ---
     fprintf(fp, "\n// --- MAIN ---\nint main() {\n    vm_init();\n");
     fprintf(fp, "    memcpy(vm.bytecode, static_bytecode, sizeof(static_bytecode));\n");
     fprintf(fp, "    memcpy(vm.lines, static_lines, sizeof(static_lines));\n");
@@ -1787,6 +1980,7 @@ void mylo_reset() {
     func_count = 0;
     struct_count = 0;
     ffi_count = 0;
+    bound_ffi_count = 0;
     inside_function = false;
     current_namespace[0] = '\0';
     enum_entry_count = 0;
