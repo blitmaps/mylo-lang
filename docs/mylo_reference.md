@@ -616,6 +616,63 @@ C() {
 }
 ```
 
+## Dynamically Running Native Code - C Bindings
+
+### Building a Dynamic C Library, to use in the Mylo Interpreter
+
+Building the mylo application hinders the ability the test and extend an
+intpreted Mylo application. We can build a binding to allow Mylo to load
+compiled C code and use them. Here is a simple example included below.
+
+You will need two files: the Library (test_lib.mylo) containing the C code, and the App (test_app.mylo) that imports and runs it.
+
+### 1. The Library (test_lib.mylo)
+This file defines the C functionality we want to share. It is a regular Mylo file, 
+but had inline C.
+
+```javascript
+fn add(a: num, b: num) {
+    var r = C(a: num = a, b: num = b) -> num {
+        return a + b;
+    }
+    ret r
+}
+```
+
+### 1.2 Create a Shared Library
+
+#### Generate the C-code for compilation
+```shell
+# This outputs test_lib.mylo_bind.c
+mylo --bind test_lib.mylo  
+```
+
+#### Generate the shared library
+The shared libary must have the same name as our mylo file (test_lib). This
+will be dynamically loaded by the interpreter. We *must* include the header files for Mylo
+```shell
+cc -shared -fPIC test_lib.mylo_bind.c -Isrc -o test_lib.so  
+```
+
+### 2.0 Importing our binding in Mylo
+The `native` keyword tells Mylo to load a shared object at runtime.
+```javascript
+// Native code is imported
+import native "test_lib.mylo"
+
+// The 'add' function is our native function
+print(add(10, 20))
+```
+
+#### Output
+```shell
+> mylo test_app.mylo
+
+Mylo: Loading Native Module './test_lib.so'...
+Mylo: Bound 1 native functions starting at ID 14
+30 # <-- add(10, 20)
+```
+
 ### Standard Library
 The standard functions are still rather limited, but can do file manipulation, array insights and some maths.
 This is actively being developed to add more power to the VM.
