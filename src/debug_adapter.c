@@ -297,22 +297,47 @@ void start_debug_adapter(const char* filename, char* source_content) {
                 char full[8250];
                 sprintf(full, "{\"variables\": %s}", json);
                 send_response(seq, command, full);
-            }
-            if (varRef == 1) {
-                char json[MAX_PACKET_SIZE] = "[";
+            }if (varRef == 1) { // GLOBALS
+                char json[8192] = "[";
                 for(int i=0; i<global_count; i++) {
                     if (i > 0) strcat(json, ",");
-                    char item[256];
-                    double val = vm.globals[globals[i].addr];
-                    snprintf(item, 256, "{\"name\": \"%s\", \"value\": \"%g\", \"variablesReference\": 0}", globals[i].name, val);
+                    char item[512];
+
+                    int addr = globals[i].addr;
+                    double val = vm.globals[addr];
+                    int type = vm.global_types[addr]; // <--- CHECK TYPE
+
+                    if (type == T_NUM) {
+                        snprintf(item, 512, "{\"name\": \"%s\", \"value\": \"%g\", \"variablesReference\": 0}",
+                                 globals[i].name, val);
+                    }
+                    else if (type == T_STR) {
+                        // Look up the string in the pool using the index 'val'
+                        // Escape quotes for JSON safety
+                        snprintf(item, 512, "{\"name\": \"%s\", \"value\": \"\\\"%s\\\"\", \"variablesReference\": 0}",
+                                 globals[i].name, vm.string_pool[(int)val]);
+                    }
+                    else if (type == T_OBJ) {
+                         // Check specifically for Bytes or Arrays if you want better detail
+                         int ptr = (int)val;
+                         int objType = (int)vm.heap[ptr]; // HEAP_OFFSET_TYPE is 0
+
+                         if (objType == -2) { // TYPE_BYTES
+                             snprintf(item, 512, "{\"name\": \"%s\", \"value\": \"[Bytes]\", \"variablesReference\": 0}", globals[i].name);
+                         } else {
+                             snprintf(item, 512, "{\"name\": \"%s\", \"value\": \"[Object]\", \"variablesReference\": 0}", globals[i].name);
+                         }
+                    }
+                    else {
+                        // Fallback
+                        snprintf(item, 512, "{\"name\": \"%s\", \"value\": \"unknown\", \"variablesReference\": 0}", globals[i].name);
+                    }
                     strcat(json, item);
                 }
                 strcat(json, "]");
                 char full[8250];
                 sprintf(full, "{\"variables\": %s}", json);
                 send_response(seq, command, full);
-            } else {
-                send_response(seq, command, "{\"variables\": []}");
             }
         }
         else if (strcmp(command, "next") == 0 || strcmp(command, "stepIn") == 0) {
