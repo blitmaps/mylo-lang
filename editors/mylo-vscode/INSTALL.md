@@ -1,5 +1,12 @@
 #### Install from Extension using VSIX Method (Recommended)
 
+##### Configure extension.js
+There is an executable path in extension.js to configure the
+location of the mylo executable
+````javascript
+const myloPath = '/path/to/cmake-build-debug/mylo';
+````
+
 ##### Install the packaging tool (requires Node.js/npm):
 
 ````Bash

@@ -20,6 +20,25 @@ typedef struct {
     bool is_array;
 } LocalSymbol;
 
+typedef struct {
+    char name[MAX_IDENTIFIER];
+    int stack_offset; // Offset relative to FP
+    int start_ip;     // Variable becomes valid here
+    int end_ip;       // Variable dies here
+} DebugSym;
+
+typedef struct {
+    char name[MAX_IDENTIFIER];
+    int addr;
+} FuncDebugInfo;
+
+extern FuncDebugInfo funcs[MAX_GLOBALS];
+extern int func_count;
+
+#define MAX_DEBUG_SYMBOLS 4096
+extern DebugSym debug_symbols[MAX_DEBUG_SYMBOLS];
+extern int debug_symbol_count;
+
 // Expose the tables to the Debugger
 extern Symbol globals[MAX_GLOBALS];
 extern int global_count;

@@ -97,10 +97,10 @@ int global_count = 0;
 LocalSymbol locals[MAX_GLOBALS];
 int local_count = 0;
 
-struct {
-    char name[MAX_IDENTIFIER];
-    int addr;
-} funcs[MAX_GLOBALS];
+DebugSym debug_symbols[MAX_DEBUG_SYMBOLS];
+int debug_symbol_count = 0;
+
+FuncDebugInfo funcs[MAX_GLOBALS];
 
 int func_count = 0;
 
@@ -830,16 +830,22 @@ int alloc_var(bool is_loc, char *name, int type_id, bool is_array) {
         locals[local_count].offset = local_count;
         locals[local_count].type_id = type_id;
         locals[local_count].is_array = is_array;
+        if (debug_symbol_count < MAX_DEBUG_SYMBOLS) {
+            if (name) strcpy(debug_symbols[debug_symbol_count].name, name);
+            debug_symbols[debug_symbol_count].stack_offset = local_count;
+            debug_symbols[debug_symbol_count].start_ip = vm.code_size;
+            debug_symbols[debug_symbol_count].end_ip = -1; // Unknown yet
+            debug_symbol_count++;
+        }
         return local_count++;
-    } else {
-        char m[MAX_IDENTIFIER * 2];
-        get_mangled_name(m, name);
-        if (name) strcpy(globals[global_count].name, m);
-        globals[global_count].addr = global_count;
-        globals[global_count].type_id = type_id;
-        globals[global_count].is_array = is_array;
-        return global_count++;
     }
+    char m[MAX_IDENTIFIER * 2];
+    get_mangled_name(m, name);
+    if (name) strcpy(globals[global_count].name, m);
+    globals[global_count].addr = global_count;
+    globals[global_count].type_id = type_id;
+    globals[global_count].is_array = is_array;
+    return global_count++;
 }
 
 void for_statement() {
@@ -1578,10 +1584,16 @@ void function() {
     emit(OP_JMP);
     int p = vm.code_size;
     emit(0);
+
+
     char m[MAX_IDENTIFIER * 2];
     get_mangled_name(m, name);
     strcpy(funcs[func_count].name, m);
     funcs[func_count++].addr = vm.code_size;
+
+    // Capture the index where this function's locals start in our debug table
+    int start_debug_idx = debug_symbol_count;
+
     bool ps = inside_function;
     int pl = local_count;
     inside_function = true;
@@ -1608,8 +1620,8 @@ void function() {
         alloc_var(true, arg_name, arg_type, arg_arr);
         if (curr.type == TK_COMMA) match(TK_COMMA);
     }
-    match(TK_RPAREN);
 
+    match(TK_RPAREN);
     match(TK_LBRACE);
     while (curr.type != TK_RBRACE) statement();
     match(TK_RBRACE);
@@ -1618,6 +1630,14 @@ void function() {
     emit(z);
     emit(OP_RET);
     vm.bytecode[p] = vm.code_size;
+
+    int func_end_ip = vm.code_size;
+    for(int i = start_debug_idx; i < debug_symbol_count; i++) {
+        if (debug_symbols[i].end_ip == -1) {
+            debug_symbols[i].end_ip = func_end_ip;
+        }
+    }
+
     inside_function = ps;
     local_count = pl;
 }
@@ -1629,7 +1649,7 @@ void parse_internal(char *source, bool is_import) {
     // FIX: Save the current line number before parsing the import
     int saved_line = line;
     if (is_import) line = 1; // Reset for the new file
-
+    int start_debug_idx = debug_symbol_count; // Track main locals
     src = source;
     next_token();
     while (curr.type != TK_EOF) {
@@ -1637,6 +1657,13 @@ void parse_internal(char *source, bool is_import) {
         else statement();
     }
     if (!is_import) emit(OP_HLT);
+
+    int end_ip = vm.code_size;
+    for(int i = start_debug_idx; i < debug_symbol_count; i++) {
+        if (debug_symbols[i].end_ip == -1) {
+            debug_symbols[i].end_ip = end_ip;
+        }
+    }
 
     src = os;
     curr = oc;

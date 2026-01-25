@@ -9,7 +9,7 @@ function activate(context) {
             // CONFIGURATION: Point this to your compiled mylo executable
             // ---------------------------------------------------------
             // Tip: Use an absolute path for development
-            const myloPath = '/path/to/cmake-build-debug/mylo';
+            const myloPath = '/home/brad/repos/mylo-lang/cmake-build-debug/mylo';
 
             // We expect the launch.json to provide the "program"
             const program = session.configuration.program;

@@ -8,7 +8,22 @@
 #include "vm.h"
 #include "compiler.h"
 
+#define MAX_PACKET_SIZE 8192
 static char current_source_path[4096];
+
+const char* get_function_name(int ip) {
+    // Find the function with the highest address that is still <= ip
+    const char* best_name = "main";
+    int best_addr = -1;
+
+    for(int i=0; i<func_count; i++) {
+        if (funcs[i].addr <= ip && funcs[i].addr > best_addr) {
+            best_name = funcs[i].name;
+            best_addr = funcs[i].addr;
+        }
+    }
+    return best_name;
+}
 
 // --- JSON Helpers ---
 
@@ -96,7 +111,7 @@ void start_debug_adapter(const char* filename) {
     MyloConfig.debug_mode = true;
     MyloConfig.print_callback = debug_print_callback;
 
-    char buffer[8192];
+    char buffer[MAX_PACKET_SIZE];
 
     while (1) {
         int content_len = 0;
@@ -167,21 +182,105 @@ void start_debug_adapter(const char* filename) {
         else if (strcmp(command, "threads") == 0) {
             send_response(seq, command, "{\"threads\": [{\"id\": 1, \"name\": \"Main Thread\"}]}");
         }
-        else if (strcmp(command, "stackTrace") == 0) {
-            int line = vm.lines[vm.ip];
-            char buf[1024];
-            snprintf(buf, 1024, "{\"totalFrames\": 1, \"stackFrames\": [{\"id\": 0, \"name\": \"main\", \"line\": %d, \"column\": 1, \"source\": {\"name\": \"Source\", \"path\": \"%s\"}}]}", line, current_source_path);
-            send_response(seq, command, buf);
-        }
         else if (strcmp(command, "scopes") == 0) {
-            send_response(seq, command, "{\"scopes\": [{\"name\": \"Globals\", \"variablesReference\": 1, \"expensive\": false}]}");
+            // Return Locals (2) and Globals (1)
+            send_response(seq, command,
+                "{\"scopes\": ["
+                "{\"name\": \"Locals\", \"variablesReference\": 2, \"expensive\": false},"
+                "{\"name\": \"Globals\", \"variablesReference\": 1, \"expensive\": false}"
+                "]}");
+        }
+        else if (strcmp(command, "stackTrace") == 0) {
+            // DYNAMIC STACK TRACE GENERATION
+            char json[8192] = "[";
+            int frame_id = 0;
+
+            // Start at current state
+            int current_fp = vm.fp;
+            int current_ip = vm.ip;
+
+            // Safety limit to prevent infinite loops on corrupted stacks
+            while (frame_id < 20) {
+                if (frame_id > 0) strcat(json, ",");
+
+                int line = vm.lines[current_ip];
+                const char* name = get_function_name(current_ip);
+
+                char frame[512];
+                snprintf(frame, 512,
+                    "{\"id\": %d, \"name\": \"%s\", \"line\": %d, \"column\": 1, \"source\": {\"name\": \"Source\", \"path\": \"%s\"}}",
+                    frame_id, name, line, current_source_path);
+                strcat(json, frame);
+
+                // WALK UP THE STACK
+                // In Mylo: Saved FP is at [FP-1], Saved IP is at [FP-2]
+                // If FP is -1 or 0, we are at the bottom (main script body)
+                if (current_fp <= 0) break;
+
+                int saved_fp = (int)vm.stack[current_fp - 1];
+                int saved_ip = (int)vm.stack[current_fp - 2];
+
+                // Sanity check to ensure we are going "up" (stack grows down/up depending on arch, but indexes usually decrease or match valid ranges)
+                if (saved_fp >= current_fp && frame_id > 0) break; // Infinite recursion guard or garbage
+
+                current_fp = saved_fp;
+                current_ip = saved_ip;
+                frame_id++;
+            }
+            strcat(json, "]");
+
+            char full[8200];
+            snprintf(full, 8200, "{\"totalFrames\": %d, \"stackFrames\": %s}", frame_id + 1, json);
+            send_response(seq, command, full);
         }
         else if (strcmp(command, "variables") == 0) {
             char* ref_ptr = strstr(body, "\"variablesReference\":");
             int varRef = ref_ptr ? atoi(ref_ptr + 21) : 0;
+            if (varRef == 2) { // LOCALS
+                char json[MAX_PACKET_SIZE] = "[";
+                bool first = true;
 
+                // DIAGNOSTIC LOG (Check Debug Console in VSCode)
+                fprintf(stderr, "[Debug] Scanning Locals for IP: %d (FP: %d, SP: %d)\n", vm.ip, vm.fp, vm.sp);
+
+                for(int i=0; i<debug_symbol_count; i++) {
+                    DebugSym* sym = &debug_symbols[i];
+
+                    // Filter: Variable must be alive at this IP
+                    if (vm.ip >= sym->start_ip && vm.ip <= sym->end_ip) {
+
+                        int stack_idx = vm.fp + sym->stack_offset;
+
+                        // DIAGNOSTIC: Print found candidates
+                        fprintf(stderr, "  > Match: %s (StackIdx: %d)\n", sym->name, stack_idx);
+
+                        if (stack_idx <= vm.sp) {
+                            if (!first) strcat(json, ",");
+                            first = false;
+
+                            char item[512];
+                            double val = vm.stack[stack_idx];
+                            int type = vm.stack_types[stack_idx];
+
+                            if (type == T_NUM) {
+                                snprintf(item, 512, "{\"name\": \"%s\", \"value\": \"%g\", \"variablesReference\": 0}", sym->name, val);
+                            } else if (type == T_STR) {
+                                // Simple escape for quotes
+                                snprintf(item, 512, "{\"name\": \"%s\", \"value\": \"\\\"string...\\\"\", \"variablesReference\": 0}", sym->name);
+                            } else {
+                                snprintf(item, 512, "{\"name\": \"%s\", \"value\": \"[Object]\", \"variablesReference\": 0}", sym->name);
+                            }
+                            strcat(json, item);
+                        }
+                    }
+                }
+                strcat(json, "]");
+                char full[8250];
+                sprintf(full, "{\"variables\": %s}", json);
+                send_response(seq, command, full);
+            }
             if (varRef == 1) {
-                char json[8192] = "[";
+                char json[MAX_PACKET_SIZE] = "[";
                 for(int i=0; i<global_count; i++) {
                     if (i > 0) strcat(json, ",");
                     char item[256];
@@ -208,6 +307,54 @@ void start_debug_adapter(const char* filename) {
         else if (strcmp(command, "disconnect") == 0) {
             send_response(seq, command, "{}");
             exit(0);
+        }
+        else if (strcmp(command, "variables") == 0) {
+            char* ref_ptr = strstr(body, "\"variablesReference\":");
+            int varRef = ref_ptr ? atoi(ref_ptr + 21) : 0;
+
+            char json[MAX_PACKET_SIZE] = "[";
+            bool first = true;
+
+            if (varRef == 1) {
+                // ... GLOBALS logic (unchanged) ...
+            }
+            else if (varRef == 2) {
+                // --- LOCALS ---
+                for(int i=0; i<debug_symbol_count; i++) {
+                    DebugSym* sym = &debug_symbols[i];
+
+                    // Check if variable is alive at current IP
+                    if (vm.ip >= sym->start_ip && vm.ip <= sym->end_ip) {
+
+                        // Calculate absolute stack address
+                        // Local Offset is relative to FP
+                        int stack_idx = vm.fp + sym->stack_offset;
+
+                        if (stack_idx <= vm.sp) { // Sanity check
+                            if (!first) strcat(json, ",");
+                            first = false;
+
+                            char item[256];
+                            double val = vm.stack[stack_idx];
+                            int type = vm.stack_types[stack_idx];
+
+                            if (type == T_NUM) {
+                                snprintf(item, 256, "{\"name\": \"%s\", \"value\": \"%g\", \"variablesReference\": 0}", sym->name, val);
+                            } else if (type == T_STR) {
+                                snprintf(item, 256, "{\"name\": \"%s\", \"value\": \"\\\"%s\\\"\", \"variablesReference\": 0}", sym->name, vm.string_pool[(int)val]);
+                            } else {
+                                snprintf(item, 256, "{\"name\": \"%s\", \"value\": \"[Object]\", \"variablesReference\": 0}", sym->name);
+                            }
+                            strcat(json, item);
+                        }
+                    }
+                }
+            }
+
+            strcat(json, "]");
+            char full[8250];
+            sprintf(full, "{\"variables\": %s}", json);
+            send_response(seq, command, full);
         }
         else {
             send_response(seq, command, "{}");
