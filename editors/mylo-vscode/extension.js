@@ -19,10 +19,14 @@ function activate(context) {
                 return undefined;
             }
 
+            const envConfig = session.configuration.env || {};
+            const spawnedEnv = { ...process.env, ...envConfig };
+            
             // This launches:  ./mylo --debug /path/to/file.mylo
             return new vscode.DebugAdapterExecutable(
                 myloPath,
-                ['--debug', program]
+                ['--debug', program],
+                { env: spawnedEnv }
             );
         }
     }));

@@ -1,7 +1,7 @@
 {
   "name": "mylo-debug",
   "displayName": "Mylo Debugger",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "publisher": "mylo-lang",
   "engines": {
     "vscode": "^1.60.0"
@@ -43,7 +43,12 @@
                 "type": "string",
                 "description": "Absolute path to a mylo file",
                 "default": "${file}"
-              }
+                },
+              "env": {
+                "type": "object",
+                "description": "Environment variables to pass to the program",
+                "default": {}
+                }
             }
           }
         }

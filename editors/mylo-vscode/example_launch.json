@@ -9,7 +9,11 @@
       "type": "mylo",
       "name": "Debug Mylo File",
       "request": "launch",
-      "program": "${file}"
+      "program": "${file}",
+      "env": {
+        // Adjust this path to match where 'libraylib.so' actually lives
+        "LD_LIBRARY_PATH": "${workspaceFolder}/raylib-5.5/build/raylib:${env:LD_LIBRARY_PATH}"
+      }
     }
   ]
 }
