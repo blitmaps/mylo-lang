@@ -28,6 +28,8 @@ typedef struct {
     bool print_to_memory;
     // DAP mode
     bool debug_mode;
+    // Disables DLOpen to allow for c-generation
+    bool build_mode;
     // Function pointer for printer overloading
     void (*print_callback)(const char *);
     void (*error_callback)(const char*);

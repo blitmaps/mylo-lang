@@ -71,7 +71,8 @@ int main(int argc, char** argv) {
         else if (strcmp(argv[i], "--debug") == 0) debug_mode = true;
         else fn = argv[i];
     }
-
+    // Disable dlopen
+    MyloConfig.build_mode = build_mode;
     if(!fn) { printf("No input file provided.\n"); return 1; }
 
     char* content = read_file(fn);
