@@ -1,18 +1,25 @@
-## Install the Extension
-VS Code looks for extensions in a specific folder. The easiest way to install a development extension is to create a generic symbolic link (shortcut).
+#### Install from Extension using VSIX Method (Recommended)
 
-Navigate to your `~/.vscode/extensions/` folder (create it if it doesn't exist).
+##### Install the packaging tool (requires Node.js/npm):
 
-Linux/Mac: `cd ~/.vscode/extensions`
+````Bash
+sudo npm install -g vsce
+````
 
-Windows: `cd %USERPROFILE%\.vscode\extensions`
+##### Generating a package
+Go to the extension source folder (mylo-vscode) and run:
 
-### Link your folder:
+````Bash
+vsce package
+````
+(If it complains about a missing Package, README or LICENSE, just say continue 'Y')
 
-Linux/Mac: `ln -s /path/to/mylo-vscode mylo-debug`
 
-Windows: `mklink /D mylo-debug C:\path\to\mylo-vscode`
+##### Install it
 
-(Alternatively, you can just copy the whole mylo-vscode folder into the extensions directory).
+Run this command (using the code command for official VS Code):
 
-Restart VS Code.
+````Bash
+code --install-extension mylo-debug-x.y.z.vsix
+````
+Verify: Restart VS Code and check the Extensions list (Ctrl+Shift+X). You should see it there.
