@@ -3,10 +3,12 @@
 #include <string.h>
 #include <stdbool.h>
 #include <stdarg.h>
-#include <ctype.h>          // <--- Added for isdigit
+#include <ctype.h>
 #include "debug_adapter.h"
 #include "vm.h"
-#include "compiler.h"       // <--- Now provides 'Symbol' and 'globals'
+#include "compiler.h"
+
+static char current_source_path[4096];
 
 // --- JSON Helpers ---
 
@@ -30,8 +32,8 @@ void send_response(int seq, const char* command, const char* body_json) {
 }
 
 void debug_print_callback(const char* msg) {
-    // Send standard output event to editor console
     char buf[1024];
+    // JSON escape newlines slightly for safety, though robust escaping needs a library
     snprintf(buf, 1024, "{\"category\": \"stdout\", \"output\": \"%s\\n\"}", msg);
     send_event("output", buf);
 }
@@ -41,72 +43,73 @@ bool is_paused = false;
 int breakpoints[100];
 int bp_count = 0;
 
-void handle_step(int seq) {
-    // Perform one VM step
-    int op = vm_step(false);
+// --- EXECUTION LOOP ---
+void run_debug_loop(bool step_mode) {
+    is_paused = false;
 
-    if (op == -1) { // OP_HLT
-        send_event("terminated", "{}");
-        exit(0);
-    }
+    // Log why we are running
+    fprintf(stderr, "[MyloDebug] Running... (StepMode: %s)\n", step_mode ? "YES" : "NO");
 
-    // Check if we hit a breakpoint AFTER the step
-    bool hit = false;
-    for(int i=0; i<bp_count; i++) {
-        // Simple mapping: Bytecode Index -> Source Line
-        // If the current IP corresponds to a line with a breakpoint...
-        if (vm.lines[vm.ip] == breakpoints[i]) {
-            hit = true;
-            break;
+    while (vm.ip < vm.code_size) {
+        int prev_line = vm.lines[vm.ip];
+
+        // Execute one instruction
+        int op = vm_step(false);
+        if (op == -1) {
+            send_event("terminated", "{}");
+            exit(0);
+        }
+
+        int current_line = vm.lines[vm.ip];
+
+        // Only check for stops if the line number changed
+        if (current_line != prev_line) {
+
+            // 1. Check Breakpoints
+            for(int i=0; i<bp_count; i++) {
+                if (breakpoints[i] == current_line) {
+                    fprintf(stderr, "[MyloDebug] Hit Breakpoint at Line %d\n", current_line);
+                    send_event("stopped", "{\"reason\": \"breakpoint\", \"threadId\": 1}");
+                    is_paused = true;
+                    return;
+                }
+            }
+
+            // 2. Check Step Mode
+            if (step_mode) {
+                send_event("stopped", "{\"reason\": \"step\", \"threadId\": 1}");
+                is_paused = true;
+                return;
+            }
         }
     }
 
-    if (hit) {
-        char buf[128];
-        snprintf(buf, 128, "{\"reason\": \"breakpoint\", \"threadId\": 1}");
-        send_event("stopped", buf);
-        is_paused = true;
-    } else {
-        // If we are "stepping", we stop after every instruction (or every line change)
-        // For simple "step over", we can check if line changed.
-        // For now, let's implement "Step" as "Step Instruction" for simplicity,
-        // or just send "stopped" immediately implies "Step complete".
-
-        char buf[128];
-        snprintf(buf, 128, "{\"reason\": \"step\", \"threadId\": 1}");
-        send_event("stopped", buf);
-        is_paused = true;
-    }
+    send_event("terminated", "{}");
+    exit(0);
 }
-
 // --- Message Loop ---
 
-void start_debug_adapter() {
+void start_debug_adapter(const char* filename) {
+    if (filename) strncpy(current_source_path, filename, 4095);
+    else strcpy(current_source_path, "unknown.mylo");
+
     MyloConfig.debug_mode = true;
     MyloConfig.print_callback = debug_print_callback;
 
-    // We need to buffer stdin to read headers
     char buffer[8192];
 
     while (1) {
-        // 1. Read Header "Content-Length: <n>"
         int content_len = 0;
         while (fgets(buffer, sizeof(buffer), stdin)) {
-            if (strncmp(buffer, "Content-Length: ", 16) == 0) {
-                content_len = atoi(buffer + 16);
-            }
-            if (strcmp(buffer, "\r\n") == 0) break; // End of headers
+            if (strncmp(buffer, "Content-Length: ", 16) == 0) content_len = atoi(buffer + 16);
+            if (strcmp(buffer, "\r\n") == 0) break;
         }
 
         if (content_len == 0) continue;
 
-        // 2. Read Body
         char* body = malloc(content_len + 1);
         fread(body, 1, content_len, stdin);
         body[content_len] = '\0';
-
-        // 3. Simple Parsing (Extract 'command' and 'seq')
-        // NOTE: In a real app, use a JSON parser. Here we use strstr hacks.
 
         int seq = 0;
         char* seq_ptr = strstr(body, "\"seq\":");
@@ -115,26 +118,21 @@ void start_debug_adapter() {
         char command[64] = {0};
         char* cmd_ptr = strstr(body, "\"command\":");
         if (cmd_ptr) {
-            char* start = strchr(cmd_ptr, '"') + 1; // "command"
-            start = strchr(start, '"') + 1; // :
-            start = strchr(start, '"') + 1; // start of value
+            char* start = strchr(cmd_ptr, '"') + 1;
+            start = strchr(start, '"') + 1;
+            start = strchr(start, '"') + 1;
             char* end = strchr(start, '"');
             strncpy(command, start, end - start);
         }
 
-        // 4. Dispatch
         if (strcmp(command, "initialize") == 0) {
             send_response(seq, command, "{\"supportsConfigurationDoneRequest\": true}");
             send_event("initialized", "{}");
         }
         else if (strcmp(command, "launch") == 0) {
-            // In launch, we normally parse arguments to find the file.
-            // For now, assume the file was passed via CLI args to mylo.
             send_response(seq, command, "{}");
-            // Don't run yet, wait for configDone
         }
         else if (strcmp(command, "setBreakpoints") == 0) {
-            // Simple Parse: Find "lines": [1, 2, 3]
             bp_count = 0;
             char* lines_ptr = strstr(body, "\"lines\":");
             if (lines_ptr) {
@@ -143,59 +141,55 @@ void start_debug_adapter() {
                     if (isdigit(*p)) {
                         breakpoints[bp_count++] = atoi(p);
                         while(isdigit(*p)) p++;
-                    } else {
-                        p++;
-                    }
+                    } else p++;
                 }
             }
-            // Acknowledge (Mocking the response structure)
             send_response(seq, command, "{\"breakpoints\": []}");
         }
         else if (strcmp(command, "configurationDone") == 0) {
             send_response(seq, command, "{}");
-            // Stop on entry
-            send_event("stopped", "{\"reason\": \"entry\", \"threadId\": 1}");
-            is_paused = true;
+
+            // FIX: Don't stop immediately. Check if Line 1 is a breakpoint.
+            int start_line = vm.lines[vm.ip];
+            bool hit_start = false;
+            for(int i=0; i<bp_count; i++) {
+                if (breakpoints[i] == start_line) hit_start = true;
+            }
+
+            if (hit_start) {
+                send_event("stopped", "{\"reason\": \"breakpoint\", \"threadId\": 1}");
+                is_paused = true;
+            } else {
+                // Run freely until breakpoint
+                run_debug_loop(false);
+            }
         }
         else if (strcmp(command, "threads") == 0) {
             send_response(seq, command, "{\"threads\": [{\"id\": 1, \"name\": \"Main Thread\"}]}");
         }
         else if (strcmp(command, "stackTrace") == 0) {
-            // Report current position
-            // line is vm.lines[vm.ip]
-            // We need the file name. For now hardcode or use global 'current_filename'
             int line = vm.lines[vm.ip];
-            char buf[512];
-            snprintf(buf, 512, "{\"totalFrames\": 1, \"stackFrames\": [{\"id\": 0, \"name\": \"main\", \"line\": %d, \"column\": 1, \"source\": {\"name\": \"Source\", \"path\": \"/path/to/source.mylo\"}}]}", line);
+            char buf[1024];
+            snprintf(buf, 1024, "{\"totalFrames\": 1, \"stackFrames\": [{\"id\": 0, \"name\": \"main\", \"line\": %d, \"column\": 1, \"source\": {\"name\": \"Source\", \"path\": \"%s\"}}]}", line, current_source_path);
             send_response(seq, command, buf);
         }
         else if (strcmp(command, "scopes") == 0) {
-            // Return "Globals" (ref 1) and "Locals" (ref 2)
             send_response(seq, command, "{\"scopes\": [{\"name\": \"Globals\", \"variablesReference\": 1, \"expensive\": false}]}");
         }
         else if (strcmp(command, "variables") == 0) {
-            // Check varRef
             char* ref_ptr = strstr(body, "\"variablesReference\":");
             int varRef = ref_ptr ? atoi(ref_ptr + 21) : 0;
 
             if (varRef == 1) {
-                // GLOBALS
-                // Build JSON list of globals
-                // Warning: buffer size limit. In prod use dynamic string.
                 char json[8192] = "[";
                 for(int i=0; i<global_count; i++) {
                     if (i > 0) strcat(json, ",");
                     char item[256];
-                    // Retrieve value from VM
                     double val = vm.globals[globals[i].addr];
-                    // Simple logic for display
-                    snprintf(item, 256, "{\"name\": \"%s\", \"value\": \"%g\", \"variablesReference\": 0}",
-                             globals[i].name, val);
+                    snprintf(item, 256, "{\"name\": \"%s\", \"value\": \"%g\", \"variablesReference\": 0}", globals[i].name, val);
                     strcat(json, item);
                 }
                 strcat(json, "]");
-
-                // Wrap in object
                 char full[8250];
                 sprintf(full, "{\"variables\": %s}", json);
                 send_response(seq, command, full);
@@ -205,23 +199,17 @@ void start_debug_adapter() {
         }
         else if (strcmp(command, "next") == 0 || strcmp(command, "stepIn") == 0) {
             send_response(seq, command, "{}");
-            handle_step(seq);
+            run_debug_loop(true); // Step Mode = True
         }
         else if (strcmp(command, "continue") == 0) {
             send_response(seq, command, "{}");
-            // Run until breakpoint
-            is_paused = false;
-            while (!is_paused) {
-                handle_step(seq); // This will pause if BP hit
-                if (vm.ip >= vm.code_size) break;
-            }
+            run_debug_loop(false); // Step Mode = False (Run until breakpoint)
         }
         else if (strcmp(command, "disconnect") == 0) {
             send_response(seq, command, "{}");
             exit(0);
         }
         else {
-            // Unknown
             send_response(seq, command, "{}");
         }
 

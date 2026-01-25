@@ -1625,6 +1625,11 @@ void function() {
 void parse_internal(char *source, bool is_import) {
     char *os = src;
     Token oc = curr;
+
+    // FIX: Save the current line number before parsing the import
+    int saved_line = line;
+    if (is_import) line = 1; // Reset for the new file
+
     src = source;
     next_token();
     while (curr.type != TK_EOF) {
@@ -1632,8 +1637,12 @@ void parse_internal(char *source, bool is_import) {
         else statement();
     }
     if (!is_import) emit(OP_HLT);
+
     src = os;
     curr = oc;
+
+    // FIX: Restore the line number of the original file
+    line = saved_line;
 }
 
 void parse(char *source) { parse_internal(source, false); }

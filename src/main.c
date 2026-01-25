@@ -86,7 +86,8 @@ int main(int argc, char** argv) {
     // --- MODE HANDLING ---
 
     if (debug_mode) {
-        start_debug_adapter();
+        // Pass 'fn' (the filename) to the adapter
+        start_debug_adapter(fn);
         free(content);
         return 0;
     }
