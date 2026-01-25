@@ -1175,49 +1175,50 @@ void statement() {
             if (!c) error("Cannot find native import '%s'", filename);
 
             parse_internal(c, true);
+            if (!MyloConfig.build_mode) {
+                int added_natives = ffi_count - start_ffi_index;
 
-            int added_natives = ffi_count - start_ffi_index;
+                char lib_name[MAX_STRING_LENGTH];
+                get_lib_name(lib_name, filename);
 
-            char lib_name[MAX_STRING_LENGTH];
-            get_lib_name(lib_name, filename);
+                //printf("Mylo: Loading Native Module '%s'...\n", lib_name);
+                fprintf(stderr, "Mylo: Loading Native Module '%s'...\n", lib_name);
 
-            //printf("Mylo: Loading Native Module '%s'...\n", lib_name);
-            fprintf(stderr, "Mylo: Loading Native Module '%s'...\n", lib_name);
+                void *lib = load_library(lib_name);
+                if (!lib) {
+                    error("Could not load native binary '%s'. Did you compile it with --bind?", lib_name);
+                }
 
-            void *lib = load_library(lib_name);
-            if (!lib) {
-                error("Could not load native binary '%s'. Did you compile it with --bind?", lib_name);
+                // Updated Binder Signature: Now takes API struct
+                typedef void (*BindFunc)(VM *, int, MyloAPI *);
+                BindFunc binder = (BindFunc) get_symbol(lib, "mylo_bind_lib");
+
+                if (!binder) {
+                    error("Native module '%s' is invalid (missing mylo_bind_lib).", lib_name);
+                }
+
+                // Construct API Bridge
+                MyloAPI api;
+                api.push = vm_push;
+                api.pop = vm_pop;
+                api.make_string = make_string;
+                api.heap_alloc = heap_alloc;
+
+                // NEW: Fill Ref Management Pointers
+                api.store_copy = vm_store_copy;
+                api.store_ptr = vm_store_ptr;
+                api.get_ref = vm_get_ref;
+                api.free_ref = vm_free_ref;
+
+                api.natives_array = natives; // The HOST natives array
+                api.string_pool = vm.string_pool; // The HOST string pool (for reads)
+                api.heap = vm.heap; // The HOST heap
+
+                // Pass &vm (though mostly unused now due to API), index, and API
+                binder(&vm, std_count + start_ffi_index, &api);
+
+                bound_ffi_count += added_natives;
             }
-
-            // Updated Binder Signature: Now takes API struct
-            typedef void (*BindFunc)(VM *, int, MyloAPI *);
-            BindFunc binder = (BindFunc) get_symbol(lib, "mylo_bind_lib");
-
-            if (!binder) {
-                error("Native module '%s' is invalid (missing mylo_bind_lib).", lib_name);
-            }
-
-            // Construct API Bridge
-            MyloAPI api;
-            api.push = vm_push;
-            api.pop = vm_pop;
-            api.make_string = make_string;
-            api.heap_alloc = heap_alloc;
-
-            // NEW: Fill Ref Management Pointers
-            api.store_copy = vm_store_copy;
-            api.store_ptr = vm_store_ptr;
-            api.get_ref = vm_get_ref;
-            api.free_ref = vm_free_ref;
-
-            api.natives_array = natives; // The HOST natives array
-            api.string_pool = vm.string_pool; // The HOST string pool (for reads)
-            api.heap = vm.heap; // The HOST heap
-
-            // Pass &vm (though mostly unused now due to API), index, and API
-            binder(&vm, std_count + start_ffi_index, &api);
-
-            bound_ffi_count += added_natives;
 
             return;
         }
