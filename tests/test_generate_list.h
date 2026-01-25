@@ -286,7 +286,7 @@ inline TestOutput test_maps() {
     "}\n";
 
     std::string expected = """"
-    "[Ref: 0]\n"
+    "[Map Ref:0]\n"
     "foo\n"
     "32\n"
     "bar\n"

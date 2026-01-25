@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include "vm.h"
 #include "utils.h"
+#include "debug_adapter.h"
 
 // Defined in compiler.c
 void parse(char* source);
@@ -52,12 +53,13 @@ void disassemble() {
 int main(int argc, char** argv) {
     vm_init();
 
-    if (argc < 2) { printf("Usage: mylo [--run|--build|--bind] <file> [--dump] [--trace]\n"); return 1; }
+    if (argc < 2) { printf("Usage: mylo [--run|--build|--bind] <file> [--dump] [--trace] [--debug]\n"); return 1; }
 
     bool build_mode = false;
     bool bind_mode = false;
     bool dump = false;
     bool trace = false;
+    bool debug_mode = false;
     char* fn = NULL;
 
     for (int i = 1; i < argc; i++) {
@@ -66,6 +68,7 @@ int main(int argc, char** argv) {
         else if (strcmp(argv[i], "--run") == 0) build_mode = false;
         else if (strcmp(argv[i], "--dump") == 0) dump = true;
         else if (strcmp(argv[i], "--trace") == 0) trace = true;
+        else if (strcmp(argv[i], "--debug") == 0) debug_mode = true;
         else fn = argv[i];
     }
 
@@ -77,10 +80,15 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // 1. If Debugging, Hand off control immediately (Do NOT parse yet)
+    if (debug_mode) { // assuming you kept the debug_mode flag from previous steps
+        start_debug_adapter(fn, content);
+        free(content);
+        return 0;
+    }
+
     mylo_reset();
     parse(content);
-
-    // --- MODE HANDLING ---
 
     if (bind_mode) {
         // Generate binding C file (e.g. test_lib.mylo -> test_lib.mylo_bind.c)

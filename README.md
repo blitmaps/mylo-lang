@@ -1,4 +1,4 @@
-![A Derpy Logo](mylogo.png)
+![A Derpy Logo](docs/mylogo.png)
 # Mylo
 
 Mylo is an experimental language implemented in C, that uses a simple VM and has cool syntax. It has almost seamless C-interoperability.
@@ -63,6 +63,9 @@ This will dump the VM assembly, as well as run the code.
 #### --trace
 This will show every VM transaction.
 
+#### --debug
+Implements the DAP protocol for debugging in VSCode or other editors.
+
 ## Building Mylo
 
 ### The simple way
@@ -77,6 +80,14 @@ This will show every VM transaction.
 > make
 > ./tests
 ```
+
+## Debugging in VSCode
+Mylo supports the DAP protocol. This can be used with any tool that supports DAP, using the `--debug` flag. There
+is a VSCode plugin, in `editors/mylo-vscode` that configures Mylo automatically.
+
+![VSCode Screenshot](docs/vscode.png)
+
+
 ## But everything cool is written in C, how do I use those libraries?
 ### Building a native binary with inline C?
 Here is some Mylo code jumping into C and back...

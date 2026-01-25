@@ -24,7 +24,13 @@ typedef struct {
 #define MYLO_RET_OBJ(v) (MyloReturn){ .value = (double)(v), .type = T_OBJ }
 
 typedef struct {
+    // Sprintf to internal memory
     bool print_to_memory;
+    // DAP mode
+    bool debug_mode;
+    // Function pointer for printer overloading
+    void (*print_callback)(const char *);
+    void (*error_callback)(const char*);
 } MyloConfigType;
 
 extern MyloConfigType MyloConfig;
@@ -54,8 +60,9 @@ typedef struct {
     double heap[MAX_HEAP];
 
     int bytecode[MAX_CODE];
-    int lines[MAX_CODE];
+    int lines[MAX_CODE]; // Map bytecode index to source line
 
+    // Type tracking
     int stack_types[STACK_SIZE];
     int global_types[MAX_GLOBALS];
     int heap_types[MAX_HEAP];
@@ -74,17 +81,20 @@ typedef struct {
     int output_mem_pos;
 } VM;
 
-// Typedef for NativeFunc
+extern VM vm;
+
 typedef void (*NativeFunc)(VM *);
 
-// --- API STRUCT ---
+extern NativeFunc natives[MAX_NATIVES];
+
+// --- API STRUCT (Restored) ---
 typedef struct {
     void (*push)(double, int);
     double (*pop)();
     int (*make_string)(const char*);
     int (*heap_alloc)(int);
 
-    // NEW: Reference Management Bridge
+    // Reference Management Bridge
     double (*store_copy)(void*, size_t, const char*);
     double (*store_ptr)(void*, const char*);
     void* (*get_ref)(int, const char*);
@@ -95,11 +105,7 @@ typedef struct {
     double* heap;
 } MyloAPI;
 
-// --- EXPORTED FUNCTIONS (HIDDEN IN BINDING MODE) ---
-#ifndef MYLO_BINDING_MODE
-
-extern VM vm;
-extern NativeFunc natives[MAX_NATIVES];
+// --- EXPORTED FUNCTIONS ---
 
 void vm_init();
 void vm_push(double val, int type);
@@ -107,18 +113,19 @@ double vm_pop();
 int make_string(const char *s);
 int make_const(double val);
 int heap_alloc(int size);
+
+// Core Execution
 void run_vm(bool debug_trace);
+int vm_step(bool debug_trace); // Single step execution
 void mylo_reset();
 
-// Prototypes for Ref counting
+// Ref counting Prototypes
 double vm_store_copy(void* data, size_t size, const char* type_name);
 double vm_store_ptr(void* ptr, const char* type_name);
 void* vm_get_ref(int id, const char* expected_type_name);
 void vm_free_ref(int id);
 
-#endif // End MYLO_BINDING_MODE
-
-// Macros for usage in User Code
+// Macros
 #define MYLO_STORE(val, type_name) vm_store_copy(&(val), sizeof(val), type_name)
 #define MYLO_RETRIEVE(id, c_type, type_name) (c_type*)vm_get_ref((int)(id), type_name)
 #define MYLO_REGISTER(ptr, type_name) vm_store_ptr((void*)(ptr), type_name)

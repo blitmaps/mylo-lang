@@ -1,0 +1,12 @@
+Content-Length: 106
+
+{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"adapterID": "mylo"}}
+Content-Length: 52
+
+{"jsonrpc": "2.0", "id": 2, "method": "launch"}
+Content-Length: 63
+
+{"jsonrpc": "2.0", "id": 3, "method": "configurationDone"}
+Content-Length: 48
+
+{"jsonrpc": "2.0", "id": 4, "method": "next"}

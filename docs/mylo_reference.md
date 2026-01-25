@@ -535,6 +535,38 @@ var pixel = C() -> Color {
 print(pixel.r) // Now prints 255
 print(pixel.b) // Now prints 128
 ```
+
+#### Getting Arrays from C
+```javascript
+// Unknown return type falls back to 'MyloReturn'
+fn get_bytes() -> any {
+    var x = C(){
+        const char* my_data = "\x01\x02\x03\x00\x04";
+        int len = 5;
+
+        // 1. Calculate size in Mylo Heap Units (doubles)
+        // 8 bytes per double. Round up.
+        int doubles_needed = (len + 7) / 8;
+        
+        // 2. Allocate (Header is 2 doubles: Type + Length)
+        int ptr = heap_alloc(2 + doubles_needed);
+        
+        // 3. Write Header
+        host_heap_ptr[ptr] = -2; // TYPE_BYTES
+        host_heap_ptr[ptr + 1] = len;
+
+        // 4. Copy Data
+        // We cast the heap location (after header) to char*
+        memcpy(&host_heap_ptr[ptr + 2], my_data, len);
+
+        // 5. Return as Object
+        // T_OBJ is 2
+        return (MyloReturn){ .value = (double)ptr, .type = 2 };
+    }
+    ret x
+}
+```
+
 <!-- TOC --><a name="sending-values-to-c"></a>
 #### Sending values to C
 Here we send an int, and a string to c, and print them using
