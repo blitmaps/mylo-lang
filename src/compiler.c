@@ -129,15 +129,25 @@ void parse_map_literal();
 
 // --- Error Handling ---
 void error(const char *fmt, ...) {
+    char buffer[1024];
     va_list args;
     va_start(args, fmt);
-    fprintf(stderr, "[Line %d] Error: ", curr.line > 0 ? curr.line : line);
-    vfprintf(stderr, fmt, args);
-    fprintf(stderr, "\n");
+
+    // Format the error message
+    int offset = snprintf(buffer, 1024, "[Line %d] Error: ", curr.line > 0 ? curr.line : line);
+    vsnprintf(buffer + offset, 1024 - offset, fmt, args);
     va_end(args);
+
+    // --- NEW: DAP ERROR HANDLING ---
+    if (MyloConfig.debug_mode && MyloConfig.error_callback) {
+        MyloConfig.error_callback(buffer);
+        exit(1); // Still exit, but after sending the message
+    }
+    // -------------------------------
+
+    fprintf(stderr, "%s\n", buffer);
     exit(1);
 }
-
 // --- Helper Prototypes ---
 void emit(int op) {
     if (vm.code_size >= MAX_CODE) {

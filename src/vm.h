@@ -30,6 +30,7 @@ typedef struct {
     bool debug_mode;
     // Function pointer for printer overloading
     void (*print_callback)(const char *);
+    void (*error_callback)(const char*);
 } MyloConfigType;
 
 extern MyloConfigType MyloConfig;

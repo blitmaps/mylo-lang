@@ -80,17 +80,15 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    mylo_reset();
-    parse(content);
-
-    // --- MODE HANDLING ---
-
-    if (debug_mode) {
-        // Pass 'fn' (the filename) to the adapter
-        start_debug_adapter(fn);
+    // 1. If Debugging, Hand off control immediately (Do NOT parse yet)
+    if (debug_mode) { // assuming you kept the debug_mode flag from previous steps
+        start_debug_adapter(fn, content);
         free(content);
         return 0;
     }
+
+    mylo_reset();
+    parse(content);
 
     if (bind_mode) {
         // Generate binding C file (e.g. test_lib.mylo -> test_lib.mylo_bind.c)

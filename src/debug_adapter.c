@@ -10,6 +10,7 @@
 
 #define MAX_PACKET_SIZE 8192
 static char current_source_path[4096];
+static char* pending_source_content = NULL; // <--- Store source here
 
 const char* get_function_name(int ip) {
     // Find the function with the highest address that is still <= ip
@@ -51,6 +52,16 @@ void debug_print_callback(const char* msg) {
     // JSON escape newlines slightly for safety, though robust escaping needs a library
     snprintf(buf, 1024, "{\"category\": \"stdout\", \"output\": \"%s\\n\"}", msg);
     send_event("output", buf);
+}
+
+void debug_error_callback(const char* msg) {
+    // 1. Send the error text to the Debug Console (stderr category makes it red)
+    char buf[1024];
+    snprintf(buf, 1024, "{\"category\": \"stderr\", \"output\": \"%s\\n\"}", msg);
+    send_event("output", buf);
+
+    // 2. Tell VS Code we are dead
+    send_event("terminated", "{}");
 }
 
 // --- State ---
@@ -104,12 +115,16 @@ void run_debug_loop(bool step_mode) {
 }
 // --- Message Loop ---
 
-void start_debug_adapter(const char* filename) {
+void start_debug_adapter(const char* filename, char* source_content) {
     if (filename) strncpy(current_source_path, filename, 4095);
     else strcpy(current_source_path, "unknown.mylo");
 
+    // Store content for later parsing
+    pending_source_content = source_content;
+
     MyloConfig.debug_mode = true;
     MyloConfig.print_callback = debug_print_callback;
+    MyloConfig.error_callback = debug_error_callback; // <--- Register it
 
     char buffer[MAX_PACKET_SIZE];
 
@@ -145,6 +160,10 @@ void start_debug_adapter(const char* filename) {
             send_event("initialized", "{}");
         }
         else if (strcmp(command, "launch") == 0) {
+            if (pending_source_content) {
+                mylo_reset();
+                parse(pending_source_content);
+            }
             send_response(seq, command, "{}");
         }
         else if (strcmp(command, "setBreakpoints") == 0) {
