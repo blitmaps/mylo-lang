@@ -1,7 +1,7 @@
 {
   "name": "mylo-debug",
   "displayName": "Mylo Debugger",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "mylo-lang",
   "engines": {
     "vscode": "^1.60.0"
@@ -15,9 +15,15 @@
       {
         "id": "mylo",
         "aliases": ["Mylo", "mylo"],
-        "extensions": [".mylo"]
+        "extensions": [".mylo"],
+        "configuration": "./language-configuration.json"
       }
     ],
+    "grammars": [{
+        "language": "mylo",
+        "scopeName": "source.mylo",
+        "path": "./syntaxes/mylo.tmLanguage.json"
+    }],
     "breakpoints": [
       {
         "language": "mylo"
