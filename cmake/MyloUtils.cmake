@@ -1,13 +1,11 @@
 # cmake/MyloUtils.cmake
 
-# Ensure we have the Mylo compiler executable
 if(NOT DEFINED MYLO_EXECUTABLE)
-    message(FATAL_ERROR "MYLO_EXECUTABLE must be set to the path of the 'mylo' compiler binary.")
+    message(FATAL_ERROR "MYLO_EXECUTABLE must be set.")
 endif()
 
-# Ensure we know where the VM sources are (required for linking the runtime)
 if(NOT DEFINED MYLO_HOME)
-    message(FATAL_ERROR "MYLO_HOME must be set to the root directory of the Mylo language source.")
+    message(FATAL_ERROR "MYLO_HOME must be set.")
 endif()
 
 set(MYLO_VM_SOURCES
@@ -17,37 +15,45 @@ set(MYLO_VM_SOURCES
 )
 
 # --- FUNCTION: Create a Native Binding (.so/.dll) ---
-# Usage: mylo_add_binding(TARGET raylib_native SOURCE raylib_binding.mylo LINKS raylib)
 function(mylo_add_binding)
     set(options "")
     set(oneValueArgs TARGET SOURCE)
     set(multiValueArgs LINKS)
     cmake_parse_arguments(ARG "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
-    # 1. Define Output Filename (raylib_binding.mylo -> raylib_binding.mylo_bind.c)
     get_filename_component(BASENAME ${ARG_SOURCE} NAME)
+
+    # Paths in the Build Directory
+    set(LOCAL_MYLO "${CMAKE_CURRENT_BINARY_DIR}/${BASENAME}")
     set(GENERATED_C "${CMAKE_CURRENT_BINARY_DIR}/${BASENAME}_bind.c")
 
-    # 2. Command: Run 'mylo --bind'
+    # 1. Copy .mylo file to Build Dir (so generated .c file ends up here too)
     add_custom_command(
             OUTPUT ${GENERATED_C}
-            COMMAND ${MYLO_EXECUTABLE} --bind ${CMAKE_CURRENT_SOURCE_DIR}/${ARG_SOURCE}
-            ARGS ${CMAKE_CURRENT_BINARY_DIR}/${GENERATED_C} # Depending on how your CLI handles output paths
+
+            # Step A: Copy source to build folder
+            COMMAND ${CMAKE_COMMAND} -E copy
+            ${CMAKE_CURRENT_SOURCE_DIR}/${ARG_SOURCE}
+            ${LOCAL_MYLO}
+
+            # Step B: Run mylo --bind on the LOCAL copy
+            COMMAND ${MYLO_EXECUTABLE} --bind ${BASENAME}
+
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
             DEPENDS ${ARG_SOURCE}
-            COMMENT "Generating Mylo Binding: ${ARG_SOURCE}"
+            COMMENT "Generating Binding Wrapper: ${ARG_SOURCE}"
     )
 
-    # 3. Create Shared Library
+    # 2. Compile the generated C file into a Shared Library
     add_library(${ARG_TARGET} SHARED ${GENERATED_C})
 
-    # 4. Remove 'lib' prefix so 'import native' finds it easily (libfoo.so -> foo.so)
+    # 3. Configure Output (No 'lib' prefix, standard extension)
     set_target_properties(${ARG_TARGET} PROPERTIES PREFIX "")
 
-    # 5. Link Dependencies (e.g. Raylib) and Include Mylo Headers
     target_link_libraries(${ARG_TARGET} PRIVATE ${ARG_LINKS})
     target_include_directories(${ARG_TARGET} PRIVATE "${MYLO_HOME}/src")
 
-    # 6. Copy to build root so the app can find it at runtime
+    # 4. Auto-copy the .so/.dll next to the executable if needed
     add_custom_command(TARGET ${ARG_TARGET} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
             $<TARGET_FILE:${ARG_TARGET}>
@@ -55,9 +61,7 @@ function(mylo_add_binding)
     )
 endfunction()
 
-
 # --- FUNCTION: Create a Standalone Executable ---
-# Usage: mylo_add_executable(TARGET my_app SOURCE main.mylo)
 function(mylo_add_executable)
     set(options "")
     set(oneValueArgs TARGET SOURCE)
@@ -65,21 +69,26 @@ function(mylo_add_executable)
     cmake_parse_arguments(ARG "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
     get_filename_component(BASENAME ${ARG_SOURCE} NAME)
+    set(LOCAL_MYLO "${CMAKE_CURRENT_BINARY_DIR}/${BASENAME}")
     set(GENERATED_C "${CMAKE_CURRENT_BINARY_DIR}/${BASENAME}.c")
 
-    # 1. Command: Run 'mylo --build'
     add_custom_command(
             OUTPUT ${GENERATED_C}
-            COMMAND ${MYLO_EXECUTABLE} --build ${CMAKE_CURRENT_SOURCE_DIR}/${ARG_SOURCE}
+
+            # Copy source to build folder
+            COMMAND ${CMAKE_COMMAND} -E copy
+            ${CMAKE_CURRENT_SOURCE_DIR}/${ARG_SOURCE}
+            ${LOCAL_MYLO}
+
+            # Run mylo --build on local copy
+            COMMAND ${MYLO_EXECUTABLE} --build ${BASENAME}
+
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
             DEPENDS ${ARG_SOURCE}
             COMMENT "Transpiling Mylo Source: ${ARG_SOURCE}"
     )
 
-    # 2. Create Executable
-    # We MUST include the VM sources (vm.c, mylolib.c) so the app has a runtime.
     add_executable(${ARG_TARGET} ${GENERATED_C} ${MYLO_VM_SOURCES})
-
-    # 3. Setup Includes and Standard Math Lib
     target_include_directories(${ARG_TARGET} PRIVATE "${MYLO_HOME}/src")
 
     if(UNIX)
