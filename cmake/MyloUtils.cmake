@@ -62,6 +62,7 @@ function(mylo_add_binding)
 endfunction()
 
 # --- FUNCTION: Create a Standalone Executable ---
+# --- FUNCTION: Create a Standalone Executable ---
 function(mylo_add_executable)
     set(options "")
     set(oneValueArgs TARGET SOURCE)
@@ -70,18 +71,23 @@ function(mylo_add_executable)
 
     get_filename_component(BASENAME ${ARG_SOURCE} NAME)
     set(LOCAL_MYLO "${CMAKE_CURRENT_BINARY_DIR}/${BASENAME}")
+
+    # CMake expects this filename:
     set(GENERATED_C "${CMAKE_CURRENT_BINARY_DIR}/${BASENAME}.c")
 
     add_custom_command(
             OUTPUT ${GENERATED_C}
 
-            # Copy source to build folder
+            # 1. Copy source to build folder
             COMMAND ${CMAKE_COMMAND} -E copy
             ${CMAKE_CURRENT_SOURCE_DIR}/${ARG_SOURCE}
             ${LOCAL_MYLO}
 
-            # Run mylo --build on local copy
+            # 2. Run mylo --build (Generates 'out.c')
             COMMAND ${MYLO_EXECUTABLE} --build ${BASENAME}
+
+            # 3. FIX: Rename 'out.c' to 'raylib.mylo.c' so CMake finds it
+            COMMAND ${CMAKE_COMMAND} -E rename out.c ${BASENAME}.c
 
             WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
             DEPENDS ${ARG_SOURCE}
