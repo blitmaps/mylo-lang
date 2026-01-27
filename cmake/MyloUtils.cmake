@@ -47,6 +47,8 @@ function(mylo_add_binding)
     # 2. Compile the generated C file into a Shared Library
     add_library(${ARG_TARGET} SHARED ${GENERATED_C})
 
+    set_target_properties(${ARG_TARGET} PROPERTIES LINKER_LANGUAGE C)
+
     # 3. Configure Output (No 'lib' prefix, standard extension)
     set_target_properties(${ARG_TARGET} PROPERTIES PREFIX "")
 
@@ -95,6 +97,9 @@ function(mylo_add_executable)
     )
 
     add_executable(${ARG_TARGET} ${GENERATED_C} ${MYLO_VM_SOURCES})
+
+    set_target_properties(${ARG_TARGET} PROPERTIES LINKER_LANGUAGE C)
+
     target_include_directories(${ARG_TARGET} PRIVATE "${MYLO_HOME}/src")
 
     if(UNIX)
