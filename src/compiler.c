@@ -1182,7 +1182,8 @@ void statement() {
                 get_lib_name(lib_name, filename);
 
                 //printf("Mylo: Loading Native Module '%s'...\n", lib_name);
-                fprintf(stderr, "Mylo: Loading Native Module '%s'...\n", lib_name);
+                if (!MyloConfig.debug_mode)
+                    fprintf(stderr, "Mylo: Loading Native Module '%s'...\n", lib_name);
 
                 void *lib = load_library(lib_name);
                 if (!lib) {
@@ -1850,7 +1851,7 @@ void generate_binding_c_source(const char *output_filename) {
         fprintf(fp, "    host_natives_array[start_index + %d] = __wrapper_%d;\n", i, i);
     }
 
-    fprintf(fp, "    fprintf(stderr,\"Mylo: Bound %d native functions starting at ID %%d\\n\", start_index);\n", ffi_count);
+    //fprintf(fp, "    fprintf(stderr,\"Mylo: Bound %d native functions starting at ID %%d\\n\", start_index);\n", ffi_count);
     fprintf(fp, "}\n");
 
     fclose(fp);

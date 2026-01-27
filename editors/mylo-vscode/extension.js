@@ -19,14 +19,20 @@ function activate(context) {
                 return undefined;
             }
 
+            // 1. Get CWD from config, or default to first workspace folder
+            const cwd = session.configuration.cwd || (vscode.workspace.workspaceFolders ? vscode.workspace.workspaceFolders[0].uri.fsPath : undefined);
+
             const envConfig = session.configuration.env || {};
             const spawnedEnv = { ...process.env, ...envConfig };
-            
-            // This launches:  ./mylo --debug /path/to/file.mylo
+
+            // 2. Pass 'cwd' in the options object (3rd argument)
             return new vscode.DebugAdapterExecutable(
                 myloPath,
                 ['--debug', program],
-                { env: spawnedEnv }
+                {
+                    env: spawnedEnv,
+                    cwd: cwd
+                }
             );
         }
     }));

@@ -125,3 +125,7 @@ Our application can then be executed (without a runtime):
   Inside C: sqrt(25) = 5.000000
   Back in Mylo: Result is 5
 ```
+
+## Integration with CMake
+Mylo applications can be built, C applications bound, and integrated into other applications
+with CMake. There are [docs here.](cmake/README.md)
