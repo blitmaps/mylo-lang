@@ -1770,10 +1770,16 @@ void generate_binding_c_source(const char *output_filename) {
 
         fprintf(fp, " __mylo_user_%d(", i);
         for (int a = 0; a < ffi_blocks[i].arg_count; a++) {
-             char *type = ffi_blocks[i].args[a].type;
-             if (strcmp(type, "str") == 0 || strcmp(type, "string") == 0) fprintf(fp, "char* %s", ffi_blocks[i].args[a].name);
-             else fprintf(fp, "double %s", ffi_blocks[i].args[a].name);
-             if (a < ffi_blocks[i].arg_count - 1) fprintf(fp, ", ");
+            char *type = ffi_blocks[i].args[a].type;
+            if (strcmp(type, "str") == 0 || strcmp(type, "string") == 0)
+                fprintf(fp, "char* %s", ffi_blocks[i].args[a].name);
+            else if (strcmp(type, "num") == 0)
+                fprintf(fp, "double %s", ffi_blocks[i].args[a].name);
+            else
+                // It is a struct! Generate a pointer to the C struct (e.g. c_RGB*)
+                    fprintf(fp, "c_%s* %s", type, ffi_blocks[i].args[a].name);
+
+            if (a < ffi_blocks[i].arg_count - 1) fprintf(fp, ", ");
         }
         fprintf(fp, ") {\n%s\n}\n\n", ffi_blocks[i].code_body);
     }
@@ -1794,9 +1800,15 @@ void generate_binding_c_source(const char *output_filename) {
 
         for (int a = 0; a < ffi_blocks[i].arg_count; a++) {
             char *type = ffi_blocks[i].args[a].type;
-            if (strcmp(type, "str") == 0 || strcmp(type, "string") == 0)
+            if (strcmp(type, "str") == 0 || strcmp(type, "string") == 0) {
                 fprintf(fp, "vm->string_pool[(int)_raw_%s]", ffi_blocks[i].args[a].name);
-            else fprintf(fp, "_raw_%s", ffi_blocks[i].args[a].name);
+            } else if (strcmp(type, "num") == 0) {
+                fprintf(fp, "_raw_%s", ffi_blocks[i].args[a].name);
+            } else {
+                // Cast the heap index to a pointer to the struct data
+                // We add HEAP_HEADER_STRUCT to skip the Type ID in the heap header
+                fprintf(fp, "(c_%s*)&vm->heap[(int)_raw_%s + HEAP_HEADER_STRUCT]", type, ffi_blocks[i].args[a].name);
+            }
             if (a < ffi_blocks[i].arg_count - 1) fprintf(fp, ", ");
         }
         fprintf(fp, ");\n");
@@ -1913,8 +1925,10 @@ void compile_to_c_source(const char *output_filename) {
             char *type = ffi_blocks[i].args[a].type;
             if (strcmp(type, "str") == 0 || strcmp(type, "string") == 0) {
                 fprintf(fp, "char* %s", ffi_blocks[i].args[a].name);
-            } else {
+            } else if (strcmp(type, "num") == 0) {
                 fprintf(fp, "double %s", ffi_blocks[i].args[a].name);
+            } else {
+                fprintf(fp, "c_%s* %s", type, ffi_blocks[i].args[a].name);
             }
             if (a < ffi_blocks[i].arg_count - 1) fprintf(fp, ", ");
         }
@@ -1949,8 +1963,10 @@ void compile_to_c_source(const char *output_filename) {
             char *type = ffi_blocks[i].args[a].type;
             if (strcmp(type, "str") == 0 || strcmp(type, "string") == 0) {
                 fprintf(fp, "vm->string_pool[(int)_raw_%s]", ffi_blocks[i].args[a].name);
-            } else {
+            } else if (strcmp(type, "num") == 0) {
                 fprintf(fp, "_raw_%s", ffi_blocks[i].args[a].name);
+            } else {
+                fprintf(fp, "(c_%s*)&vm->heap[(int)_raw_%s + HEAP_HEADER_STRUCT]", type, ffi_blocks[i].args[a].name);
             }
             if (a < ffi_blocks[i].arg_count - 1) fprintf(fp, ", ");
         }
