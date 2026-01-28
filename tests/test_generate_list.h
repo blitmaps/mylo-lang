@@ -774,6 +774,34 @@ inline TestOutput test_byte_slice_assignment() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_array_slice_assignment() {
+
+    std::string src = """"
+    "var header = [1, 2, 3, 4]\n"
+    "header[1:2] = [5, 6]\n"
+    "for (x in header) {\n"
+        "print(x)\n"
+    "}";
+    std::string expected = """"
+    "1\n5\n6\n4\n";
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_arr_str_slice_assignment() {
+
+    std::string src = """"
+    "var header = [\"cart\", \"dorg\", \"fox\", \"rat\"]\n"
+    "header[0:1] = [\"cat\", \"dog\"]\n"
+    "for (x in header) {\n"
+        "print(x)\n"
+    "}";
+    std::string expected = """"
+    "cat\ndog\nfox\nrat\n";
+    return run_source_test(src, expected);
+}
+
+
+
 
 
 
@@ -820,6 +848,9 @@ inline void test_generate_list() {
     ADD_TEST("Test bytes (for)", test_byte_iterator);
     ADD_TEST("Test bytes (slice)", test_byte_slice_iterator);
     ADD_TEST("Test bytes (slice-assignment)", test_byte_slice_assignment);
+    ADD_TEST("Test Array (slice-assignment)", test_array_slice_assignment);
+    ADD_TEST("Test Array Str (slice-assignment)", test_arr_str_slice_assignment);
+
 
 }
 
