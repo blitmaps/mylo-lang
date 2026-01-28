@@ -1517,7 +1517,14 @@ void statement() {
                         match(TK_COLON);
                         expression();
                         match(TK_RBRACKET);
-                        emit(OP_SLICE);
+                        if (curr.type == TK_EQ_ASSIGN) {
+                            match(TK_EQ_ASSIGN);
+                            expression();       // Parse the value (e.g. b"22")
+                            emit(OP_SLICE_SET); // Emit the Setter
+                            emit(OP_POP);       // Clean stack (statement ends)
+                            break;              // Break the . or [] loop
+                        }
+                        emit(OP_SLICE);     // Emit the Getter
                     } else {
                         match(TK_RBRACKET);
                         if (curr.type == TK_EQ_ASSIGN) {
