@@ -748,6 +748,20 @@ inline TestOutput test_byte_iterator() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_byte_slice_iterator() {
+
+    std::string src = """"
+    "var header = b\"1298\"\n"
+    "var slice = header[1:2]"
+    "for (x in slice) {\n"
+        "print(x)\n"
+    "}";
+    std::string expected = """"
+    "50\n57\n";
+    return run_source_test(src, expected);
+}
+
+
 
 
 inline void test_generate_list() {
@@ -791,6 +805,8 @@ inline void test_generate_list() {
     ADD_TEST("Test forever", test_forever);
     ADD_TEST("Test bytes (print)", test_bytes_print);
     ADD_TEST("Test bytes (for)", test_byte_iterator);
+    ADD_TEST("Test bytes (slice)", test_byte_slice_iterator);
+
 
 
 }

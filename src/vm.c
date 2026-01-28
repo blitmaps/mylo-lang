@@ -466,24 +466,67 @@ int vm_step(bool debug_trace) {
             else vm_push(vm.heap[ptr+1], T_NUM);
             break;
         }
-        case OP_SLICE: {
-            // ... (Keep existing slice logic) ...
+case OP_SLICE: {
             CHECK_STACK(3);
-            double e = vm_pop(); double s = vm_pop();
+            double e = vm_pop();
+            double s = vm_pop();
             int ptr = (int)vm_pop();
-            int len = (int)vm.heap[ptr+1];
-            int start = (int)s; int end = (int)e;
-            if(start<0) start+=len; if(end<0) end+=len;
-            if(start<0) start=0; if(end>=len) end=len-1;
-            int newlen = (end>=start)?(end-start+1):0;
-            int newptr = heap_alloc(newlen+2);
-            vm.heap[newptr] = TYPE_ARRAY;
-            vm.heap[newptr+1] = (double)newlen;
-            for(int i=0; i<newlen; i++) {
-                vm.heap[newptr+2+i] = vm.heap[ptr+2+start+i];
-                vm.heap_types[newptr+2+i] = vm.heap_types[ptr+2+start+i];
+
+            // FIX 1: Retrieve the specific type of the object being sliced
+            int type = (int)vm.heap[ptr];
+
+            // Get length based on type (Array/Bytes stores len at offset 1)
+            int len = (int)vm.heap[ptr + HEAP_OFFSET_LEN];
+
+            int start = (int)s;
+            int end = (int)e;
+
+            // Handle negative indices
+            if (start < 0) start += len;
+            if (end < 0) end += len;
+
+            // Clamp bounds
+            if (start < 0) start = 0;
+            // Note: Mylo slices appear inclusive based on existing logic (end-start+1)
+            // Logic: if end is beyond length, cap it at last index
+            if (end >= len) end = len - 1;
+
+            int newlen = (end >= start) ? (end - start + 1) : 0;
+
+            if (type == TYPE_BYTES) {
+                // FIX 2: Handle Byte Array Slicing
+                // 1. Calculate doubles needed for packed bytes
+                int d_needed = (newlen + 7) / 8;
+                int newptr = heap_alloc(2 + d_needed);
+
+                // 2. Set correct type
+                vm.heap[newptr] = TYPE_BYTES;
+                vm.heap[newptr + 1] = (double)newlen;
+
+                // 3. Perform Byte-wise copy
+                char* src = (char*)&vm.heap[ptr + HEAP_HEADER_ARRAY];
+                char* dst = (char*)&vm.heap[newptr + HEAP_HEADER_ARRAY];
+
+                if (newlen > 0) {
+                    // +2 accounts for the Heap Header (Type, Len) offset in bytes?
+                    // No, &vm.heap[ptr + 2] points to the start of the data payload.
+                    // We simply offset the src pointer by 'start' bytes.
+                    for (int i = 0; i < newlen; i++) {
+                        dst[i] = src[start + i];
+                    }
+                }
+                vm_push((double)newptr, T_OBJ);
+            } else {
+                // FIX 3: Existing Logic for Standard Arrays
+                int newptr = heap_alloc(newlen + 2);
+                vm.heap[newptr] = TYPE_ARRAY;
+                vm.heap[newptr + 1] = (double)newlen;
+                for (int i = 0; i < newlen; i++) {
+                    vm.heap[newptr + 2 + i] = vm.heap[ptr + 2 + start + i];
+                    vm.heap_types[newptr + 2 + i] = vm.heap_types[ptr + 2 + start + i];
+                }
+                vm_push((double)newptr, T_OBJ);
             }
-            vm_push((double)newptr, T_OBJ);
             break;
         }
         case OP_MAP: {
