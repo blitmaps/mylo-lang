@@ -574,10 +574,47 @@ printf.
 ````javascript
 var a = 100
 var b = "200"
-var result: num = C(val: int = a, val2 : str = b) {
-    printf("Inside C: %d, %s\n", (int)val, val2);
+
+struct MyStruct {
+    var x
+}
+
+var X : MyStruct = {x=9}
+
+var result: num = C(val: int = a, val2 : str = b, val3 : MyStruct = X) {
+    printf("Inside C: %d, %s, %d\n", (int)val, val2, (int)val3->x);
 }
 ````
+
+##### Namespace Complexity
+Mylo uses `mod` as its module/namespace seperator. This 
+must be reflected in C bindings using underscores to type names, like so:
+
+````javascript
+
+mod FOO {
+    struct BAR {
+        var x
+    }
+    
+    // Notice the type in this function is just BAR
+    fn MyFunc(var0: BAR) {
+        // Notice tht type passed to C must be FOO_BAR
+        C(var_to_c : FOO_BAR = var0) {
+            
+            //... things
+            
+            // Access to the var
+            var_to_c->x = 99999;
+
+            //... things
+        }
+    }
+}
+
+
+````
+
 
 #### Getting Type Handles !
 

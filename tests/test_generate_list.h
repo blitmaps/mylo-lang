@@ -748,6 +748,61 @@ inline TestOutput test_byte_iterator() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_byte_slice_iterator() {
+
+    std::string src = """"
+    "var header = b\"1298\"\n"
+    "var slice = header[1:2]"
+    "for (x in slice) {\n"
+        "print(x)\n"
+    "}";
+    std::string expected = """"
+    "50\n57\n";
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_byte_slice_assignment() {
+
+    std::string src = """"
+    "var header = b\"1111\"\n"
+    "header[1:2] = b\"22\"\n"
+    "for (x in header) {\n"
+        "print(x)\n"
+    "}";
+    std::string expected = """"
+    "49\n50\n50\n49\n";
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_array_slice_assignment() {
+
+    std::string src = """"
+    "var header = [1, 2, 3, 4]\n"
+    "header[1:2] = [5, 6]\n"
+    "for (x in header) {\n"
+        "print(x)\n"
+    "}";
+    std::string expected = """"
+    "1\n5\n6\n4\n";
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_arr_str_slice_assignment() {
+
+    std::string src = """"
+    "var header = [\"cart\", \"dorg\", \"fox\", \"rat\"]\n"
+    "header[0:1] = [\"cat\", \"dog\"]\n"
+    "for (x in header) {\n"
+        "print(x)\n"
+    "}";
+    std::string expected = """"
+    "cat\ndog\nfox\nrat\n";
+    return run_source_test(src, expected);
+}
+
+
+
+
 
 
 inline void test_generate_list() {
@@ -791,6 +846,10 @@ inline void test_generate_list() {
     ADD_TEST("Test forever", test_forever);
     ADD_TEST("Test bytes (print)", test_bytes_print);
     ADD_TEST("Test bytes (for)", test_byte_iterator);
+    ADD_TEST("Test bytes (slice)", test_byte_slice_iterator);
+    ADD_TEST("Test bytes (slice-assignment)", test_byte_slice_assignment);
+    ADD_TEST("Test Array (slice-assignment)", test_array_slice_assignment);
+    ADD_TEST("Test Array Str (slice-assignment)", test_arr_str_slice_assignment);
 
 
 }

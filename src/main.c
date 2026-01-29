@@ -51,6 +51,7 @@ void disassemble() {
 }
 
 int main(int argc, char** argv) {
+    printf("--- MYLO COMPILER v2 (STRUCTS ENABLED) ---\n"); // Add this
     vm_init();
 
     if (argc < 2) { printf("Usage: mylo [--run|--build|--bind] <file> [--dump] [--trace] [--debug]\n"); return 1; }
