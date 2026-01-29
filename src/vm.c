@@ -177,23 +177,28 @@ int vm_step(bool debug_trace) {
             vm_push((double) index, T_STR);
             break;
         }
-        case OP_ADD: {
+case OP_ADD: {
             CHECK_STACK(2);
             int typeB = vm.stack_types[vm.sp];
             double valB = vm_pop();
             int typeA = vm.stack_types[vm.sp];
             double valA = vm.stack[vm.sp];
+
+            // 1. Number + Number
             if (typeA == T_NUM && typeB == T_NUM) {
                 vm.stack[vm.sp] = valA + valB;
                 vm.stack_types[vm.sp] = T_NUM;
-            } else if (typeA == T_OBJ && typeB == T_OBJ) {
-                // Array Concatenation
+            }
+            // 2. Array + Array (Concatenation)
+            else if (typeA == T_OBJ && typeB == T_OBJ) {
                 int ptrA = (int)valA; int ptrB = (int)valB;
                 int lenA = (int)vm.heap[ptrA + HEAP_OFFSET_LEN];
                 int lenB = (int)vm.heap[ptrB + HEAP_OFFSET_LEN];
+
                 int newPtr = heap_alloc(lenA + lenB + HEAP_HEADER_ARRAY);
                 vm.heap[newPtr] = TYPE_ARRAY;
-                vm.heap[newPtr + 1] = lenA + lenB;
+                vm.heap[newPtr + 1] = (double)(lenA + lenB);
+
                 for(int i=0; i<lenA; i++) {
                     vm.heap[newPtr+2+i] = vm.heap[ptrA+2+i];
                     vm.heap_types[newPtr+2+i] = vm.heap_types[ptrA+2+i];
@@ -203,22 +208,269 @@ int vm_step(bool debug_trace) {
                     vm.heap_types[newPtr+2+lenA+i] = vm.heap_types[ptrB+2+i];
                 }
                 vm.stack[vm.sp] = (double)newPtr;
-            } else {
+            }
+            // 3. Array + Scalar (Broadcast Addition)
+            else if (typeA == T_OBJ || typeB == T_OBJ) {
+                // Identify which is the array and which is the scalar
+                double arrVal = (typeA == T_OBJ) ? valA : valB;
+                double scalVal = (typeA == T_OBJ) ? valB : valA;
+                int scalType = (typeA == T_OBJ) ? typeB : typeA;
+
+                // Only support Arrays for now (not Maps/Bytes)
+                int ptr = (int)arrVal;
+                if ((int)vm.heap[ptr] != TYPE_ARRAY) RUNTIME_ERROR("Invalid object type for addition");
+
+                int len = (int)vm.heap[ptr + HEAP_OFFSET_LEN];
+                int newPtr = heap_alloc(len + HEAP_HEADER_ARRAY);
+                vm.heap[newPtr] = TYPE_ARRAY;
+                vm.heap[newPtr + 1] = (double)len;
+
+                for (int i = 0; i < len; i++) {
+                    double elVal = vm.heap[ptr + 2 + i];
+                    int elType = vm.heap_types[ptr + 2 + i];
+
+                    if (elType == T_NUM && scalType == T_NUM) {
+                        // Math: [1, 2] + 5 => [6, 7]
+                        vm.heap[newPtr + 2 + i] = elVal + scalVal;
+                        vm.heap_types[newPtr + 2 + i] = T_NUM;
+                    }
+                    else if (scalType == T_STR) {
+                        // String Broadcast: ["a", "b"] + "c" => ["ac", "bc"]
+                        char buf[1024];
+                        const char* sArr = (elType == T_STR) ? vm.string_pool[(int)elVal] : ""; // Simplification: enforce string arrays?
+                        // If element is number, convert? For now let's assume string array.
+                        if (elType == T_NUM) sprintf(buf, "%g", elVal);
+                        else strcpy(buf, sArr);
+
+                        const char* sScal = vm.string_pool[(int)scalVal];
+
+                        // Handle ordering: Array + String vs String + Array
+                        if (typeA == T_OBJ) strcat(buf, sScal); // Array First: "Arr" + "Scl"
+                        else {
+                            // String First: "Scl" + "Arr" -> Prepend
+                            char temp[1024];
+                            strcpy(temp, sScal);
+                            strcat(temp, buf);
+                            strcpy(buf, temp);
+                        }
+
+                        vm.heap[newPtr + 2 + i] = (double)make_string(buf);
+                        vm.heap_types[newPtr + 2 + i] = T_STR;
+                    }
+                    else {
+                        RUNTIME_ERROR("Invalid types for array broadcast addition");
+                    }
+                }
+                vm.stack[vm.sp] = (double)newPtr;
+                vm.stack_types[vm.sp] = T_OBJ;
+            }
+            else {
                 RUNTIME_ERROR("Invalid types for ADD");
             }
             break;
         }
-        case OP_SUB: {
-            CHECK_STACK(2); double b = vm_pop(); vm.stack[vm.sp] -= b; break;
-        }
+
         case OP_MUL: {
-            CHECK_STACK(2); double b = vm_pop(); vm.stack[vm.sp] *= b; break;
+            CHECK_STACK(2);
+            int typeB = vm.stack_types[vm.sp];
+            double valB = vm_pop();
+            int typeA = vm.stack_types[vm.sp];
+            double valA = vm.stack[vm.sp]; // Keep A on stack to overwrite
+
+            // 1. Number * Number
+            if (typeA == T_NUM && typeB == T_NUM) {
+                vm.stack[vm.sp] *= valB;
+            }
+            // 2. Array * Number (Scalar Multiplication)
+            else if ((typeA == T_OBJ && typeB == T_NUM) || (typeA == T_NUM && typeB == T_OBJ)) {
+                double arrVal = (typeA == T_OBJ) ? valA : valB;
+                double scalVal = (typeA == T_OBJ) ? valB : valA;
+
+                int ptr = (int)arrVal;
+                if ((int)vm.heap[ptr] != TYPE_ARRAY) RUNTIME_ERROR("Invalid object type for multiplication");
+
+                int len = (int)vm.heap[ptr + HEAP_OFFSET_LEN];
+                int newPtr = heap_alloc(len + HEAP_HEADER_ARRAY);
+                vm.heap[newPtr] = TYPE_ARRAY;
+                vm.heap[newPtr + 1] = (double)len;
+
+                for(int i = 0; i < len; i++) {
+                     double elVal = vm.heap[ptr + 2 + i];
+                     int elType = vm.heap_types[ptr + 2 + i];
+                     if (elType == T_NUM) {
+                         vm.heap[newPtr + 2 + i] = elVal * scalVal;
+                         vm.heap_types[newPtr + 2 + i] = T_NUM;
+                     } else {
+                         // Fallback for non-numbers (e.g. repeat string? "a" * 3 = "aaa")
+                         // For now, just copy or error. Let's error to be safe.
+                         RUNTIME_ERROR("Cannot multiply non-number array element");
+                     }
+                }
+                vm.stack[vm.sp] = (double)newPtr;
+                vm.stack_types[vm.sp] = T_OBJ;
+            }
+            else {
+                 RUNTIME_ERROR("Invalid types for MUL");
+            }
+            break;
         }
+        case OP_SUB: {
+            CHECK_STACK(2);
+            int typeB = vm.stack_types[vm.sp];
+            double valB = vm_pop(); // Right Operand
+            int typeA = vm.stack_types[vm.sp]; // Left Operand
+            double valA = vm.stack[vm.sp];
+
+            // 1. Number - Number
+            if (typeA == T_NUM && typeB == T_NUM) {
+                vm.stack[vm.sp] = valA - valB;
+                vm.stack_types[vm.sp] = T_NUM;
+            }
+            // 2. Array Broadcast Subtraction
+            else if (typeA == T_OBJ || typeB == T_OBJ) {
+                // Determine which is array and which is scalar
+                int ptr = (typeA == T_OBJ) ? (int)valA : (int)valB;
+                double scalar = (typeA == T_OBJ) ? valB : valA;
+
+                // Validate types
+                if ((int)vm.heap[ptr] != TYPE_ARRAY) RUNTIME_ERROR("Invalid object type for subtraction");
+                if (typeA == T_OBJ && typeB != T_NUM) RUNTIME_ERROR("Can only subtract number from array");
+                if (typeB == T_OBJ && typeA != T_NUM) RUNTIME_ERROR("Can only subtract array from number");
+
+                int len = (int)vm.heap[ptr + HEAP_OFFSET_LEN];
+                int newPtr = heap_alloc(len + HEAP_HEADER_ARRAY);
+                vm.heap[newPtr] = TYPE_ARRAY;
+                vm.heap[newPtr + 1] = (double)len;
+
+                for (int i = 0; i < len; i++) {
+                    double elVal = vm.heap[ptr + 2 + i];
+                    int elType = vm.heap_types[ptr + 2 + i];
+                    if (elType != T_NUM) RUNTIME_ERROR("Cannot subtract non-number array element");
+
+                    // Order matters: A - B
+                    if (typeA == T_OBJ) {
+                        // Array - Scalar: [10, 20] - 5 = [5, 15]
+                        vm.heap[newPtr + 2 + i] = elVal - scalar;
+                    } else {
+                        // Scalar - Array: 10 - [1, 2] = [9, 8]
+                        vm.heap[newPtr + 2 + i] = scalar - elVal;
+                    }
+                    vm.heap_types[newPtr + 2 + i] = T_NUM;
+                }
+                vm.stack[vm.sp] = (double)newPtr;
+                vm.stack_types[vm.sp] = T_OBJ;
+            }
+            else {
+                RUNTIME_ERROR("Invalid types for SUB");
+            }
+            break;
+        }
+
         case OP_DIV: {
-            CHECK_STACK(2); double b = vm_pop(); if(b==0) RUNTIME_ERROR("Div by zero"); vm.stack[vm.sp] /= b; break;
+            CHECK_STACK(2);
+            int typeB = vm.stack_types[vm.sp];
+            double valB = vm_pop(); // Right Operand
+            int typeA = vm.stack_types[vm.sp]; // Left Operand
+            double valA = vm.stack[vm.sp];
+
+            // 1. Number / Number
+            if (typeA == T_NUM && typeB == T_NUM) {
+                if (valB == 0) RUNTIME_ERROR("Div by zero");
+                vm.stack[vm.sp] = valA / valB;
+                vm.stack_types[vm.sp] = T_NUM;
+            }
+            // 2. Array Broadcast Division
+            else if (typeA == T_OBJ || typeB == T_OBJ) {
+                int ptr = (typeA == T_OBJ) ? (int)valA : (int)valB;
+                double scalar = (typeA == T_OBJ) ? valB : valA;
+
+                if ((int)vm.heap[ptr] != TYPE_ARRAY) RUNTIME_ERROR("Invalid object type for division");
+                if (typeA == T_OBJ && typeB != T_NUM) RUNTIME_ERROR("Can only divide array by number");
+                if (typeB == T_OBJ && typeA != T_NUM) RUNTIME_ERROR("Can only divide number by array");
+
+                // Check scalar zero div (Array / 0)
+                if (typeA == T_OBJ && scalar == 0) RUNTIME_ERROR("Div by zero");
+
+                int len = (int)vm.heap[ptr + HEAP_OFFSET_LEN];
+                int newPtr = heap_alloc(len + HEAP_HEADER_ARRAY);
+                vm.heap[newPtr] = TYPE_ARRAY;
+                vm.heap[newPtr + 1] = (double)len;
+
+                for (int i = 0; i < len; i++) {
+                    double elVal = vm.heap[ptr + 2 + i];
+                    int elType = vm.heap_types[ptr + 2 + i];
+                    if (elType != T_NUM) RUNTIME_ERROR("Cannot divide non-number array element");
+
+                    if (typeA == T_OBJ) {
+                        // Array / Scalar: [10, 20] / 2 = [5, 10]
+                        vm.heap[newPtr + 2 + i] = elVal / scalar;
+                    } else {
+                        // Scalar / Array: 10 / [2, 5] = [5, 2]
+                        if (elVal == 0) RUNTIME_ERROR("Div by zero in array element");
+                        vm.heap[newPtr + 2 + i] = scalar / elVal;
+                    }
+                    vm.heap_types[newPtr + 2 + i] = T_NUM;
+                }
+                vm.stack[vm.sp] = (double)newPtr;
+                vm.stack_types[vm.sp] = T_OBJ;
+            }
+            else {
+                 RUNTIME_ERROR("Invalid types for DIV");
+            }
+            break;
         }
         case OP_MOD: {
-            CHECK_STACK(2); double b = vm_pop(); if(b==0) RUNTIME_ERROR("Mod by zero"); vm.stack[vm.sp] = fmod(vm.stack[vm.sp], b); break;
+            CHECK_STACK(2);
+            int typeB = vm.stack_types[vm.sp];
+            double valB = vm_pop(); // Right Operand (Divisor)
+            int typeA = vm.stack_types[vm.sp]; // Left Operand (Dividend)
+            double valA = vm.stack[vm.sp];
+
+            // 1. Number % Number
+            if (typeA == T_NUM && typeB == T_NUM) {
+                if (valB == 0) RUNTIME_ERROR("Mod by zero");
+                vm.stack[vm.sp] = fmod(valA, valB);
+                vm.stack_types[vm.sp] = T_NUM;
+            }
+            // 2. Array Broadcast Modulo
+            else if (typeA == T_OBJ || typeB == T_OBJ) {
+                int ptr = (typeA == T_OBJ) ? (int)valA : (int)valB;
+                double scalar = (typeA == T_OBJ) ? valB : valA;
+
+                if ((int)vm.heap[ptr] != TYPE_ARRAY) RUNTIME_ERROR("Invalid object type for modulo");
+                if (typeA == T_OBJ && typeB != T_NUM) RUNTIME_ERROR("Can only mod array by number");
+                if (typeB == T_OBJ && typeA != T_NUM) RUNTIME_ERROR("Can only mod number by array");
+
+                // Check scalar zero mod (Array % 0)
+                if (typeA == T_OBJ && scalar == 0) RUNTIME_ERROR("Mod by zero");
+
+                int len = (int)vm.heap[ptr + HEAP_OFFSET_LEN];
+                int newPtr = heap_alloc(len + HEAP_HEADER_ARRAY);
+                vm.heap[newPtr] = TYPE_ARRAY;
+                vm.heap[newPtr + 1] = (double)len;
+
+                for (int i = 0; i < len; i++) {
+                    double elVal = vm.heap[ptr + 2 + i];
+                    int elType = vm.heap_types[ptr + 2 + i];
+                    if (elType != T_NUM) RUNTIME_ERROR("Cannot mod non-number array element");
+
+                    if (typeA == T_OBJ) {
+                        // Array % Scalar: [10, 11] % 3 = [1, 2]
+                        vm.heap[newPtr + 2 + i] = fmod(elVal, scalar);
+                    } else {
+                        // Scalar % Array: 10 % [3, 4] = [1, 2]
+                        if (elVal == 0) RUNTIME_ERROR("Mod by zero in array element");
+                        vm.heap[newPtr + 2 + i] = fmod(scalar, elVal);
+                    }
+                    vm.heap_types[newPtr + 2 + i] = T_NUM;
+                }
+                vm.stack[vm.sp] = (double)newPtr;
+                vm.stack_types[vm.sp] = T_OBJ;
+            }
+            else {
+                RUNTIME_ERROR("Invalid types for MOD");
+            }
+            break;
         }
         case OP_LT: { CHECK_STACK(2); double b = vm_pop(); vm.stack[vm.sp] = (vm.stack[vm.sp] < b); break; }
         case OP_GT: { CHECK_STACK(2); double b = vm_pop(); vm.stack[vm.sp] = (vm.stack[vm.sp] > b); break; }

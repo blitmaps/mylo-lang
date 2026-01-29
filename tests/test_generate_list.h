@@ -865,8 +865,31 @@ inline TestOutput test_arr_str_slice_assignment() {
 }
 
 
+inline TestOutput test_vector_ops_add() {
 
+    std::string src = """"
+    "var x = [1,2,3,4,5]\n"
+    "x = x[2:3] + x[2]\n"
+    "for (y in x) {\n"
+        "print(y)\n"
+    "}";
+    std::string expected = """"
+    "6\n7\n";
+    return run_source_test(src, expected);
+}
 
+inline TestOutput test_vector_ops_mul() {
+
+    std::string src = """"
+    "var x = [1,2,3,4,5]\n"
+    "x = x * x[2]\n"
+    "for (y in x) {\n"
+        "print(y)\n"
+    "}";
+    std::string expected = """"
+    "3\n6\n9\n12\n15\n";
+    return run_source_test(src, expected);
+}
 
 
 inline void test_generate_list() {
@@ -919,8 +942,8 @@ inline void test_generate_list() {
     ADD_TEST("Test List (remove())", test_list_remove);
     ADD_TEST("Test Map Iterator", test_map_iterator);
     ADD_TEST("Test Map (remove())", test_map_remove);
-
-
+    ADD_TEST("Test Vector (add())", test_vector_ops_add);
+    ADD_TEST("Test Vector (mul())", test_vector_ops_mul);
 }
 
 #endif //MYLO_TEST_GENERATE_LIST_H
