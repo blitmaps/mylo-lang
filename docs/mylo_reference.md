@@ -1,12 +1,10 @@
-<!-- TOC --><a name="mylo-reference"></a>
+<a name="mylo-reference"></a>
 # Mylo Reference
 
-<!-- TOC --><a name="language-basics"></a>
+<a name="language-basics"></a>
 ## Language Basics
 Mylo uses familiar programming concepts: variables, loops, conditional statements, functions, modules etc.
 It is fast to write, fast to run, and can run anywhere.
-
-<!-- TOC start -->
 
 ### Contents
 - [Mylo Reference](#mylo-reference)
@@ -15,11 +13,18 @@ It is fast to write, fast to run, and can run anywhere.
     * [Variables](#variables)
         + [Numbers and Strings](#numbers-and-strings)
     * [Types](#types)
+        + [Structs](#structs)
+        + [Enums](#enums)
+        + [Bools](#bools)
     * [Lists/Arrays](#listsarrays)
         + [Arrays of Structs](#arrays-of-structs)
         + [Adding to or Concatenating Arrays](#adding-to-or-concatenating-arrays)
         + [Sub-Arrays or Array-Slicing](#sub-arrays-or-array-slicing)
+        + [Vector Math & Broadcasting](#vector-math-broadcasting)
+    * [Bytes](#bytes)
     * [Maps](#maps)
+        + [Accessing Values](#accessing-values)
+        + [Modifying and Inserting](#modifying-and-inserting)
     * [Control flow](#control-flow)
         + [Conditionals (If Statements)](#conditionals-if-statements)
         + [For loops](#for-loops)
@@ -36,20 +41,22 @@ It is fast to write, fast to run, and can run anywhere.
         + [Source example.mylo](#source-examplemylo)
         + [Passing variables to C](#passing-variables-to-c)
             - [Getting values back](#getting-values-back)
+            - [Getting Arrays from C](#getting-arrays-from-c)
             - [Sending values to C](#sending-values-to-c)
+            - [Namespace Complexity](#namespace-complexity)
+        + [Getting Type Handles](#getting-type-handles)
+        + [Void blocks](#void-blocks)
+    * [Dynamically Running Native Code - C Bindings](#dynamically-running-native-code---c-bindings)
 
-<!-- TOC end -->
-
-
-<!-- TOC --><a name="technical-intro-for-nerds"></a>
+<a name="technical-intro-for-nerds"></a>
 ## Technical Intro (for nerds)
 Mylo uses a high-level syntax like Python or Javascript, but is *strongly typed*. Code
 is compiled to a virtual machine (VM), and it is executed on any platform with Mylo installed. Mylo also
 supports compiling to a binary, with embedded VM code, as well as interfacing with native libraries.
 
-<!-- TOC --><a name="variables"></a>
+<a name="variables"></a>
 ## Variables
-<!-- TOC --><a name="numbers-and-strings"></a>
+<a name="numbers-and-strings"></a>
 ### Numbers and Strings
 Mylo is strongly typed, but types are inferred for numbers, strings, bools, enums, maps and lists. Here is how to define variables.
 ```javascript
@@ -63,8 +70,9 @@ var my_var = 40
 my_var = "Oh no!"
 ```
 
-<!-- TOC --><a name="types"></a>
+<a name="types"></a>
 ## Types
+<a name="structs"></a>
 ### Structs
 You can make your own types using the `struct` keyword.
 The type is specified after var using the `:` operator
@@ -78,6 +86,7 @@ struct Color {
 // Very red
 var my_colour: Colour = { r=255, g=0, b=0 }
 ```
+<a name="enums"></a>
 ### Enums
 You can also define your own enumerated variations on types like this:
 
@@ -93,6 +102,7 @@ if (myvar == Transport::car) {
 }
 ```
 
+<a name="bools"></a>
 ### Bools
 Truth statements evaluate to 0 for false and 1 for true. These are also codified as `true` and `false`
 
@@ -106,7 +116,7 @@ if (true == false) { // Never true
 print(a)
 ```
 
-<!-- TOC --><a name="listsarrays"></a>
+<a name="listsarrays"></a>
 ## Lists/Arrays
 
 Arrays for string and numbers can be defined just like regular variables,
@@ -115,21 +125,8 @@ using the `[]` syntax.
 var my_list = ["a", "b", "c"]
 var my_list = [1, 2, 3]
 ```
-<!-- TOC --><a name="bytes"></a>
-## Bytes
 
-Bytes can be defined like so:
-
-```javascript
-    var byte = b"0"
-    "print(byte)\n";
-    var byte_array = b"PNG"
-    for (B in byte_array) {
-        print(B)
-    }
-```
-
-<!-- TOC --><a name="arrays-of-structs"></a>
+<a name="arrays-of-structs"></a>
 ### Arrays of Structs
 Arrays of a given struct are defined as usual with type information, and specified with `[]` operators.
 
@@ -140,7 +137,7 @@ struct Color {
 var my_list: Color = [{rgba=1000}, {rgba=2000}]
 ```
 
-<!-- TOC --><a name="adding-to-or-concatenating-arrays"></a>
+<a name="adding-to-or-concatenating-arrays"></a>
 ### Adding to or Concatenating Arrays
 Elements can be added to an array with the `+` operator, with the
 elements to be added in braces `[]`.
@@ -158,7 +155,7 @@ my_list = mylist + [{rgba: 500}]
 print(my_list[0])
 ```
 
-<!-- TOC --><a name="sub-arrays-or-array-slicing"></a>
+<a name="sub-arrays-or-array-slicing"></a>
 ### Sub-Arrays or Array-Slicing
 Elements can be sliced using the `:` operator in the index. Inclusive Slicing (like Ruby ranges or standard math [start, end]) is used so:
 
@@ -184,8 +181,88 @@ for (x: Color in my_list) {
 }
 ```
 
-<!-- TOC --><a name="maps"></a>
+<a name="vector-math-broadcasting"></a>
+### Vector Math & Broadcasting
 
+Mylo supports vector arithmetic, allowing you to apply operations to every element of an array or byte string simultaneously.
+
+#### Number Arrays
+You can use standard math operators (`+`, `-`, `*`, `/`, `%`) between an array and a single number (scalar).
+
+```javascript
+var numbers = [10, 20, 30]
+
+// Addition
+for (x in numbers+5) {
+    print(x)
+}   // [15, 25, 35]
+
+// Subtraction (Scalar - Array supported)
+var numbers = [10, 20, 30]
+
+for (x in 100-numbers) {
+    print(x)
+}  // [90, 80, 70]
+
+// Multiplication
+numbers * 2    // [20, 40, 60]
+
+// Modulo
+var vals = [10, 11, 12]
+vals % 2       // [0, 1, 0]
+```
+
+#### String Broadcasting
+You can add strings to an array to **prepend** or **append** text to every element.
+
+```javascript
+var files = ["image1", "image2"]
+
+// Append: Array + String
+var pngs = files + ".png" 
+// ["image1.png", "image2.png"]
+
+// Prepend: String + Array
+var paths = "/home/user/" + pngs
+// ["/home/user/image1.png", "/home/user/image2.png"]
+```
+
+#### Byte Array Math
+Byte arrays (`b"..."`) support vector math. The result is automatically promoted to a standard List (`TYPE_ARRAY`) to safely handle values that exceed 255 (0xFF).
+
+```javascript
+// Raw bytes: [254, 255]
+var data = b"\xFE\xFF" 
+
+// Add 2 to every byte
+// Result is a number list: [256, 257]
+var result = data + 2 
+
+print(result[0]) // 256
+```
+
+<a name="bytes"></a>
+## Bytes
+
+Bytes can be defined using the `b""` string literal. You can use standard ASCII characters or Hexadecimal escape codes for non-printable bytes.
+
+```javascript
+var byte = b"0"
+print(byte)
+
+// Standard Bytes
+var byte_array = b"PNG"
+for (B in byte_array) {
+    print(B) // Prints 80, 78, 71
+}
+
+// Hexadecimal Escape Codes
+// Represents [255, 0, 10, 65]
+var binary_data = b"\xFF\x00\x0A\x41"
+print(binary_data[0]) // 255
+```
+
+<a name="maps"></a>
 ## Maps (Dictionaries)
 
 Maps are key-value collections where keys are always strings and values can be any type. They are dynamic and will grow as new keys are added.
@@ -203,17 +280,19 @@ var user = {
 }
 ```
 
+<a name="accessing-values"></a>
 ### Accessing Values
 
 Values are retrieved using the bracket syntax `["key"]`.
 
-**Note:** If a key does not exist, accessing it returns an empty string `""` (or default value depending on implementation context).
+**Note:** If a key does not exist, accessing it returns an empty string `""`.
 
 ```javascript
 var name = user["name"]
 print(name) // "Alice"
 ```
 
+<a name="modifying-and-inserting"></a>
 ### Modifying and Inserting
 
 Maps are mutable. You can update existing keys or add new ones using the bracket assignment syntax.
@@ -226,10 +305,10 @@ user["age"] = 31
 user["status"] = "Active"
 ```
 
-<!-- TOC --><a name="control-flow"></a>
+<a name="control-flow"></a>
 ## Control flow
 
-<!-- TOC --><a name="conditionals-if-statements"></a>
+<a name="conditionals-if-statements"></a>
 ### Conditionals (If Statements)
 We can control the flow of our program like this.
 ```javascript
@@ -245,10 +324,10 @@ if (age < 10) {
 Mylo supports binary comparisons the same as C:
 less than`<`, less than or equal to`<=`, greater than`>`, greater than or equal to`>=`, not equal `!=` and  equal to`==`.
 
-<!-- TOC --><a name="for-loops"></a>
+<a name="for-loops"></a>
 ### For loops
 For loops can be range based, checked or iterated. See here:
-<!-- TOC --><a name="range-based"></a>
+<a name="range-based"></a>
 #### Range Based
 ```javascript
 // This is a loop to count from 0 to 4
@@ -266,7 +345,7 @@ output:
 4
 ```
 
-<!-- TOC --><a name="checked"></a>
+<a name="checked"></a>
 #### Checked
 Checked loops check a value each iteration, they could loop
 forever if the checked value is never updated.
@@ -279,7 +358,7 @@ for (index <= 100) {
 }
 ```
 
-<!-- TOC --><a name="iterated"></a>
+<a name="iterated"></a>
 #### Iterated
 Lists can be iterated over, using the `in` keyword.
 ```javascript
@@ -291,7 +370,7 @@ for (x in my_pets) {
     print(x)
 }
 ```
-<!-- TOC --><a name="forever"></a>
+<a name="forever"></a>
 #### Forever
 You can just keep executing a block forever, or until you break out.
 ```javascript
@@ -305,7 +384,7 @@ forever {
     }
 }
 ```
-<!-- TOC --><a name="break-continue"></a>
+<a name="break-and-continue"></a>
 #### Break and Continue
 You can exit a loop early or jump back and begin the next iteration with `break` and `continue`
 
@@ -325,7 +404,7 @@ for (var x in 0...100) {
 }
 ```
 
-<!-- TOC --><a name="functions"></a>
+<a name="functions"></a>
 ## Functions
 
 Subroutines/Functions can be defined to allow variables to be passed
@@ -353,7 +432,7 @@ my_num = add_one_to_my_number(my_num)
 print(my_num)
 ```
 
-<!-- TOC --><a name="passing-own-types"></a>
+<a name="passing-own-types"></a>
 #### Passing own types
 
 Functions can reference any type, but use *Strict Types*. This example show how to use a custom type.
@@ -384,7 +463,7 @@ list_names(myvar0)
 // list_names([99])
 ```
 
-<!-- TOC --><a name="scope-modules"></a>
+<a name="scope-modules"></a>
 ## Scope & Modules
 
 Variables inside functions have their own scope unless they are passed in.
@@ -425,7 +504,7 @@ print(MyFirstMod::a_big_number())
 print(a_big_number())
 ```
 
-<!-- TOC --><a name="import"></a>
+<a name="import"></a>
 ## Import - Using other Mylo files
 Other files, containing modules can be imported into the program using `import`, and search path can be added with
 `module_path()`.
@@ -453,7 +532,7 @@ Now in our main.mylo:
     my_test()
 ```
 
-<!-- TOC --><a name="c-interoperability-foreign-function-interface-ffi"></a>
+<a name="c-interoperability-foreign-function-interface-ffi"></a>
 ## C Interoperability Foreign Function Interface (FFI)
 
 Most software, especially that running at high speed, interfacing with hardware, is written either in C or with a C API.
@@ -462,7 +541,7 @@ To make Mylo useful, C code can be compiled within a Mylo source file.
 This is achieved by compiling the VM assembly and embedding the VM into a C-application, and generating interfaces
 with C variables and functions.
 
-<!-- TOC --><a name="source-examplemylo"></a>
+<a name="source-examplemylo"></a>
 ### Source example.mylo
 ```javascript
 struct foo {
@@ -502,13 +581,13 @@ Our application can then be executed (without a runtime):
   foo.x : 6
 ```
 
-<!-- TOC --><a name="passing-variables-to-c"></a>
+<a name="passing-variables-to-c"></a>
 ### Passing variables to C
 
 It's important to be able to pass information to C, and crucially, to get it back again!
 This includes arbitrary structures from C!
 
-<!-- TOC --><a name="getting-values-back"></a>
+<a name="getting-values-back"></a>
 #### Getting values back
 Mylo's numbers are doubles as default, so we can cast chars or other types and pass them back from C:
 ```javascript
@@ -536,6 +615,7 @@ print(pixel.r) // Now prints 255
 print(pixel.b) // Now prints 128
 ```
 
+<a name="getting-arrays-from-c"></a>
 #### Getting Arrays from C
 ```javascript
 // Unknown return type falls back to 'MyloReturn'
@@ -567,7 +647,7 @@ fn get_bytes() -> any {
 }
 ```
 
-<!-- TOC --><a name="sending-values-to-c"></a>
+<a name="sending-values-to-c"></a>
 #### Sending values to C
 Here we send an int, and a string to c, and print them using
 printf.
@@ -586,8 +666,9 @@ var result: num = C(val: int = a, val2 : str = b, val3 : MyStruct = X) {
 }
 ````
 
-##### Namespace Complexity
-Mylo uses `mod` as its module/namespace seperator. This 
+<a name="namespace-complexity"></a>
+#### Namespace Complexity
+Mylo uses `mod` as its module/namespace seperator. This
 must be reflected in C bindings using underscores to type names, like so:
 
 ````javascript
@@ -616,6 +697,7 @@ mod FOO {
 ````
 
 
+<a name="getting-type-handles"></a>
 #### Getting Type Handles !
 
 Libraries have custom types in C. Mylo has memory handlers which
@@ -651,6 +733,7 @@ C(id: num = img_id) {
 }
 ```
 
+<a name="void-blocks"></a>
 #### Void blocks
 
 Running C code can return no values
@@ -675,7 +758,7 @@ fn C() {
 
 ### Including C Headers
 
-To include C header code (to define functions to call in native blocks) you use 
+To include C header code (to define functions to call in native blocks) you use
 the 'C' identifier in import statements
 ```javascript
 import C "cool_func.h"
@@ -685,6 +768,7 @@ C() {
 }
 ```
 
+<a name="dynamically-running-native-code---c-bindings"></a>
 ## Dynamically Running Native Code - C Bindings
 
 ### Building a Dynamic C Library, to use in the Mylo Interpreter
@@ -696,7 +780,7 @@ compiled C code and use them. Here is a simple example included below.
 You will need two files: the Library (test_lib.mylo) containing the C code, and the App (test_app.mylo) that imports and runs it.
 
 ### 1. The Library (test_lib.mylo)
-This file defines the C functionality we want to share. It is a regular Mylo file, 
+This file defines the C functionality we want to share. It is a regular Mylo file,
 but had inline C.
 
 ```javascript

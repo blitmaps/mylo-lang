@@ -275,22 +275,20 @@ void next_token() {
             if (*src == '\n') line++;
 
             // Check for \x followed by two hex digits
-            if (*src == '\\' && *(src+1) == 'x' &&
+            if (*src == '\\' && *(src + 1) == 'x' &&
                 isxdigit((unsigned char)*(src+2)) &&
                 isxdigit((unsigned char)*(src+3))) {
-
-                char c1 = *(src+2);
-                char c2 = *(src+3);
+                char c1 = *(src + 2);
+                char c2 = *(src + 3);
 
                 int v1 = (isdigit(c1) ? c1 - '0' : tolower(c1) - 'a' + 10);
                 int v2 = (isdigit(c2) ? c2 - '0' : tolower(c2) - 'a' + 10);
 
                 if (idx < MAX_IDENTIFIER - 1) {
-                    curr.text[idx++] = (char)((v1 << 4) | v2);
+                    curr.text[idx++] = (char) ((v1 << 4) | v2);
                 }
                 src += 4; // Skip \xNN
-                }
-            else {
+            } else {
                 if (idx < MAX_IDENTIFIER - 1) {
                     curr.text[idx++] = *src;
                 }
@@ -1910,8 +1908,9 @@ void generate_binding_c_source(const char *output_filename) {
 
         if (strcmp(ret_type, "num") == 0) fprintf(fp, "    vm_push(res, T_NUM);\n");
         else if (strcmp(ret_type, "void") == 0) fprintf(fp, "    vm_push(0.0, T_NUM);\n");
-        else if (strcmp(ret_type, "string") == 0) fprintf(
-            fp, "    int id = make_string(s);\n    vm_push((double)id, T_STR);\n");
+        else if (strcmp(ret_type, "string") == 0)
+            fprintf(
+                fp, "    int id = make_string(s);\n    vm_push((double)id, T_STR);\n");
         else if (strlen(ret_type) > 0) {
             int st_idx = -1;
             for (int s = 0; s < struct_count; s++) if (strcmp(struct_defs[s].name, ret_type) == 0) st_idx = s;
