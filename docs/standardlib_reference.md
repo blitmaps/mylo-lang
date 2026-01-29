@@ -11,6 +11,9 @@ The Mylo Standard Library provides essential functions for file I/O, math, and d
   * [Utility Functions](#utility-functions)
     + [`len(collection: any) -> num`](#lencollection-any-num)
     + [`contains(haystack: any, needle: any) -> num`](#containshaystack-any-needle-any-num)
+    + [`list(size: num) -> arr`](#listsize-num---arr)
+    + [`add(array: arr, index: num, value: any) -> arr`](#addarray-arr-index-num-value-any---arr)
+    + [`remove(collection: any, key: any) -> obj`](#removecollection-any-key-any---obj)
   * [Type Conversion](#type-conversion)
     + [`to_string(value: any) -> str`](#to_string)
     + [`to_num(value: any) -> num`](#to_num)
@@ -93,6 +96,75 @@ if (contains("Teamwork", "work")) {
     print("Found substring!")
 }
 ```
+
+<a name="listsize-num-arr"></a>
+### `list(size: num) -> arr`
+
+Creates a new array of a specific size, initialized with zeros.
+
+**Arguments:**
+* `size`: The number of elements to allocate.
+
+**Returns:**
+* A new array containing `size` zeros.
+
+**Example:**
+```javascript
+var buffer = list(10)
+print(len(buffer)) // 10
+print(buffer[0])   // 0
+```
+
+<a name="addarray-arr-index-num-value-any-arr"></a>
+### `add(array: arr, index: num, value: any) -> arr`
+
+Inserts a value into an array at a specific index, shifting subsequent elements to the right.
+
+**Important:** Arrays in Mylo are fixed-size in memory. This function creates and returns a **new** array. You must assign the result back to your variable to see the change.
+
+**Arguments:**
+* `array`: The source array.
+* `index`: The position to insert the value (0 to len).
+* `value`: The value to insert.
+
+**Returns:**
+* A **new** array with the element added.
+
+**Example:**
+```javascript
+var weights = [10, 20]
+// Insert 15 at index 1
+weights = add(weights, 1, 15) 
+print(weights) // [10, 15, 20]
+```
+
+<a name="removecollection-any-key-any-obj"></a>
+### `remove(collection: any, key: any) -> obj`
+
+Removes an element from a collection **in-place**.
+
+**Arguments:**
+* `collection`: The array or map to modify.
+* `key`: The identifier for the item to remove.
+  * **Array**: The numeric **index** of the item. Elements after this index are shifted left.
+  * **Map**: The **key** (string) of the entry to remove.
+
+**Returns:**
+* Returns the modified collection to support chaining (e.g., `remove(arr, 0)`).
+
+**Example:**
+```javascript
+// Array Removal
+var items = ["A", "B", "C"]
+remove(items, 1) // Remove index 1 ("B")
+print(items) // ["A", "C"]
+
+// Map Removal
+var data = {"name"="Mylo", "ver"=1}
+remove(data, "ver")
+print(data) // {"name"="Mylo"}
+```
+
 <!-- TOC --><a name="type-conversion"></a>
 ## Type Conversion
 <!-- TOC --><a name="to_string"></a>
