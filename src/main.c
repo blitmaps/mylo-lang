@@ -1,3 +1,4 @@
+#define VERSION_INFO "0.1.4"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -51,7 +52,7 @@ void disassemble() {
 }
 
 int main(int argc, char** argv) {
-    printf("--- MYLO COMPILER v2 (STRUCTS ENABLED) ---\n"); // Add this
+
     vm_init();
 
     if (argc < 2) { printf("Usage: mylo [--run|--build|--bind] <file> [--dump] [--trace] [--debug]\n"); return 1; }
@@ -61,6 +62,7 @@ int main(int argc, char** argv) {
     bool dump = false;
     bool trace = false;
     bool debug_mode = false;
+    bool version = false;
     char* fn = NULL;
 
     for (int i = 1; i < argc; i++) {
@@ -70,7 +72,13 @@ int main(int argc, char** argv) {
         else if (strcmp(argv[i], "--dump") == 0) dump = true;
         else if (strcmp(argv[i], "--trace") == 0) trace = true;
         else if (strcmp(argv[i], "--debug") == 0) debug_mode = true;
+        else if (strcmp(argv[i], "--version") == 0) version = true;
         else fn = argv[i];
+    }
+
+    if (version) {
+        printf("Mylo version %s\n", VERSION_INFO);
+        return 0;
     }
     // Disable dlopen
     MyloConfig.build_mode = build_mode;

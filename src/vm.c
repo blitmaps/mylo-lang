@@ -24,7 +24,10 @@ const char *OP_NAMES[] = {
     "ARR", "AGET", "ALEN", "SLICE",
     "MAP", "ASET",
     "MK_BYTES",
-    "SLICE_SET"
+    "SLICE_SET",
+    "IT_KEY",
+    "IT_VAL",
+    "IT_DEF"
 };
 
 // --- REFERENCE MANAGEMENT ---
@@ -467,7 +470,7 @@ int vm_step(bool debug_trace) {
             else vm_push(vm.heap[ptr+1], T_NUM);
             break;
         }
-case OP_SLICE: {
+        case OP_SLICE: {
             CHECK_STACK(3);
             double e = vm_pop();
             double s = vm_pop();
@@ -660,6 +663,58 @@ case OP_SLICE: {
             }
 
             vm_push(val, vt); // Assignment evaluates to the value assigned
+            break;
+        }
+            case OP_IT_KEY:
+        case OP_IT_VAL:
+        case OP_IT_DEF: {
+            CHECK_STACK(2);
+            double idx_val = vm_pop();
+            double obj_val = vm_pop();
+            int idx = (int)idx_val;
+            int ptr = (int)obj_val;
+            int type = (int)vm.heap[ptr];
+
+            if (type == TYPE_ARRAY || type == TYPE_BYTES) {
+                int len = (int)vm.heap[ptr + HEAP_OFFSET_LEN];
+                if (idx < 0 || idx >= len) RUNTIME_ERROR("Iterator OOB");
+
+                if (op == OP_IT_KEY) {
+                    // For arrays, Key is the Index
+                    vm_push((double)idx, T_NUM);
+                } else {
+                    // OP_IT_VAL or OP_IT_DEF (Array default is Value)
+                    if (type == TYPE_BYTES) {
+                         unsigned char* b = (unsigned char*)&vm.heap[ptr + HEAP_HEADER_ARRAY];
+                         vm_push((double)b[idx], T_NUM);
+                    } else {
+                         vm_push(vm.heap[ptr + 2 + idx], vm.heap_types[ptr + 2 + idx]);
+                    }
+                }
+            }
+            else if (type == TYPE_MAP) {
+                int count = (int)vm.heap[ptr + HEAP_OFFSET_COUNT];
+                if (idx < 0 || idx >= count) RUNTIME_ERROR("Iterator OOB");
+
+                int data = (int)vm.heap[ptr + HEAP_OFFSET_DATA];
+
+                // Map Memory Layout: [Key, Value, Key, Value...]
+                // Key is at 2*idx, Value is at 2*idx + 1
+
+                if (op == OP_IT_VAL) {
+                    // Explicit Value Request
+                    vm_push(vm.heap[data + idx * 2 + 1], vm.heap_types[data + idx * 2 + 1]);
+                } else if (op == OP_IT_KEY) {
+                    // Explicit Key Request
+                    vm_push(vm.heap[data + idx * 2], vm.heap_types[data + idx * 2]);
+                } else {
+                    // OP_IT_DEF: Default for 'for(x in map)' is Key
+                    vm_push(vm.heap[data + idx * 2], vm.heap_types[data + idx * 2]);
+                }
+            }
+            else {
+                RUNTIME_ERROR("Type not iterable");
+            }
             break;
         }
         case OP_HLT: return -1;

@@ -748,6 +748,18 @@ inline TestOutput test_byte_iterator() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_map_iterator() {
+
+    std::string src = """"
+    "var header = {\"cat\"=\"Glad\", \"dog\"=\"Meg\"}"
+    "for (key, value in header) {\n"
+    "print(f\"{key}, {value}\")\n"
+    "}";
+    std::string expected = """"
+    "cat, Glad\ndog, Meg\n";
+    return run_source_test(src, expected);
+}
+
 inline TestOutput test_byte_slice_iterator() {
 
     std::string src = """"
@@ -784,6 +796,58 @@ inline TestOutput test_array_slice_assignment() {
     "}";
     std::string expected = """"
     "1\n5\n6\n4\n";
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_list_reserve() {
+
+    std::string src = """"
+    "var header: num[] = list(5)\n"
+    "for (x in header) {\n"
+        "print(x)\n"
+    "}";
+    std::string expected = """"
+    "0\n0\n0\n0\n0\n";
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_list_add() {
+
+    std::string src = """"
+    "var header: num[] = list(4)\n"
+    "header = add(header, 1, 22)"
+    "for (x in header) {\n"
+        "print(x)\n"
+    "}";
+    std::string expected = """"
+    "0\n22\n0\n0\n0\n";
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_list_remove() {
+
+    std::string src = """"
+    "var header: num[] = list(4)\n"
+    "header = add(header, 1, 22)\n"
+    "header = remove(header, 0)"
+    "for (x in header) {\n"
+        "print(x)\n"
+    "}";
+    std::string expected = """"
+    "22\n0\n0\n0\n";
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_map_remove() {
+
+    std::string src = """"
+    "var header = {\"cat\"=\"Glad\", \"dog\"=\"Meg\"}\n"
+    "header = remove(header, \"cat\")\n"
+    "for (key, value in header) {\n"
+    "print(f\"{key}, {value}\")\n"
+    "}";
+    std::string expected = """"
+    "dog, Meg\n";
     return run_source_test(src, expected);
 }
 
@@ -850,6 +914,11 @@ inline void test_generate_list() {
     ADD_TEST("Test bytes (slice-assignment)", test_byte_slice_assignment);
     ADD_TEST("Test Array (slice-assignment)", test_array_slice_assignment);
     ADD_TEST("Test Array Str (slice-assignment)", test_arr_str_slice_assignment);
+    ADD_TEST("Test List (list(10))", test_list_reserve);
+    ADD_TEST("Test List (add())", test_list_add);
+    ADD_TEST("Test List (remove())", test_list_remove);
+    ADD_TEST("Test Map Iterator", test_map_iterator);
+    ADD_TEST("Test Map (remove())", test_map_remove);
 
 
 }

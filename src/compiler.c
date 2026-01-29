@@ -148,6 +148,7 @@ void error(const char *fmt, ...) {
     fprintf(stderr, "%s\n", buffer);
     exit(1);
 }
+
 // --- Helper Prototypes ---
 void emit(int op) {
     if (vm.code_size >= MAX_CODE) {
@@ -861,14 +862,22 @@ int alloc_var(bool is_loc, char *name, int type_id, bool is_array) {
 void for_statement() {
     match(TK_FOR);
     match(TK_LPAREN);
-    char name[MAX_IDENTIFIER] = {0};
+
+    char name1[MAX_IDENTIFIER] = {0};
+    char name2[MAX_IDENTIFIER] = {0};
+
     bool is_iter = false;
+    bool is_pair = false; // True if 'for (k, v in ...)'
     int explicit_type = -1;
 
+    // --- PARSING LOGIC ---
     if (curr.type == TK_VAR) {
+        // Form: for (var x ...)
         match(TK_VAR);
-        strcpy(name, curr.text);
+        strcpy(name1, curr.text);
         match(TK_ID);
+        // We don't support 'var k, v' in loop currently, just simple var
+        // Check for type annotation
         if (curr.type == TK_COLON) {
             match(TK_COLON);
             char tn[MAX_IDENTIFIER];
@@ -877,65 +886,98 @@ void for_statement() {
         }
         is_iter = true;
     } else if (curr.type == TK_ID) {
+        // Form: for (x ...) or for (x, y ...) or for (expr)
         char *safe_src = src;
         Token safe_curr = curr;
         int safe_line = line;
-        char temp_name[MAX_IDENTIFIER];
-        strcpy(temp_name, curr.text);
+
+        // Try to parse 'ID' or 'ID, ID' followed by 'IN'
+        strcpy(name1, curr.text);
         match(TK_ID);
-        if (curr.type == TK_COLON) {
+
+        // Check for pair unpacking: "key, value"
+        if (curr.type == TK_COMMA) {
+            match(TK_COMMA);
+            strcpy(name2, curr.text);
+            match(TK_ID);
+            is_pair = true;
+        }
+
+        // Type annotation (only on first var if single, or skipped for simplicity here)
+        if (!is_pair && curr.type == TK_COLON) {
             match(TK_COLON);
             char tn[MAX_IDENTIFIER];
             parse_namespaced_id(tn);
             explicit_type = find_struct(tn);
         }
+
         if (curr.type == TK_IN) {
             is_iter = true;
-            strcpy(name, temp_name);
         } else {
+            // Not an iterator loop, backtrack and parse as standard C-style 'for (expr;...)'
             src = safe_src;
             curr = safe_curr;
             line = safe_line;
+            is_iter = false;
         }
     }
 
+    // --- CODE GENERATION ---
     if (is_iter) {
         push_loop();
-        int var_addr = -1;
+
+        // 1. Setup Variables
+        int var1_addr = -1;
+        int var2_addr = -1;
         bool is_local = inside_function;
-        bool created = false;
-        if (is_local) {
-            int loc = find_local(name);
-            if (loc != -1) var_addr = loc;
-            else {
-                var_addr = alloc_var(true, name, explicit_type, false);
-                created = true;
+
+        // Helper to find or alloc variable
+        int get_var_addr(char *n)
+        {
+            if (is_local) {
+                int loc = find_local(n);
+                if (loc != -1) return loc;
+                emit(OP_PSH_NUM);
+                emit(make_const(0.0)); // Init
+                return alloc_var(true, n, explicit_type, false);
+            } else {
+                char m[MAX_IDENTIFIER * 2];
+                get_mangled_name(m, n);
+                int glob = find_global(m);
+                if (glob != -1) return glob;
+                emit(OP_PSH_NUM);
+                emit(make_const(0.0)); // Init
+                return alloc_var(false, n, explicit_type, false);
             }
-        } else {
-            char m[MAX_IDENTIFIER * 2];
-            get_mangled_name(m, name);
-            int glob = find_global(m);
-            if (glob != -1) var_addr = glob;
-            else var_addr = alloc_var(false, name, explicit_type, false);
         }
-        if (created) {
-            emit(OP_PSH_NUM);
-            emit(make_const(0.0));
+
+        var1_addr = get_var_addr(name1);
+        if (is_pair) {
+            var2_addr = get_var_addr(name2);
         }
 
         match(TK_IN);
-        expression();
+        expression(); // Pushes the Array/Map/Range
 
+        // 2. Handle Range "0...10" Optimization
         if (curr.type == TK_RANGE) {
-            if (!is_local) {
-                emit(OP_SET);
-                emit(var_addr);
-            } else { EMIT_SET(is_local, var_addr); }
+            if (is_pair) error("Cannot unpack key/value from range loop");
+
+            // ... (Insert existing Range Loop Logic here) ...
+            // Note: Since you didn't ask to change Range logic, you can keep the existing
+            // code block for TK_RANGE found in your original compiler.c
+            // For brevity, I am omitting the copy-paste of the large range block
+            // but ensure you retain it!
+
+            // Placeholder for existing range logic:
+            EMIT_SET(is_local, var1_addr);
             match(TK_RANGE);
+            // ... existing range implementation ...
+            // (Copy from your provided compiler.c lines 1120-1175)
             int t = make_const(curr.val_float);
             match(TK_NUM);
             int s = alloc_var(is_local, "_step", -1, false);
-            EMIT_GET(is_local, var_addr);
+            EMIT_GET(is_local, var1_addr);
             emit(OP_PSH_NUM);
             emit(t);
             emit(OP_LT);
@@ -948,7 +990,7 @@ void for_statement() {
             int p2 = vm.code_size;
             emit(0);
             vm.bytecode[p1] = vm.code_size;
-            EMIT_GET(is_local, var_addr);
+            EMIT_GET(is_local, var1_addr);
             emit(OP_PSH_NUM);
             emit(t);
             emit(OP_GT);
@@ -975,31 +1017,39 @@ void for_statement() {
             while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
             match(TK_RBRACE);
             int continue_dest = vm.code_size;
-            EMIT_GET(is_local, var_addr);
+            EMIT_GET(is_local, var1_addr);
             EMIT_GET(is_local, s);
             emit(OP_ADD);
-            EMIT_SET(is_local, var_addr);
+            EMIT_SET(is_local, var1_addr);
             emit(OP_PSH_NUM);
             emit(t);
-            EMIT_GET(is_local, var_addr);
+            EMIT_GET(is_local, var1_addr);
             emit(OP_SUB);
             emit(OP_JNZ);
             emit(loop);
             pop_loop(continue_dest, vm.code_size);
-        } else {
+            return;
+        }
+
+        // 3. Generic Iterator (Arrays, Maps, Lists)
+        else {
             int a = alloc_var(is_local, "_arr", -1, true);
             if (!is_local) {
                 emit(OP_SET);
                 emit(a);
-            }
+            } // Store Expr Result
+
             int i = alloc_var(is_local, "_idx", -1, false);
             emit(OP_PSH_NUM);
             emit(make_const(0.0));
             if (!is_local) {
                 emit(OP_SET);
                 emit(i);
-            }
+            } // i = 0
+
             int loop = vm.code_size;
+
+            // Condition: i < len(arr)
             EMIT_GET(is_local, i);
             EMIT_GET(is_local, a);
             emit(OP_ALEN);
@@ -1007,26 +1057,50 @@ void for_statement() {
             emit(OP_JZ);
             int exit = vm.code_size;
             emit(0);
-            EMIT_GET(is_local, a);
-            EMIT_GET(is_local, i);
-            emit(OP_AGET);
-            EMIT_SET(is_local, var_addr);
+
+            // Assignment: var = arr[i] OR k,v = key(i), val(i)
+            if (is_pair) {
+                // Key (var1)
+                EMIT_GET(is_local, a);
+                EMIT_GET(is_local, i);
+                emit(OP_IT_KEY);
+                EMIT_SET(is_local, var1_addr);
+
+                // Value (var2)
+                EMIT_GET(is_local, a);
+                EMIT_GET(is_local, i);
+                emit(OP_IT_VAL);
+                EMIT_SET(is_local, var2_addr);
+            } else {
+                // Single Var (Default Behavior)
+                // Maps -> Key, Arrays -> Value
+                EMIT_GET(is_local, a);
+                EMIT_GET(is_local, i);
+                emit(OP_IT_DEF); // Replaces OP_AGET
+                EMIT_SET(is_local, var1_addr);
+            }
+
             match(TK_RPAREN);
             match(TK_LBRACE);
             while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
             match(TK_RBRACE);
+
             int continue_dest = vm.code_size;
+
+            // i++
             EMIT_GET(is_local, i);
             emit(OP_PSH_NUM);
             emit(make_const(1.0));
             emit(OP_ADD);
             EMIT_SET(is_local, i);
+
             emit(OP_JMP);
             emit(loop);
             vm.bytecode[exit] = vm.code_size;
             pop_loop(continue_dest, vm.code_size);
         }
     } else {
+        // C-Style For Loop (Existing Logic)
         push_loop();
         int loop = vm.code_size;
         expression();
@@ -1519,12 +1593,12 @@ void statement() {
                         match(TK_RBRACKET);
                         if (curr.type == TK_EQ_ASSIGN) {
                             match(TK_EQ_ASSIGN);
-                            expression();       // Parse the value (e.g. b"22")
+                            expression(); // Parse the value (e.g. b"22")
                             emit(OP_SLICE_SET); // Emit the Setter
-                            emit(OP_POP);       // Clean stack (statement ends)
-                            break;              // Break the . or [] loop
+                            emit(OP_POP); // Clean stack (statement ends)
+                            break; // Break the . or [] loop
                         }
-                        emit(OP_SLICE);     // Emit the Getter
+                        emit(OP_SLICE); // Emit the Getter
                     } else {
                         match(TK_RBRACKET);
                         if (curr.type == TK_EQ_ASSIGN) {
@@ -1651,7 +1725,7 @@ void function() {
     vm.bytecode[p] = vm.code_size;
 
     int func_end_ip = vm.code_size;
-    for(int i = start_debug_idx; i < debug_symbol_count; i++) {
+    for (int i = start_debug_idx; i < debug_symbol_count; i++) {
         if (debug_symbols[i].end_ip == -1) {
             debug_symbols[i].end_ip = func_end_ip;
         }
@@ -1678,7 +1752,7 @@ void parse_internal(char *source, bool is_import) {
     if (!is_import) emit(OP_HLT);
 
     int end_ip = vm.code_size;
-    for(int i = start_debug_idx; i < debug_symbol_count; i++) {
+    for (int i = start_debug_idx; i < debug_symbol_count; i++) {
         if (debug_symbols[i].end_ip == -1) {
             debug_symbols[i].end_ip = end_ip;
         }
@@ -1777,7 +1851,7 @@ void generate_binding_c_source(const char *output_filename) {
                 fprintf(fp, "double %s", ffi_blocks[i].args[a].name);
             else
                 // It is a struct! Generate a pointer to the C struct (e.g. c_RGB*)
-                    fprintf(fp, "c_%s* %s", type, ffi_blocks[i].args[a].name);
+                fprintf(fp, "c_%s* %s", type, ffi_blocks[i].args[a].name);
 
             if (a < ffi_blocks[i].arg_count - 1) fprintf(fp, ", ");
         }
@@ -1815,7 +1889,8 @@ void generate_binding_c_source(const char *output_filename) {
 
         if (strcmp(ret_type, "num") == 0) fprintf(fp, "    vm_push(res, T_NUM);\n");
         else if (strcmp(ret_type, "void") == 0) fprintf(fp, "    vm_push(0.0, T_NUM);\n");
-        else if (strcmp(ret_type, "string") == 0) fprintf(fp, "    int id = make_string(s);\n    vm_push((double)id, T_STR);\n");
+        else if (strcmp(ret_type, "string") == 0) fprintf(
+            fp, "    int id = make_string(s);\n    vm_push((double)id, T_STR);\n");
         else if (strlen(ret_type) > 0) {
             int st_idx = -1;
             for (int s = 0; s < struct_count; s++) if (strcmp(struct_defs[s].name, ret_type) == 0) st_idx = s;
@@ -1823,7 +1898,8 @@ void generate_binding_c_source(const char *output_filename) {
                 fprintf(fp, "    int ptr = heap_alloc(%d + HEAP_HEADER_STRUCT);\n", struct_defs[st_idx].field_count);
                 fprintf(fp, "    host_heap_ptr[ptr + HEAP_OFFSET_TYPE] = %d.0;\n", st_idx);
                 for (int f = 0; f < struct_defs[st_idx].field_count; f++) {
-                    fprintf(fp, "    host_heap_ptr[ptr + HEAP_HEADER_STRUCT + %d] = val.%s;\n", f, struct_defs[st_idx].fields[f]);
+                    fprintf(fp, "    host_heap_ptr[ptr + HEAP_HEADER_STRUCT + %d] = val.%s;\n", f,
+                            struct_defs[st_idx].fields[f]);
                 }
                 fprintf(fp, "    vm_push((double)ptr, T_OBJ);\n");
             }
@@ -1866,7 +1942,7 @@ void generate_binding_c_source(const char *output_filename) {
     fprintf(fp, "    host_natives_array = api->natives_array;\n");
     fprintf(fp, "    host_heap_ptr = api->heap;\n");
 
-    for(int i=0; i<ffi_count; i++) {
+    for (int i = 0; i < ffi_count; i++) {
         fprintf(fp, "    host_natives_array[start_index + %d] = __wrapper_%d;\n", i, i);
     }
 
@@ -1877,6 +1953,7 @@ void generate_binding_c_source(const char *output_filename) {
     printf("Binding source generated at %s\n", output_filename);
     printf("Example compile: cc -shared -fPIC %s -I. -o libname.so\n", output_filename);
 }
+
 void compile_to_c_source(const char *output_filename) {
     FILE *fp = fopen(output_filename, "w");
     if (!fp) {
