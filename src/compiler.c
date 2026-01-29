@@ -266,18 +266,39 @@ void next_token() {
     }
 
     curr.line = line;
-    //  byte string
+    //  byte string with hex escape parsing
     if (*src == 'b' && *(src + 1) == '"') {
         src += 2;
-        char *start = src;
+        int idx = 0;
+
         while (*src != '"' && *src != 0) {
             if (*src == '\n') line++;
-            src++;
+
+            // Check for \x followed by two hex digits
+            if (*src == '\\' && *(src+1) == 'x' &&
+                isxdigit((unsigned char)*(src+2)) &&
+                isxdigit((unsigned char)*(src+3))) {
+
+                char c1 = *(src+2);
+                char c2 = *(src+3);
+
+                int v1 = (isdigit(c1) ? c1 - '0' : tolower(c1) - 'a' + 10);
+                int v2 = (isdigit(c2) ? c2 - '0' : tolower(c2) - 'a' + 10);
+
+                if (idx < MAX_IDENTIFIER - 1) {
+                    curr.text[idx++] = (char)((v1 << 4) | v2);
+                }
+                src += 4; // Skip \xNN
+                }
+            else {
+                if (idx < MAX_IDENTIFIER - 1) {
+                    curr.text[idx++] = *src;
+                }
+                src++;
+            }
         }
-        int len = (int) (src - start);
-        if (len > MAX_IDENTIFIER - 1) len = MAX_IDENTIFIER - 1;
-        strncpy(curr.text, start, len);
-        curr.text[len] = '\0';
+
+        curr.text[idx] = '\0';
         if (*src == '"') src++;
         curr.type = TK_BSTR;
         return;

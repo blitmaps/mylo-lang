@@ -736,6 +736,18 @@ inline TestOutput test_bytes_print() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_bytes_hex_print() {
+
+    std::string src = """"
+    "var header = b\"\\xFF\"\n"
+    "print(to_num(header[0]))\n";
+
+    std::string expected = """"
+    "255\n";
+    return run_source_test(src, expected);
+}
+
+
 inline TestOutput test_byte_iterator() {
 
     std::string src = """"
@@ -946,6 +958,7 @@ inline void test_generate_list() {
     ADD_TEST("Test bool", test_bool);
     ADD_TEST("Test forever", test_forever);
     ADD_TEST("Test bytes (print)", test_bytes_print);
+    ADD_TEST("Test bytes (hex)", test_bytes_hex_print);
     ADD_TEST("Test bytes (for)", test_byte_iterator);
     ADD_TEST("Test bytes (slice)", test_byte_slice_iterator);
     ADD_TEST("Test bytes (slice-assignment)", test_byte_slice_assignment);
@@ -959,7 +972,6 @@ inline void test_generate_list() {
     ADD_TEST("Test Vector (add())", test_vector_ops_add);
     ADD_TEST("Test Vector (mul())", test_vector_ops_mul);
     ADD_TEST("Test Vector(str) (add())", test_vector_str_add);
-
 }
 
 #endif //MYLO_TEST_GENERATE_LIST_H
