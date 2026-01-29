@@ -891,6 +891,20 @@ inline TestOutput test_vector_ops_mul() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_vector_str_add() {
+
+    std::string src = """"
+    "var x = [\"cat\",\"dog\"]\n"
+    "x = x + \"fish\"\n"
+    "for (y in x) {\n"
+        "print(y)\n"
+    "}";
+    std::string expected = """"
+    "catfish\ndogfish\n";
+    return run_source_test(src, expected);
+}
+
+
 
 inline void test_generate_list() {
     ADD_TEST("Test Test", test_test);
@@ -944,6 +958,8 @@ inline void test_generate_list() {
     ADD_TEST("Test Map (remove())", test_map_remove);
     ADD_TEST("Test Vector (add())", test_vector_ops_add);
     ADD_TEST("Test Vector (mul())", test_vector_ops_mul);
+    ADD_TEST("Test Vector(str) (add())", test_vector_str_add);
+
 }
 
 #endif //MYLO_TEST_GENERATE_LIST_H
