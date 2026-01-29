@@ -747,7 +747,6 @@ inline TestOutput test_bytes_hex_print() {
     return run_source_test(src, expected);
 }
 
-
 inline TestOutput test_byte_iterator() {
 
     std::string src = """"
@@ -916,7 +915,16 @@ inline TestOutput test_vector_str_add() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_bytes_vector_add() {
 
+    std::string src = """"
+    "var header = b\"\\xFE\\xFE\"\n"
+    "var b = b + 1"
+    "print(to_num(header[0]))\n";
+    std::string expected = """"
+    "255\n";
+    return run_source_test(src, expected);
+}
 
 inline void test_generate_list() {
     ADD_TEST("Test Test", test_test);
@@ -972,6 +980,8 @@ inline void test_generate_list() {
     ADD_TEST("Test Vector (add())", test_vector_ops_add);
     ADD_TEST("Test Vector (mul())", test_vector_ops_mul);
     ADD_TEST("Test Vector(str) (add())", test_vector_str_add);
+    ADD_TEST("Test Vector(byte) (add())", test_bytes_vector_add);
+
 }
 
 #endif //MYLO_TEST_GENERATE_LIST_H
