@@ -304,6 +304,144 @@ void std_write_bytes(VM *vm) {
     vm_push(1.0, T_NUM);
 }
 
+// --- New Array/List Functions ---
+
+// Usage: var x = list(100)
+void std_list(VM *vm) {
+    double size_val = vm_pop();
+    int size = (int)size_val;
+
+    if (size < 0) {
+        printf("Runtime Error: list() size must be positive\n");
+        exit(1);
+    }
+
+    int ptr = heap_alloc(size + HEAP_HEADER_ARRAY);
+    vm->heap[ptr + HEAP_OFFSET_TYPE] = TYPE_ARRAY;
+    vm->heap[ptr + HEAP_OFFSET_LEN] = (double)size;
+
+    // Initialize with 0.0
+    for(int i = 0; i < size; i++) {
+        vm->heap[ptr + HEAP_HEADER_ARRAY + i] = 0.0;
+        vm->heap_types[ptr + HEAP_HEADER_ARRAY + i] = T_NUM;
+    }
+
+    vm_push((double)ptr, T_OBJ);
+}
+
+// Usage: remove(arr, index) or remove(map, key)
+// Usage: remove(arr, index) or remove(map, key)
+void std_remove(VM *vm) {
+    double key_val = vm_pop();
+    int key_type = vm->stack_types[vm->sp + 1];
+    double obj_val = vm_pop();
+
+    // Safety checks
+    if (vm->stack_types[vm->sp + 1] != T_OBJ) {
+        printf("Runtime Error: remove() expects an object\n");
+        exit(1);
+    }
+
+    int ptr = (int)obj_val;
+    int type = (int)vm->heap[ptr + HEAP_OFFSET_TYPE];
+
+    if (type == TYPE_ARRAY) {
+        int index = (int)key_val;
+        int len = (int)vm->heap[ptr + HEAP_OFFSET_LEN];
+
+        // Handle negative indexing
+        if (index < 0) index += len;
+
+        if (index >= 0 && index < len) {
+            // Shift elements down from index+1 to end
+            for (int i = index; i < len - 1; i++) {
+                vm->heap[ptr + HEAP_HEADER_ARRAY + i] = vm->heap[ptr + HEAP_HEADER_ARRAY + i + 1];
+                vm->heap_types[ptr + HEAP_HEADER_ARRAY + i] = vm->heap_types[ptr + HEAP_HEADER_ARRAY + i + 1];
+            }
+            // Decrement length
+            vm->heap[ptr + HEAP_OFFSET_LEN] = (double)(len - 1);
+        }
+    }
+    else if (type == TYPE_MAP) {
+        int count = (int)vm->heap[ptr + HEAP_OFFSET_COUNT];
+        int data = (int)vm->heap[ptr + HEAP_OFFSET_DATA];
+
+        for (int i = 0; i < count; i++) {
+            // Find key
+            double k = vm->heap[data + i * 2];
+            int kt = vm->heap_types[data + i * 2];
+
+            // Note: String keys are compared by pointer ID here for simplicity
+            if (k == key_val && kt == key_type) {
+                // Shift remaining pairs down
+                int pairs_to_move = count - 1 - i;
+                if (pairs_to_move > 0) {
+                    for(int j = 0; j < pairs_to_move * 2; j++) {
+                        vm->heap[data + i * 2 + j] = vm->heap[data + (i + 1) * 2 + j];
+                        vm->heap_types[data + i * 2 + j] = vm->heap_types[data + (i + 1) * 2 + j];
+                    }
+                }
+                // Decrement count
+                vm->heap[ptr + HEAP_OFFSET_COUNT] = (double)(count - 1);
+                break;
+            }
+        }
+    }
+
+    // FIX: Return the object pointer so 'arr = remove(arr, 0)' works
+    vm_push(obj_val, T_OBJ);
+}
+// Usage: weights = add(weights, 0, 56)
+// Note: Returns a NEW array because standard arrays are fixed-size in heap.
+void std_add(VM *vm) {
+    double val = vm_pop();
+    int val_type = vm->stack_types[vm->sp + 1];
+
+    double idx_val = vm_pop();
+    int idx = (int)idx_val;
+
+    double arr_val = vm_pop();
+    int ptr = (int)arr_val;
+
+    if (vm->stack_types[vm->sp + 1] != T_OBJ || (int)vm->heap[ptr] != TYPE_ARRAY) {
+        printf("Runtime Error: add() expects an array\n");
+        exit(1);
+    }
+
+    int len = (int)vm->heap[ptr + HEAP_OFFSET_LEN];
+
+    // Normalize index
+    if (idx < 0) idx += len;
+    if (idx < 0) idx = 0;
+    if (idx > len) idx = len; // Append
+
+    // Allocate new array with size + 1
+    int new_ptr = heap_alloc(len + 1 + HEAP_HEADER_ARRAY);
+    vm->heap[new_ptr + HEAP_OFFSET_TYPE] = TYPE_ARRAY;
+    vm->heap[new_ptr + HEAP_OFFSET_LEN] = (double)(len + 1);
+
+    int src_base = ptr + HEAP_HEADER_ARRAY;
+    int dst_base = new_ptr + HEAP_HEADER_ARRAY;
+
+    // Copy 0 to index
+    for(int i = 0; i < idx; i++) {
+        vm->heap[dst_base + i] = vm->heap[src_base + i];
+        vm->heap_types[dst_base + i] = vm->heap_types[src_base + i];
+    }
+
+    // Insert new value
+    vm->heap[dst_base + idx] = val;
+    vm->heap_types[dst_base + idx] = val_type;
+
+    // Copy index to end
+    for(int i = idx; i < len; i++) {
+        vm->heap[dst_base + i + 1] = vm->heap[src_base + i];
+        vm->heap_types[dst_base + i + 1] = vm->heap_types[src_base + i];
+    }
+
+    vm_push((double)new_ptr, T_OBJ);
+}
+
 // --- Registry Definition ---
 // Moved from header to here
 const StdLibDef std_library[] = {
@@ -322,5 +460,8 @@ const StdLibDef std_library[] = {
     {"write_file", std_write_file, "num", 3, {"str", "str", "str"}},
     {"read_bytes", std_read_bytes, "arr", 2, {"str", "num"}},
     {"write_bytes", std_write_bytes, "num", 2, {"str", "arr"}},
+    {"list", std_list, "arr", 1, {"num"}},
+    {"remove", std_remove, "void", 2, {"any", "any"}},
+    {"add", std_add, "arr", 3, {"arr", "num", "any"}},
     {NULL, NULL, NULL, 0, {NULL}}
 };
