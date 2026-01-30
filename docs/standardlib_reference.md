@@ -14,6 +14,9 @@ The Mylo Standard Library provides essential functions for file I/O, math, and d
     + [`list(size: num) -> arr`](#listsize-num---arr)
     + [`add(array: arr, index: num, value: any) -> arr`](#addarray-arr-index-num-value-any---arr)
     + [`remove(collection: any, key: any) -> obj`](#removecollection-any-key-any---obj)
+	+ [`where(collection: any, item: any) -> num`](#wherecollectionany-itemany-num)
+    + [`split(source: str, delimiter: str) -> arr`](#splitsourcestr-delimiterstr-arr)
+
   * [Type Conversion](#type-conversion)
     + [`to_string(value: any) -> str`](#to_string)
     + [`to_num(value: any) -> num`](#to_num)
