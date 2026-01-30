@@ -129,3 +129,21 @@ Our application can then be executed (without a runtime):
 ## Integration with CMake
 Mylo applications can be built, C applications bound, and integrated into other applications
 with CMake. There are [docs here.](cmake/README.md)
+
+
+## Mylo REPL
+
+Mylo can be launched in interpreter mode to evaluate commands from the CLI. It can also be used
+to load native dlls and to import other mylo modules.
+
+Launch the Mylo repl with `mylo --repl`. An example can be seen below running in Powershell:
+
+```powershell
+PS C:\Users\Brad\Documents\mylo-lang\build> .\mylo.exe --repl
+Mylo REPL v0.1.5
+Type 'exit' to quit.
+> var x = range(20, 2, -2)
+> print(x)
+[20, 18, 16, 14, 12, 10, 8, 6, 4, 2, 0, -2]
+> 
+```
