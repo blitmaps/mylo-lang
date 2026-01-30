@@ -252,7 +252,7 @@ inline TestOutput test_struct() {
     "print(person.name)\n";
 
     std::string expected = """"
-    "[Ref: 0]\n"
+    "[Struct Ref:0]\n"
     "30\n"
     "Andy\n";
 
@@ -286,7 +286,7 @@ inline TestOutput test_maps() {
     "}\n";
 
     std::string expected = """"
-    "[Map Ref:0]\n"
+    "[name=\"foo\", age=32]\n"
     "foo\n"
     "32\n"
     "bar\n"
@@ -969,6 +969,16 @@ inline TestOutput test_print_array() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_print_map() {
+
+    std::string src = """"
+        "var header = {\"foo\"=99, \"bar\"=88}\n"
+        "print(header)\n";
+    std::string expected = """"
+        "[foo=99, bar=88]\n";
+    return run_source_test(src, expected);
+}
+
 
 inline void test_generate_list() {
     ADD_TEST("Test Test", test_test);
@@ -1029,6 +1039,8 @@ inline void test_generate_list() {
     ADD_TEST("Test Where list", test_where_list);
     ADD_TEST("Test Split str", test_split_str);
     ADD_TEST("Test print (list)", test_print_array);
+    ADD_TEST("Test print (map)", test_print_map);
+
 }
 
 #endif //MYLO_TEST_GENERATE_LIST_H
