@@ -154,6 +154,90 @@ int heap_alloc(int size) {
     return addr;
 }
 
+// --- PRINTER HELPERS ---
+
+void print_raw(const char* str) {
+    if (MyloConfig.debug_mode && MyloConfig.print_callback) {
+        MyloConfig.print_callback(str);
+    }
+    else if (MyloConfig.print_to_memory) {
+        vm.output_mem_pos += sprintf(vm.output_char_buffer + vm.output_mem_pos, "%s", str);
+    }
+    else {
+        printf("%s", str);
+    }
+}
+
+void print_recursive(double val, int type, int depth) {
+    // Recursion Guard
+    if (depth > 10) { print_raw("..."); return; }
+
+    char buf[64];
+
+    if (type == T_NUM) {
+        // Integer check for cleaner output (1 instead of 1.0)
+        if (val == (int)val) sprintf(buf, "%d", (int)val);
+        else sprintf(buf, "%g", val);
+        print_raw(buf);
+    }
+    else if (type == T_STR) {
+        // Quote strings if they are inside a collection
+        if (depth > 0) print_raw("\"");
+        print_raw(vm.string_pool[(int)val]);
+        if (depth > 0) print_raw("\"");
+    }
+    else if (type == T_OBJ) {
+        int ptr = (int)val;
+        int obj_type = (int)vm.heap[ptr];
+
+        if (obj_type == TYPE_ARRAY) {
+            print_raw("[");
+            int len = (int)vm.heap[ptr + HEAP_OFFSET_LEN];
+            for (int i = 0; i < len; i++) {
+                if (i > 0) print_raw(", ");
+                // Recurse
+                print_recursive(vm.heap[ptr + 2 + i], vm.heap_types[ptr + 2 + i], depth + 1);
+            }
+            print_raw("]");
+        }
+        else if (obj_type == TYPE_MAP) {
+            print_raw("[");
+            int count = (int)vm.heap[ptr + HEAP_OFFSET_COUNT];
+            int data = (int)vm.heap[ptr + HEAP_OFFSET_DATA];
+
+            for (int i = 0; i < count; i++) {
+                if (i > 0) print_raw(", ");
+
+                // Key (Assumed String for now)
+                double k = vm.heap[data + i * 2];
+                print_raw(vm.string_pool[(int)k]);
+                print_raw("=");
+
+                // Value (Recurse)
+                print_recursive(vm.heap[data + i * 2 + 1], vm.heap_types[data + i * 2 + 1], depth + 1);
+            }
+            print_raw("]");
+        }
+        else if (obj_type == TYPE_BYTES) {
+            int len = (int)vm.heap[ptr + HEAP_OFFSET_LEN];
+            unsigned char* b = (unsigned char*)&vm.heap[ptr + HEAP_HEADER_ARRAY];
+            print_raw("b\"");
+            for (int i = 0; i < len; i++) {
+                // Print basic ASCII, hex for others
+                if (b[i] >= 32 && b[i] <= 126) sprintf(buf, "%c", b[i]);
+                else sprintf(buf, "\\x%02X", b[i]);
+                print_raw(buf);
+            }
+            print_raw("\"");
+        }
+        else {
+            // Structs (No length/name metadata available at runtime yet)
+            sprintf(buf, "[Struct Ref:%d]", ptr);
+            print_raw(buf);
+        }
+    }
+}
+
 // --- SINGLE STEP EXECUTION ---
 // Returns the opcode executed, or OP_HLT (-1) if finished
 int vm_step(bool debug_trace) {
@@ -179,7 +263,7 @@ int vm_step(bool debug_trace) {
             vm_push((double) index, T_STR);
             break;
         }
-case OP_ADD: {
+        case OP_ADD: {
             CHECK_STACK(2);
             int typeB = vm.stack_types[vm.sp];
             double valB = vm_pop();
@@ -539,56 +623,17 @@ case OP_ADD: {
             vm_push(rv, rt);
             break;
         }
-        // --- UPDATED PRINT OP WITH CALLBACK ---
         case OP_PRN: {
             CHECK_STACK(1);
             double v = vm.stack[vm.sp];
             int t = vm.stack_types[vm.sp];
             vm.sp--;
 
-            char buffer[1024];
-            buffer[0] = '\0';
+            // Use the recursive printer
+            print_recursive(v, t, 0);
 
-            if (t == T_STR) {
-                snprintf(buffer, 1024, "%s", vm.string_pool[(int)v]);
-            } else if (t == T_OBJ) {
-                int ptr = (int)v;
-                int type = (int)vm.heap[ptr + HEAP_OFFSET_TYPE];
-
-                if (type == TYPE_BYTES) {
-                    int len = (int)vm.heap[ptr + HEAP_OFFSET_LEN];
-                    unsigned char* b = (unsigned char*)&vm.heap[ptr + HEAP_HEADER_ARRAY];
-                    // Basic binary output representation
-                    int offset = snprintf(buffer, 1024, "b\"");
-                    for(int i=0; i<len && offset < 1000; i++) {
-                        // Printable ascii check could be added here
-                        buffer[offset++] = (char)b[i];
-                    }
-                    buffer[offset++] = '"';
-                    buffer[offset] = '\0';
-                } else if (type == TYPE_ARRAY) {
-                    snprintf(buffer, 1024, "[Array Ref:%d]", ptr);
-                } else if (type == TYPE_MAP) {
-                    snprintf(buffer, 1024, "[Map Ref:%d]", ptr);
-                } else {
-                    snprintf(buffer, 1024, "[Ref: %d]", ptr);
-                }
-            } else {
-                if (v == (int)v) snprintf(buffer, 1024, "%d", (int)v);
-                else snprintf(buffer, 1024, "%g", v);
-            }
-
-            // --- REDIRECTION LOGIC ---
-            if (MyloConfig.debug_mode && MyloConfig.print_callback) {
-                // Send to debugger (no newline, debugger handles it)
-                MyloConfig.print_callback(buffer);
-            } else if (MyloConfig.print_to_memory) {
-                // Test harness mode
-                vm.output_mem_pos += sprintf(vm.output_char_buffer + vm.output_mem_pos, "%s\n", buffer);
-            } else {
-                // Standard mode
-                printf("%s\n", buffer);
-            }
+            // Print Newline
+            print_raw("\n");
             break;
         }
         case OP_CAT: {

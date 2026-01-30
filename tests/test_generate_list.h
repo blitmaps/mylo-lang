@@ -959,6 +959,16 @@ inline TestOutput test_split_str() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_print_array() {
+
+    std::string src = """"
+        "var header = \"[1,2,3,4,5,6,7,8,99]\"\n"
+        "print(header)\n";
+    std::string expected = """"
+        "[1,2,3,4,5,6,7,8,99]\n";
+    return run_source_test(src, expected);
+}
+
 
 inline void test_generate_list() {
     ADD_TEST("Test Test", test_test);
@@ -1018,7 +1028,7 @@ inline void test_generate_list() {
     ADD_TEST("Test Where str", test_where_str);
     ADD_TEST("Test Where list", test_where_list);
     ADD_TEST("Test Split str", test_split_str);
-
+    ADD_TEST("Test print (list)", test_print_array);
 }
 
 #endif //MYLO_TEST_GENERATE_LIST_H
