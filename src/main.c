@@ -55,43 +55,68 @@ void disassemble() {
 
 void start_repl() {
     char buffer[MAX_INPUT];
+    char line_buf[1024];
+
     printf("Mylo REPL v%s\n", VERSION_INFO);
     printf("Type 'exit' to quit.\n");
 
-    mylo_reset(); // Initialize VM once at start
+    mylo_reset();
+
+    // State for multiline
+    buffer[0] = '\0';
+    int open_braces = 0;
 
     while (true) {
-        printf("> ");
-        if (!fgets(buffer, sizeof(buffer), stdin)) break;
+        // Change prompt based on depth
+        if (open_braces > 0) printf("... ");
+        else printf("> ");
 
-        // Strip newline
-        buffer[strcspn(buffer, "\n")] = 0;
+        if (!fgets(line_buf, sizeof(line_buf), stdin)) break;
 
-        if (strcmp(buffer, "exit") == 0) break;
-        if (strlen(buffer) == 0) continue;
+        // Handle Exit
+        if (strncmp(line_buf, "exit", 4) == 0) break;
 
-        // 1. Compile the line (appending to bytecode)
-        int start_ip = 0;
-        compile_repl(buffer, &start_ip);
-
-        // 2. Snapshot stack to detect if expression returned a value
-        int stack_start = vm.sp;
-
-        // 3. Run only the new code
-        run_vm_from(start_ip, false);
-
-        // 4. If stack grew, print the result
-        if (vm.sp > stack_start) {
-            double val = vm.stack[vm.sp];
-            int type = vm.stack_types[vm.sp];
-
-            if (type == T_NUM) printf("%g\n", val);
-            else if (type == T_STR) printf("\"%s\"\n", vm.string_pool[(int)val]);
-            else if (type == T_OBJ) printf("[Object]\n");
-
-            // Clean up stack for next loop
-            vm.sp = stack_start;
+        // 1. Analyze Braces to detect Multiline
+        for (int i = 0; line_buf[i]; i++) {
+            if (line_buf[i] == '{') open_braces++;
+            if (line_buf[i] == '}') open_braces--;
         }
+
+        // 2. Append line to main buffer
+        strcat(buffer, line_buf);
+
+        // 3. If braces are balanced, Compile & Run
+        if (open_braces <= 0) {
+            open_braces = 0; // Reset safety
+
+            // Skip empty lines
+            if (strlen(buffer) == 0 || buffer[0] == '\n') {
+                buffer[0] = '\0';
+                continue;
+            }
+
+            int start_ip = 0;
+            compile_repl(buffer, &start_ip);
+
+            int stack_start = vm.sp;
+            run_vm_from(start_ip, false);
+
+            if (vm.sp > stack_start) {
+                double val = vm.stack[vm.sp];
+                int type = vm.stack_types[vm.sp];
+
+                // Simple printer
+                if (type == T_NUM) printf("%g\n", val);
+                else if (type == T_STR) printf("\"%s\"\n", vm.string_pool[(int)val]);
+                else if (type == T_OBJ) printf("[Object]\n");
+
+                vm.sp = stack_start;
+            }
+
+            // Clear buffer for next command
+            buffer[0] = '\0';
+        }
+        // Else: Loop again to get next line (buffer is preserved)
     }
 }
 

@@ -2158,50 +2158,53 @@ void compile_to_c_source(const char *output_filename) {
 }
 
 void compile_repl(char* source, int* out_start_ip) {
-    // 1. Reset specific state for REPL line
     src = source;
-    // Do NOT reset global/local counts here to preserve state
     next_token();
 
     *out_start_ip = vm.code_size;
 
     if (curr.type == TK_EOF) return;
 
-    // 2. Try to parse as a Statement first (VAR, FN, IF...)
-    if (curr.type == TK_VAR || curr.type == TK_FN || curr.type == TK_STRUCT ||
-        curr.type == TK_IF || curr.type == TK_FOR || curr.type == TK_FOREVER ||
-        curr.type == TK_PRINT || curr.type == TK_IMPORT || curr.type == TK_RET ||
-        curr.type == TK_BREAK || curr.type == TK_CONTINUE || curr.type == TK_ENUM) {
-
+    // FIX 1: Explicitly handle Top-Level Declarations
+    if (curr.type == TK_FN) {
+        function(); // <--- Call function() directly
+    }
+    else if (curr.type == TK_STRUCT) {
+        struct_decl(); // <--- Call struct_decl() directly
+    }
+    // FIX 2: Handle standard statements
+    else if (curr.type == TK_VAR || curr.type == TK_IF || curr.type == TK_FOR ||
+        curr.type == TK_FOREVER || curr.type == TK_PRINT ||
+        curr.type == TK_IMPORT || curr.type == TK_RET ||
+        curr.type == TK_BREAK || curr.type == TK_CONTINUE ||
+        curr.type == TK_ENUM) {
         statement();
     }
-    // 3. Handle Ambiguous IDs (Assignments vs Expressions)
+    // FIX 3: Ambiguous Identifiers (Statement vs Expression)
     else if (curr.type == TK_ID) {
-        // Snapshot state
         int saved_code_size = vm.code_size;
+        int saved_line = line;
         char* saved_src = src;
         Token saved_curr = curr;
-        int saved_line = line;
 
         // Try statement (e.g. "x = 1" or "func()")
         statement();
 
-        // FIX: If statement() didn't consume the whole line (e.g. "x + 1"), rollback!
+        // If not consumed cleanly, rollback and try Expression
         if (curr.type != TK_EOF) {
-            vm.code_size = saved_code_size; // Discard invalid instructions
-            src = source;                   // Reset Lexer to start of string
-            next_token();                   // Re-prime token
-
-            expression();                   // Parse as expression
+            vm.code_size = saved_code_size;
+            src = source;
+            next_token();
+            expression();
         }
     }
-    // 4. Explicit Expressions (1+1, "hello")
     else {
         expression();
     }
 
-    emit(OP_HLT); // Use OP_HLT (the opcode), not a token
+    emit(OP_HLT);
 }
+
 
 void mylo_reset() {
     vm_init();
