@@ -119,31 +119,54 @@ my_project/
 
 ```cmake
 cmake_minimum_required(VERSION 3.14)
-project(MyGame)
+project(MyloRaylib)
+# FIX: Explicitly specify "LANGUAGES C" to disable C++
+project(MyloRaylib LANGUAGES C)
+# --- 1. Options ---
+option(MAKE_MYLO_STATIC "Build dependencies statically for portability" ON)
 
-# --- Config ---
-set(MYLO_HOME "/home/user/repos/mylo-lang")
+# --- 2. Mylo Setup ---
+set(MYLO_HOME "${CMAKE_CURRENT_SOURCE_DIR}/mylo-lang")
 set(MYLO_EXECUTABLE "${MYLO_HOME}/build/mylo")
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(MyloUtils)
 
-# --- Dependencies ---
-find_package(raylib REQUIRED)
+# --- 3. Raylib Configuration ---
+set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 
-# --- 1. Build the Binding ---
+if(MAKE_MYLO_STATIC)
+    message(STATUS "Mylo: Building Static Dependencies (Portable)")
+    
+    # Force Raylib to build as a Static Library (.a)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    
+    # CRITICAL: Static libs must be compiled with Position Independent Code (PIC)
+    # if we want to link them into a Shared Library (our raylib_binding.so).
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+else()
+    message(STATUS "Mylo: Building Shared Dependencies")
+    set(BUILD_SHARED_LIBS ON CACHE BOOL "" FORCE)
+endif()
+
+# Include Raylib (It reads the variables above)
+add_subdirectory(raylib-5.5)
+
+# --- 4. Build Binding ---
+# This creates raylib_binding.so
+# If MAKE_MYLO_STATIC is ON, this .so will contain all of Raylib inside it.
 mylo_add_binding(
-    TARGET raylib_native
-    SOURCE lib/raylib_binding.mylo
+    TARGET raylib_binding
+    SOURCE raylib_binding.mylo
     LINKS  raylib
 )
 
-# --- 2. Build the Game ---
+# --- 5. Build Game ---
 mylo_add_executable(
-    TARGET game_app
-    SOURCE src/main.mylo
+    TARGET my_game
+    SOURCE raylib.mylo
 )
 
-# Ensure binding is built before the app runs (optional but recommended)
-add_dependencies(game_app raylib_native)
+add_dependencies(my_game raylib_binding)
+target_link_libraries(my_game PRIVATE raylib)
 ```
