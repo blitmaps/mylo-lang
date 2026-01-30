@@ -878,6 +878,27 @@ int alloc_var(bool is_loc, char *name, int type_id, bool is_array) {
     return global_count++;
 }
 
+// Helper to find or alloc variable
+int get_var_addr(char* n, bool is_local, int explicit_type)
+{
+    if (is_local) {
+        int loc = find_local(n);
+        if (loc != -1) return loc;
+        emit(OP_PSH_NUM);
+        emit(make_const(0.0)); // Init
+        return alloc_var(true, n, explicit_type, false);
+    }
+    else {
+        char m[MAX_IDENTIFIER * 2];
+        get_mangled_name(m, n);
+        int glob = find_global(m);
+        if (glob != -1) return glob;
+        emit(OP_PSH_NUM);
+        emit(make_const(0.0)); // Init
+        return alloc_var(false, n, explicit_type, false);
+    }
+}
+
 void for_statement() {
     match(TK_FOR);
     match(TK_LPAREN);
@@ -950,29 +971,9 @@ void for_statement() {
         int var2_addr = -1;
         bool is_local = inside_function;
 
-        // Helper to find or alloc variable
-        int get_var_addr(char *n)
-        {
-            if (is_local) {
-                int loc = find_local(n);
-                if (loc != -1) return loc;
-                emit(OP_PSH_NUM);
-                emit(make_const(0.0)); // Init
-                return alloc_var(true, n, explicit_type, false);
-            } else {
-                char m[MAX_IDENTIFIER * 2];
-                get_mangled_name(m, n);
-                int glob = find_global(m);
-                if (glob != -1) return glob;
-                emit(OP_PSH_NUM);
-                emit(make_const(0.0)); // Init
-                return alloc_var(false, n, explicit_type, false);
-            }
-        }
-
-        var1_addr = get_var_addr(name1);
+        var1_addr = get_var_addr(name1, is_local, explicit_type);
         if (is_pair) {
-            var2_addr = get_var_addr(name2);
+            var2_addr = get_var_addr(name2, is_local, explicit_type);
         }
 
         match(TK_IN);
