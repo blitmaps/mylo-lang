@@ -85,6 +85,7 @@ typedef struct {
 
     char output_char_buffer[OUTPUT_BUFFER_SIZE];
     int output_mem_pos;
+    bool error;
 } VM;
 
 extern VM vm;

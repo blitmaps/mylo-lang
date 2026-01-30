@@ -98,6 +98,7 @@ void vm_init() {
     vm.sp = -1;
     memset(natives, 0, sizeof(natives));
     ref_next_id = 0;
+    vm.error = false;
 }
 
 #define RUNTIME_ERROR(fmt, ...) { \

@@ -919,12 +919,48 @@ inline TestOutput test_bytes_vector_add() {
 
     std::string src = """"
     "var header = b\"\\xFE\\xFE\"\n"
-    "var b = b + 1"
+    "var header = header + 1"
     "print(to_num(header[0]))\n";
     std::string expected = """"
     "255\n";
     return run_source_test(src, expected);
 }
+
+
+inline TestOutput test_where_str() {
+
+    std::string src = """"
+        "var header = \"ohblast\""
+        "print(where(header,\"blast\"))\n";
+    std::string expected = """"
+        "2\n";
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_where_list() {
+
+    std::string src = """"
+        "var header = [1,2,3,4,5]\n"
+        "print(where(header,4))\n";
+    std::string expected = """"
+        "3\n";
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_split_str() {
+
+    std::string src = """"
+        "var header = \"a,b,c\"\n"
+        "var parts = split(header, \",\")\n"
+        "print(parts[0])\n"
+        "print(parts[1])\n";
+    std::string expected = """"
+        "a\nb\n";
+    return run_source_test(src, expected);
+}
+
+
+
 
 inline void test_generate_list() {
     ADD_TEST("Test Test", test_test);
@@ -981,6 +1017,9 @@ inline void test_generate_list() {
     ADD_TEST("Test Vector (mul())", test_vector_ops_mul);
     ADD_TEST("Test Vector(str) (add())", test_vector_str_add);
     ADD_TEST("Test Vector(byte) (add())", test_bytes_vector_add);
+    ADD_TEST("Test Where str", test_where_str);
+    ADD_TEST("Test Where list", test_where_list);
+    ADD_TEST("Test Split str", test_split_str);
 
 }
 

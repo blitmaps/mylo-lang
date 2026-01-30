@@ -442,6 +442,144 @@ void std_add(VM *vm) {
     vm_push((double)new_ptr, T_OBJ);
 }
 
+// Usage: var parts = split("a,b,c", ",")
+void std_split(VM* vm) {
+    double del_val = vm_pop();
+    double str_val = vm_pop();
+
+    int del_type = vm->stack_types[vm->sp + 2]; // Peek types derived from pop order
+    int str_type = vm->stack_types[vm->sp + 1];
+
+    // Since we already popped, we rely on the internal knowledge that 
+    // arguments are pushed: [STR, DELIM] -> Pop DELIM, Pop STR.
+    // Safety check:
+    const char* str = get_str(vm, str_val);
+    const char* del = get_str(vm, del_val);
+    int del_len = strlen(del);
+
+    if (del_len == 0) {
+        // Edge case: Empty delimiter. Return array of individual chars?
+        // For simplicity, let's return [str] or error. 
+        // Standard behavior often splits every char. Let's do that.
+        int len = strlen(str);
+        int ptr = heap_alloc(len + HEAP_HEADER_ARRAY);
+        vm->heap[ptr] = TYPE_ARRAY;
+        vm->heap[ptr + 1] = (double)len;
+
+        for (int i = 0; i < len; i++) {
+            char tmp[2] = { str[i], '\0' };
+            int id = make_string(tmp);
+            vm->heap[ptr + 2 + i] = (double)id;
+            vm->heap_types[ptr + 2 + i] = T_STR;
+        }
+        vm_push((double)ptr, T_OBJ);
+        return;
+    }
+
+    // 1. Count tokens
+    int count = 1;
+    const char* p = str;
+    while ((p = strstr(p, del)) != NULL) {
+        count++;
+        p += del_len;
+    }
+
+    // 2. Allocate Array
+    int ptr = heap_alloc(count + HEAP_HEADER_ARRAY);
+    vm->heap[ptr] = TYPE_ARRAY;
+    vm->heap[ptr + 1] = (double)count;
+
+    // 3. Fill Tokens
+    int idx = 0;
+    p = str;
+    const char* next;
+    while ((next = strstr(p, del)) != NULL) {
+        int token_len = next - p;
+        char* buf = malloc(token_len + 1);
+        strncpy(buf, p, token_len);
+        buf[token_len] = '\0';
+
+        int id = make_string(buf);
+        free(buf);
+
+        vm->heap[ptr + 2 + idx] = (double)id;
+        vm->heap_types[ptr + 2 + idx] = T_STR;
+        idx++;
+        p = next + del_len;
+    }
+
+    // Last token
+    int id = make_string(p);
+    vm->heap[ptr + 2 + idx] = (double)id;
+    vm->heap_types[ptr + 2 + idx] = T_STR;
+
+    vm_push((double)ptr, T_OBJ);
+}
+
+// Usage: var idx = where(collection, item)
+void std_where(VM* vm) {
+    double item_val = vm_pop();
+    int item_type = vm->stack_types[vm->sp + 1]; // Actually +1 because we already popped 1
+    // But to be safe on types, let's look at what we just popped.
+    // vm_pop decrements SP. So types are at vm->stack_types[vm->sp + 1]
+
+    double col_val = vm_pop();
+    int col_type = vm->stack_types[vm->sp + 1];
+
+    if (col_type == T_STR) {
+        // String Search
+        if (item_type != T_STR) {
+            vm_push(-1.0, T_NUM);
+            return;
+        }
+        const char* haystack = get_str(vm, col_val);
+        const char* needle = get_str(vm, item_val);
+
+        char* found = strstr(haystack, needle);
+        if (found) {
+            vm_push((double)(found - haystack), T_NUM);
+        }
+        else {
+            vm_push(-1.0, T_NUM);
+        }
+    }
+    else if (col_type == T_OBJ) {
+        // Array Search
+        int ptr = (int)col_val;
+        int type = (int)vm->heap[ptr];
+
+        if (type == TYPE_ARRAY) {
+            int len = (int)vm->heap[ptr + 1];
+            for (int i = 0; i < len; i++) {
+                double el = vm->heap[ptr + 2 + i];
+                int et = vm->heap_types[ptr + 2 + i];
+
+                // Strict equality check
+                if (el == item_val && et == item_type) {
+                    vm_push((double)i, T_NUM);
+                    return;
+                }
+            }
+        }
+        else if (type == TYPE_BYTES) {
+            // Byte Search
+            int len = (int)vm->heap[ptr + 1];
+            unsigned char* b = (unsigned char*)&vm->heap[ptr + HEAP_HEADER_ARRAY];
+            for (int i = 0; i < len; i++) {
+                if ((double)b[i] == item_val) {
+                    vm_push((double)i, T_NUM);
+                    return;
+                }
+            }
+        }
+        // Not found in array/bytes
+        vm_push(-1.0, T_NUM);
+    }
+    else {
+        vm_push(-1.0, T_NUM);
+    }
+}
+
 // --- Registry Definition ---
 // Moved from header to here
 const StdLibDef std_library[] = {
@@ -463,5 +601,7 @@ const StdLibDef std_library[] = {
     {"list", std_list, "arr", 1, {"num"}},
     {"remove", std_remove, "void", 2, {"any", "any"}},
     {"add", std_add, "arr", 3, {"arr", "num", "any"}},
+    {"split", std_split, "arr", 2, {"str", "str"}},
+    {"where", std_where, "num", 2, {"any", "any"}},
     {NULL, NULL, NULL, 0, {NULL}}
 };

@@ -97,6 +97,56 @@ if (contains("Teamwork", "work")) {
 }
 ```
 
+<a name="splitsourcestr-delimiterstr-arr"></a>
+### `split(source: str, delimiter: str) -> arr`
+
+Splits a string into an array of substrings based on a delimiter.
+
+**Arguments:**
+* `source`: The string to split.
+* `delimiter`: The string pattern to split by. If empty `""`, splits into individual characters.
+
+**Returns:**
+* An array of strings.
+
+**Example:**
+```javascript
+var s = "a,b,c"
+var parts = split(s, ",")
+print(parts[0]) // "a"
+print(parts[1]) // "b"
+
+var word = "cat"
+for (x in split(word, "")) {
+	print(x)
+}
+// ["c", "a", "t"]
+```
+
+<a name="wherecollectionany-itemany-num"></a>
+### `where(collection: any, item: any) -> num`
+
+Finds the index of the first occurrence of an item within a collection.
+
+**Arguments:**
+* `collection`: The string or array to search.
+* `item`: The value to search for.
+
+**Returns:**
+* The index (0-based) of the found item, or `-1` if not found.
+
+**Example:**
+```javascript
+// Arrays
+var list = ["cat", "dog"]
+print(where(list, "dog")) // 1
+print(where(list, "fish")) // -1
+
+// Strings
+var text = "ohblast"
+print(where(text, "blast")) // 2
+```
+
 <a name="listsize-num-arr"></a>
 ### `list(size: num) -> arr`
 
