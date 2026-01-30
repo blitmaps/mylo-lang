@@ -120,6 +120,7 @@ double vm_pop();
 int make_string(const char *s);
 int make_const(double val);
 int heap_alloc(int size);
+void run_vm_from(int start_ip, bool debug_trace);
 
 // Core Execution
 void run_vm(bool debug_trace);

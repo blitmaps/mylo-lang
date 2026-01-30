@@ -91,6 +91,7 @@ void vm_free_ref(int id) {
     }
 }
 
+
 // --- VM CORE ---
 
 void vm_init() {
@@ -1011,9 +1012,15 @@ int vm_step(bool debug_trace) {
     return op;
 }
 
-void run_vm(bool debug_trace) {
-    vm.ip = 0;
+// Executes VM starting from a specific instruction
+void run_vm_from(int start_ip, bool debug_trace) {
+    vm.ip = start_ip;
     while (vm.ip < vm.code_size) {
-        if (vm_step(debug_trace) == -1) break;
+        if (vm_step(debug_trace) == -1) break; // Stop on OP_HLT
     }
+}
+
+// Update existing run_vm to use the new helper
+void run_vm(bool debug_trace) {
+    run_vm_from(0, debug_trace);
 }

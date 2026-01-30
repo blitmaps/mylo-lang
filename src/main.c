@@ -1,4 +1,6 @@
-#define VERSION_INFO "0.1.4.1"
+#define VERSION_INFO "0.1.4.5"
+#define MAX_INPUT 1024
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -51,11 +53,53 @@ void disassemble() {
     printf("-------------------\n\n");
 }
 
+void start_repl() {
+    char buffer[MAX_INPUT];
+    printf("Mylo REPL v%s\n", VERSION_INFO);
+    printf("Type 'exit' to quit.\n");
+
+    mylo_reset(); // Initialize VM once at start
+
+    while (true) {
+        printf("> ");
+        if (!fgets(buffer, sizeof(buffer), stdin)) break;
+
+        // Strip newline
+        buffer[strcspn(buffer, "\n")] = 0;
+
+        if (strcmp(buffer, "exit") == 0) break;
+        if (strlen(buffer) == 0) continue;
+
+        // 1. Compile the line (appending to bytecode)
+        int start_ip = 0;
+        compile_repl(buffer, &start_ip);
+
+        // 2. Snapshot stack to detect if expression returned a value
+        int stack_start = vm.sp;
+
+        // 3. Run only the new code
+        run_vm_from(start_ip, false);
+
+        // 4. If stack grew, print the result
+        if (vm.sp > stack_start) {
+            double val = vm.stack[vm.sp];
+            int type = vm.stack_types[vm.sp];
+
+            if (type == T_NUM) printf("%g\n", val);
+            else if (type == T_STR) printf("\"%s\"\n", vm.string_pool[(int)val]);
+            else if (type == T_OBJ) printf("[Object]\n");
+
+            // Clean up stack for next loop
+            vm.sp = stack_start;
+        }
+    }
+}
+
 int main(int argc, char** argv) {
 
     vm_init();
 
-    if (argc < 2) { printf("Usage: mylo [--run|--build|--bind] <file> [--dump] [--trace] [--debug]\n"); return 1; }
+    if (argc < 2) { printf("Usage: mylo [--run|--build|--bind|--repl] <file> [--dump] [--trace] [--debug]\n"); return 1; }
 
     bool build_mode = false;
     bool bind_mode = false;
@@ -63,6 +107,8 @@ int main(int argc, char** argv) {
     bool trace = false;
     bool debug_mode = false;
     bool version = false;
+    bool repl_mode = false;
+
     char* fn = NULL;
 
     for (int i = 1; i < argc; i++) {
@@ -73,11 +119,17 @@ int main(int argc, char** argv) {
         else if (strcmp(argv[i], "--trace") == 0) trace = true;
         else if (strcmp(argv[i], "--debug") == 0) debug_mode = true;
         else if (strcmp(argv[i], "--version") == 0) version = true;
+        else if (strcmp(argv[i], "--repl") == 0) repl_mode = true;
         else fn = argv[i];
     }
 
     if (version) {
         printf("Mylo version %s\n", VERSION_INFO);
+        return 0;
+    }
+    
+    if (repl_mode) {
+        start_repl();
         return 0;
     }
     // Disable dlopen

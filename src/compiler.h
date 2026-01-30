@@ -50,5 +50,6 @@ extern int local_count;
 void parse(char *source);
 void compile_to_c_source(const char *output_filename);
 void generate_binding_c_source(const char *output_filename);
+void compile_repl(char* source, int* out_start_ip);
 
 #endif

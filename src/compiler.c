@@ -2157,6 +2157,52 @@ void compile_to_c_source(const char *output_filename) {
     printf("Compile with: cc %s src/vm.c src/mylolib.c src/utils.c -Isrc/ -o mylo_app -lm\n", output_filename);
 }
 
+void compile_repl(char* source, int* out_start_ip) {
+    // 1. Reset specific state for REPL line
+    src = source;
+    // Do NOT reset global/local counts here to preserve state
+    next_token();
+
+    *out_start_ip = vm.code_size;
+
+    if (curr.type == TK_EOF) return;
+
+    // 2. Try to parse as a Statement first (VAR, FN, IF...)
+    if (curr.type == TK_VAR || curr.type == TK_FN || curr.type == TK_STRUCT ||
+        curr.type == TK_IF || curr.type == TK_FOR || curr.type == TK_FOREVER ||
+        curr.type == TK_PRINT || curr.type == TK_IMPORT || curr.type == TK_RET ||
+        curr.type == TK_BREAK || curr.type == TK_CONTINUE || curr.type == TK_ENUM) {
+
+        statement();
+    }
+    // 3. Handle Ambiguous IDs (Assignments vs Expressions)
+    else if (curr.type == TK_ID) {
+        // Snapshot state
+        int saved_code_size = vm.code_size;
+        char* saved_src = src;
+        Token saved_curr = curr;
+        int saved_line = line;
+
+        // Try statement (e.g. "x = 1" or "func()")
+        statement();
+
+        // FIX: If statement() didn't consume the whole line (e.g. "x + 1"), rollback!
+        if (curr.type != TK_EOF) {
+            vm.code_size = saved_code_size; // Discard invalid instructions
+            src = source;                   // Reset Lexer to start of string
+            next_token();                   // Re-prime token
+
+            expression();                   // Parse as expression
+        }
+    }
+    // 4. Explicit Expressions (1+1, "hello")
+    else {
+        expression();
+    }
+
+    emit(OP_HLT); // Use OP_HLT (the opcode), not a token
+}
+
 void mylo_reset() {
     vm_init();
     global_count = 0;
