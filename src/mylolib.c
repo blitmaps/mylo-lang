@@ -580,6 +580,50 @@ void std_where(VM* vm) {
     }
 }
 
+void std_range(VM *vm) {
+    double stop_val = vm_pop();
+    double step_val = vm_pop();
+    double start_val = vm_pop();
+
+    if (step_val == 0) {
+        printf("Runtime Error: range() step cannot be 0\n");
+        exit(1);
+    }
+
+    // Determine direction
+    // If start < stop, we go UP. If start > stop, we go DOWN.
+    // We use absolute step to ensure the math works regardless of sign provided.
+    double abs_step = fabs(step_val);
+    if (abs_step == 0) abs_step = 1.0; // Safety
+
+    // Calculate count (Inclusive)
+    // Formula: floor(|stop - start| / step) + 1
+    // Added epsilon (1e-9) to handle floating point precision inclusions
+    double diff = fabs(stop_val - start_val);
+    int count = (int)((diff / abs_step) + 1.00000001);
+
+    if (count < 0) count = 0;
+
+    // Allocate Array
+    int ptr = heap_alloc(count + HEAP_HEADER_ARRAY);
+    vm->heap[ptr + HEAP_OFFSET_TYPE] = TYPE_ARRAY;
+    vm->heap[ptr + HEAP_OFFSET_LEN] = (double)count;
+
+    double current = start_val;
+    bool ascending = (start_val <= stop_val);
+
+    for (int i = 0; i < count; i++) {
+        vm->heap[ptr + HEAP_HEADER_ARRAY + i] = current;
+        vm->heap_types[ptr + HEAP_HEADER_ARRAY + i] = T_NUM;
+
+        // Advance
+        if (ascending) current += abs_step;
+        else current -= abs_step;
+    }
+
+    vm_push((double)ptr, T_OBJ);
+}
+
 // --- Registry Definition ---
 // Moved from header to here
 const StdLibDef std_library[] = {
@@ -603,5 +647,6 @@ const StdLibDef std_library[] = {
     {"add", std_add, "arr", 3, {"arr", "num", "any"}},
     {"split", std_split, "arr", 2, {"str", "str"}},
     {"where", std_where, "num", 2, {"any", "any"}},
+    {"range", std_range, "arr", 3, {"num", "num", "num"}},
     {NULL, NULL, NULL, 0, {NULL}}
 };

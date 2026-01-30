@@ -979,6 +979,35 @@ inline TestOutput test_print_map() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_range() {
+
+    std::string src = """"
+        "var header = range(0,2,10)\n"
+        "print(header)\n";
+    std::string expected = """"
+        "[0, 2, 4, 6, 8, 10]\n";
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_range_rev() {
+    std::string src = """"
+        "var header = range(10,2,-2)\n"
+        "print(header)\n";
+    std::string expected = """"
+        "[10, 8, 6, 4, 2, 0, -2]\n";
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_range_dec() {
+    std::string src = """"
+        "var header = range(-0.1,0.1,0)\n"
+        "print(header)\n";
+    std::string expected = """"
+        "[-0.1, 0]\n";
+    return run_source_test(src, expected);
+}
+
+
 
 inline void test_generate_list() {
     ADD_TEST("Test Test", test_test);
@@ -1040,6 +1069,10 @@ inline void test_generate_list() {
     ADD_TEST("Test Split str", test_split_str);
     ADD_TEST("Test print (list)", test_print_array);
     ADD_TEST("Test print (map)", test_print_map);
+    ADD_TEST("Test range", test_range);
+    ADD_TEST("Test range reverse", test_range_rev);
+    ADD_TEST("Test range decimal", test_range_dec);
+
 
 }
 

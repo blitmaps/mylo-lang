@@ -14,9 +14,9 @@ The Mylo Standard Library provides essential functions for file I/O, math, and d
     + [`list(size: num) -> arr`](#listsize-num---arr)
     + [`add(array: arr, index: num, value: any) -> arr`](#addarray-arr-index-num-value-any---arr)
     + [`remove(collection: any, key: any) -> obj`](#removecollection-any-key-any---obj)
-	+ [`where(collection: any, item: any) -> num`](#wherecollectionany-itemany-num)
+	  + [`where(collection: any, item: any) -> num`](#wherecollectionany-itemany-num)
+    + [`range(start: num, step: num, stop: num) -> arr`](#array-range)
     + [`split(source: str, delimiter: str) -> arr`](#splitsourcestr-delimiterstr-arr)
-
   * [Type Conversion](#type-conversion)
     + [`to_string(value: any) -> str`](#to_string)
     + [`to_num(value: any) -> num`](#to_num)
@@ -166,6 +166,42 @@ Creates a new array of a specific size, initialized with zeros.
 var buffer = list(10)
 print(len(buffer)) // 10
 print(buffer[0])   // 0
+```
+<a name="array-range"></a>
+### `range(start: num, step: num, stop: num) -> arr`
+
+Generates an array of numbers from `start` to `stop` (inclusive), incrementing by `step`.
+
+**Arguments:**
+* `start`: The starting number of the sequence.
+* `step`: The amount to increment (or decrement) by in each step. Must not be 0.
+* `stop`: The final number of the sequence.
+
+**Behavior:**
+* **Inclusive:** The returned array includes the `stop` value if the step lands exactly on it.
+* **Auto-Direction:** The function automatically determines whether to increment or decrement based on `start` and `stop`. The sign of `step` is ignored (the absolute value is used).
+    * If `start < stop`: Values increase.
+    * If `start > stop`: Values decrease.
+* **Floats:** Supports floating point numbers.
+
+**Examples:**
+
+```javascript
+// Basic Integer Range
+var r1 = range(0, 2, 10)
+// Result: [0, 2, 4, 6, 8, 10]
+
+// Floating Point Range
+var r2 = range(0, 0.5, 1.5)
+// Result: [0.0, 0.5, 1.0, 1.5]
+
+// Reverse Range
+var r3 = range(10, 2, 0)
+// Result: [10, 8, 6, 4, 2, 0]
+
+// Decimal Reverse
+var r4 = range(1, 0.1, 0)
+// Result: [1.0, 0.9, 0.8, ... 0.0]
 ```
 
 <a name="addarray-arr-index-num-value-any-arr"></a>
