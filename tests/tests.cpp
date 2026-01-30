@@ -20,9 +20,9 @@ int main()
     int total = 0;
     for (auto &test : tests)
     {
-        setTerminalColor(Color::Blue, BgColor::Default);
-        std::cout << "========================================================" << std::endl;
-        setTerminalColor(Color::Default, BgColor::Default);
+        //setTerminalColor(Color::Blue, BgColor::Default);
+        //std::cout << "========================================================" << std::endl;
+        //setTerminalColor(Color::Default, BgColor::Default);
         std::cout << "Running..." << test.first << std::endl;
         try {
             if (test.second().result) {

@@ -919,7 +919,7 @@ inline TestOutput test_bytes_vector_add() {
 
     std::string src = """"
     "var header = b\"\\xFE\\xFE\"\n"
-    "var header = header + 1"
+    "header = header + 1"
     "print(to_num(header[0]))\n";
     std::string expected = """"
     "255\n";
@@ -958,8 +958,6 @@ inline TestOutput test_split_str() {
         "a\nb\n";
     return run_source_test(src, expected);
 }
-
-
 
 
 inline void test_generate_list() {
