@@ -1,6 +1,7 @@
-#define VERSION_INFO "0.1.4.5"
-#define MAX_INPUT 1024
+#define VERSION_INFO "0.1.5"
+#define MAX_INPUT 4096
 
+#include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -8,6 +9,7 @@
 #include "vm.h"
 #include "utils.h"
 #include "debug_adapter.h"
+#include "compiler.h"
 
 // Defined in compiler.c
 void parse(char* source);
@@ -53,23 +55,54 @@ void disassemble() {
     printf("-------------------\n\n");
 }
 
+void print_greeting() {
+    setTerminalColor(MyloFgMagenta, MyloBgColorDefault);
+    printf("Mylo REPL v%s\n", VERSION_INFO);
+    setTerminalColor(MyloFgDefault, MyloBgColorDefault);
+    printf("Type 'exit' to quit.\n");
+}
+
 void start_repl() {
     char buffer[MAX_INPUT];
-    char line_buf[1024];
+    char line_buf[MAX_INPUT];
 
-    printf("Mylo REPL v%s\n", VERSION_INFO);
-    printf("Type 'exit' to quit.\n");
-
+    // Setup
+    print_greeting();
     mylo_reset();
+
+    // 1. Setup Error Recovery Environment
+    jmp_buf repl_env;
+    MyloConfig.repl_jmp_buf = &repl_env;
 
     // State for multiline
     buffer[0] = '\0';
     int open_braces = 0;
 
     while (true) {
+
+        // 2. ERROR LANDING PAD
+        // setjmp returns 0 normally. It returns 1 if an error occurred and we jumped back.
+        if (setjmp(repl_env) != 0) {
+            // We just crashed! Reset state to survive.
+            vm.sp = -1;       // Clear Stack
+            open_braces = 0;  // Reset multiline parsing
+            buffer[0] = '\0'; // Clear input buffer
+            
+            // Note: We do NOT call mylo_reset() because we want to keep 
+            // functions/variables defined in previous successful lines.
+        }
+
         // Change prompt based on depth
-        if (open_braces > 0) printf("... ");
-        else printf("> ");
+        if (open_braces > 0) {
+            setTerminalColor(MyloFgBlue, MyloBgColorDefault);
+            printf("... ");
+            setTerminalColor(MyloFgDefault, MyloBgColorDefault);
+        }
+        else {
+            setTerminalColor(MyloFgYellow, MyloBgColorDefault);
+            printf("> ");
+            setTerminalColor(MyloFgDefault, MyloBgColorDefault);
+        }
 
         if (!fgets(line_buf, sizeof(line_buf), stdin)) break;
 
@@ -106,10 +139,17 @@ void start_repl() {
                 int type = vm.stack_types[vm.sp];
 
                 // Simple printer
-                if (type == T_NUM) printf("%g\n", val);
-                else if (type == T_STR) printf("\"%s\"\n", vm.string_pool[(int)val]);
-                else if (type == T_OBJ) printf("[Object]\n");
-
+                setTerminalColor(MyloFgCyan, MyloBgColorDefault);
+                if (type == T_NUM) {
+                    printf("%g\n", val);
+                }
+                else if (type == T_STR) {
+                    printf("\"%s\"\n", vm.string_pool[(int)val]);
+                }
+                else if (type == T_OBJ) {
+                    printf("[Object]\n");
+                }
+                setTerminalColor(MyloFgDefault, MyloBgColorDefault);
                 vm.sp = stack_start;
             }
 

@@ -33,6 +33,8 @@ typedef struct {
     // Function pointer for printer overloading
     void (*print_callback)(const char *);
     void (*error_callback)(const char*);
+    // Error Recovery Buffer for REPL
+    void* repl_jmp_buf;
 } MyloConfigType;
 
 extern MyloConfigType MyloConfig;
@@ -85,7 +87,6 @@ typedef struct {
 
     char output_char_buffer[OUTPUT_BUFFER_SIZE];
     int output_mem_pos;
-    bool error;
 } VM;
 
 extern VM vm;

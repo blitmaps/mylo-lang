@@ -11,6 +11,7 @@
 #include "defines.h"
 #include "loader.h"
 #include "compiler.h"
+#include <setjmp.h>
 
 // --- Tokenizer & Structures ---
 
@@ -141,11 +142,18 @@ void error(const char *fmt, ...) {
     // --- NEW: DAP ERROR HANDLING ---
     if (MyloConfig.debug_mode && MyloConfig.error_callback) {
         MyloConfig.error_callback(buffer);
+        // Debugger usually handles exit, but if we want to stay alive:
+        if (MyloConfig.repl_jmp_buf) longjmp(*(jmp_buf*)MyloConfig.repl_jmp_buf, 1);
         exit(1); // Still exit, but after sending the message
     }
     // -------------------------------
 
     fprintf(stderr, "%s\n", buffer);
+
+    // 3. RECOVERY: Jump back to REPL loop
+    if (MyloConfig.repl_jmp_buf) {
+        longjmp(*(jmp_buf*)MyloConfig.repl_jmp_buf, 1);
+    }
     exit(1);
 }
 

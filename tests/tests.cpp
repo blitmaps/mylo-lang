@@ -1,15 +1,16 @@
 //
 // Created by Bradley Pearce on 19/01/2026.
 //
+
 extern "C" {
     #include "../src/vm.h"
+    #include "../src/utils.h"
 }
 #include <iostream>
 #include <string>
 #include "test_include.h"
 #include "test_generate_list.h"
 
-using namespace TestTerminalColours;
 int main()
 {
     // tests
@@ -20,38 +21,38 @@ int main()
     int total = 0;
     for (auto &test : tests)
     {
-        //setTerminalColor(Color::Blue, BgColor::Default);
+        //setTerminalColor(Color::Blue, BgMyloFgDefault);
         //std::cout << "========================================================" << std::endl;
-        //setTerminalColor(Color::Default, BgColor::Default);
+        //setTerminalColor(MyloFgDefault, BgMyloFgDefault);
         std::cout << "Running..." << test.first << std::endl;
         try {
             if (test.second().result) {
                 ++passed;
-                setTerminalColor(Color::Green, BgColor::Default);
+                setTerminalColor(MyloFgGreen, MyloBgColorDefault);
                 std::cout << "[PASS] ";
-                setTerminalColor(Color::Default, BgColor::Default);
+                setTerminalColor(MyloFgDefault, MyloBgColorDefault);
                 std::cout << test.first << std::endl;
             }
             else {
-                setTerminalColor(Color::Red, BgColor::Default);
+                setTerminalColor(MyloFgRed, MyloBgColorDefault);
                 std::cout << "[FAILED] ";
-                setTerminalColor(Color::Default, BgColor::Default);
+                setTerminalColor(MyloFgDefault, MyloBgColorDefault);
                 std::cout << test.first << std::endl;
-                setTerminalColor(Color::Magenta, BgColor::Default);
+                setTerminalColor(MyloFgMagenta, MyloBgColorDefault);
                 std::cout << " --> " << test.second().result_string << std::endl;
-                setTerminalColor(Color::Default, BgColor::Default);
+                setTerminalColor(MyloFgDefault, MyloBgColorDefault);
             }
             ++total;
         } catch (std::exception &e) {
-            setTerminalColor(Color::Red, BgColor::Default);
+            setTerminalColor(MyloFgRed, MyloBgColorDefault);
             std::cout << "[FAILED -- EXCEPTION] ";
             std::cout << std::endl << test.first << " --> " << "EXCEPTION" << e.what() << std::endl;
-            setTerminalColor(Color::Default, BgColor::Default);
+            setTerminalColor(MyloFgDefault, MyloBgColorDefault);
             ++total;
         }
-        setTerminalColor(Color::Blue, BgColor::Default);
+        setTerminalColor(MyloFgBlue, MyloBgColorDefault);
         std::cout << "========================================================" << std::endl;
-        setTerminalColor(Color::Default, BgColor::Default);
+        setTerminalColor(MyloFgDefault, MyloBgColorDefault);
 
     }
     std::cout << std::endl;

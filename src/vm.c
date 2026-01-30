@@ -5,6 +5,32 @@
 #include <math.h>
 #include <stdbool.h>
 #include "vm.h"
+#include <setjmp.h>
+#include <stdarg.h> 
+
+
+void mylo_runtime_error(const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    
+    // Print Error
+    printf("[Line %d] Runtime Error: ", vm.lines[vm.ip - 1]);
+    vprintf(fmt, args);
+    printf("\n");
+    
+    va_end(args);
+
+    // RECOVERY: If we are in REPL mode, jump back!
+    if (MyloConfig.repl_jmp_buf) {
+        longjmp(*(jmp_buf*)MyloConfig.repl_jmp_buf, 1);
+    } else {
+        // Standard mode: Crash
+        exit(1);
+    }
+}
+
+// Update the Macro to call our new function
+#define RUNTIME_ERROR(fmt, ...) mylo_runtime_error(fmt, ##__VA_ARGS__)
 
 // Global Instance
 VM vm;
@@ -99,13 +125,12 @@ void vm_init() {
     vm.sp = -1;
     memset(natives, 0, sizeof(natives));
     ref_next_id = 0;
-    vm.error = false;
 }
 
-#define RUNTIME_ERROR(fmt, ...) { \
-    printf("[Line %d] Runtime Error: " fmt "\n", vm.lines[vm.ip - 1], ##__VA_ARGS__); \
-    exit(1); \
-}
+//#define RUNTIME_ERROR(fmt, ...) { \
+//    printf("[Line %d] Runtime Error: " fmt "\n", vm.lines[vm.ip - 1], ##__VA_ARGS__); \
+//    exit(1); \
+//}
 
 #define CHECK_STACK(count) if (vm.sp < (count) - 1) RUNTIME_ERROR("Stack Underflow")
 #define CHECK_OBJ(depth) if (vm.stack_types[vm.sp - (depth)] != T_OBJ) RUNTIME_ERROR("Expected Object/Array")
