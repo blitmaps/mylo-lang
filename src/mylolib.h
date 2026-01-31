@@ -21,6 +21,11 @@ void std_cos(VM *vm);
 void std_tan(VM *vm);
 void std_floor(VM *vm);
 void std_ceil(VM *vm);
+void std_mix(VM *vm);
+void std_min(VM *vm);
+void std_max(VM *vm);
+void std_dist(VM *vm);
+
 void std_len(VM *vm);
 void std_contains(VM *vm);
 void std_to_string(VM *vm);

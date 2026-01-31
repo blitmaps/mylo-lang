@@ -739,9 +739,57 @@ void std_rand_normal(VM *vm) {
     // This typically produces values between -3.0 and 3.0
     // To strictly squeeze 'mostly' between -1 and 1 as requested,
     // you might want to divide by, say, 3.0, but standard "normal" usually implies Sigma=1.
-    // I will return the Standard Normal (Sigma=1).
     vm_push(z0, T_NUM);
 }
+
+// Usage: val = mix(x, y, a) -> x*(1-a) + y*a
+void std_mix(VM *vm) {
+    double a = vm_pop();
+    double y = vm_pop();
+    double x = vm_pop();
+
+    // Linear Interpolation: x + (y - x) * a
+    // This is generally more precise than x*(1-a) + y*a
+    double result = x + (y - x) * a;
+
+    vm_push(result, T_NUM);
+}
+
+// Usage: val = min(a, b)
+void std_min(VM *vm) {
+    double b = vm_pop();
+    double a = vm_pop();
+
+    // Simple scalar min
+    // Note: To support array min, we'd need variadic args or a separate function
+    if (a < b) vm_push(a, T_NUM);
+    else vm_push(b, T_NUM);
+}
+
+// Usage: val = max(a, b)
+void std_max(VM *vm) {
+    double b = vm_pop();
+    double a = vm_pop();
+
+    if (a > b) vm_push(a, T_NUM);
+    else vm_push(b, T_NUM);
+}
+
+// Usage: d = distance(x1, y1, x2, y2)
+void std_dist(VM *vm) {
+    double y2 = vm_pop();
+    double x2 = vm_pop();
+    double y1 = vm_pop();
+    double x1 = vm_pop();
+
+    double dx = x2 - x1;
+    double dy = y2 - y1;
+    double dist = sqrt(dx*dx + dy*dy);
+
+    vm_push(dist, T_NUM);
+}
+
+
 // --- Registry Definition ---
 // Moved from header to here
 const StdLibDef std_library[] = {
@@ -756,7 +804,6 @@ const StdLibDef std_library[] = {
     {"floor", std_floor, "num", 1, {"num"}},
     {"ceil", std_ceil, "num", 1, {"num"}},
     {"read_lines", std_read_lines, "arr", 1, {"str"}},
-    // Updated arg counts to match your tests
     {"write_file", std_write_file, "num", 3, {"str", "str", "str"}},
     {"read_bytes", std_read_bytes, "arr", 2, {"str", "num"}},
     {"write_bytes", std_write_bytes, "num", 2, {"str", "arr"}},
@@ -770,5 +817,9 @@ const StdLibDef std_library[] = {
     {"seed", std_seed, "void", 1, {"num"}},
     {"rand", std_rand, "num", 0, {NULL}},
     {"rand_normal", std_rand_normal, "num", 0, {NULL}},
+    {"mix", std_mix, "num", 3, {"num", "num", "num"}},
+    {"min", std_min, "num", 2, {"num", "num"}},
+    {"max", std_max, "num", 2, {"num", "num"}},
+    {"distance", std_dist, "num", 4, {"num", "num", "num", "num"}},
     {NULL, NULL, NULL, 0, {NULL}}
 };

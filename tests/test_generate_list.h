@@ -1029,6 +1029,30 @@ inline TestOutput test_for_list_str() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_min() {
+    std::string src = """"
+        "print(min(0.4, 0.2))\n";
+    std::string expected = """"
+        "0.2\n";
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_max() {
+    std::string src = """"
+        "print(max(0.4, 0.2))\n";
+    std::string expected = """"
+        "0.4\n";
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_dist() {
+    std::string src = """"
+        "print(distance(0,0,1,1))\n";
+    std::string expected = """"
+        "1.41421\n";
+    return run_source_test(src, expected);
+}
+
 
 
 
@@ -1097,6 +1121,10 @@ inline void test_generate_list() {
     ADD_TEST("Test range decimal", test_range_dec);
     ADD_TEST("Test for-list", test_for_list);
     ADD_TEST("Test for-list str", test_for_list_str);
+    ADD_TEST("Test Math min", test_min);
+    ADD_TEST("Test Math max", test_max);
+    ADD_TEST("Test Math dist", test_dist);
+
 }
 
 #endif //MYLO_TEST_GENERATE_LIST_H

@@ -13,6 +13,10 @@ The Mylo Standard Library provides essential functions for file I/O, math, and d
     + [`tan(value: num) -> num`](#tanangle-num---num)
     + [`floor(value: num) -> num`](#floorvalue-num---num)
     + [`ceil(value: num) -> num`](#ceilvalue-num---num)
+    + [`mix(start: num, stop: num, weight: num) -> num`](#mixstart-num-stop-num-weight-num---num)
+    + [`min(val1: num, val2:num) -> num`](#minval1-num-val2-num---num)
+    + [`max(val1: num, val2:num) -> num`](#maxval1-num-val2-num---num)
+    + [`distance(x1: num, y1: num, x2: num, y2: num) -> num`](#distancex1-num-y1-num-x2-num-y2-num---num)
     + [`seed() -> None (Random Number Functions)`](#random_numbers)
   * [Utility Functions](#utility-functions)
     + [`len(collection: any) -> num`](#lencollection-any-num)
@@ -110,6 +114,57 @@ Rounds a number up to the nearest integer.
 
 **Returns:**
 * The smallest integer greater than or equal to the given number.
+
+<a name="mixstart-stop-weight-num"></a>
+### `mix(start: num, stop: num, weight: num) -> num`
+
+Linearly interpolates between two values based on a weight.
+
+**Arguments:**
+* `start`: The starting value (returned when weight is 0).
+* `stop`: The ending value (returned when weight is 1).
+* `weight`: The interpolation factor (usually between 0.0 and 1.0).
+
+**Returns:**
+* The interpolated number.
+
+<a name="minval1-val2-num"></a>
+### `min(val1: num, val2: num) -> num`
+
+Returns the smaller of two numbers.
+
+**Arguments:**
+* `val1`: The first number.
+* `val2`: The second number.
+
+**Returns:**
+* The minimum value.
+
+<a name="maxval1-val2-num"></a>
+### `max(val1: num, val2: num) -> num`
+
+Returns the larger of two numbers.
+
+**Arguments:**
+* `val1`: The first number.
+* `val2`: The second number.
+
+**Returns:**
+* The maximum value.
+
+<a name="distancex1-y1-x2-y2-num"></a>
+### `distance(x1: num, y1: num, x2: num, y2: num) -> num`
+
+Calculates the Euclidean distance between two 2D points.
+
+**Arguments:**
+* `x1`: The X coordinate of the first point.
+* `y1`: The Y coordinate of the first point.
+* `x2`: The X coordinate of the second point.
+* `y2`: The Y coordinate of the second point.
+
+**Returns:**
+* The distance between the points.
 
 
 <!-- TOC --><a name="random_numbers"></a>
