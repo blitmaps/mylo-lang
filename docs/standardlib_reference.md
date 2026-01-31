@@ -28,6 +28,9 @@ The Mylo Standard Library provides essential functions for file I/O, math, and d
     + [`range(start: num, step: num, stop: num) -> arr`](#array-range)
     + [`split(source: str, delimiter: str) -> arr`](#splitsourcestr-delimiterstr-arr)
     + [`for_list(func_name: str, list: arr) -> arr`](#for-list-arr)
+    + [`min_list(list: arr) -> num`](#min_listlist-arr---num)
+    + [`max_list(list: arr) -> num`](#max_listlist-arr---num)
+
   * [Type Conversion](#type-conversion)
     + [`to_string(value: any) -> str`](#to_string)
     + [`to_num(value: any) -> num`](#to_num)
@@ -292,6 +295,35 @@ print(where(list, "fish")) // -1
 // Strings
 var text = "ohblast"
 print(where(text, "blast")) // 2
+```
+
+<a name="list_minlist-arr-num"></a>
+### `min_list(list: arr) -> num`
+
+Finds the smallest numeric value within a list.
+
+**Arguments:**
+* `list`: The array to search. Must not be empty.
+
+**Returns:**
+* The minimum number found in the list.
+
+<a name="list_maxlist-arr-num"></a>
+### `max_list(list: arr) -> num`
+
+Finds the largest numeric value within a list.
+
+**Arguments:**
+* `list`: The array to search. Must not be empty.
+
+**Returns:**
+* The maximum number found in the list.
+
+**Example:**
+```javascript
+var nums = [10, 5, 20, 2]
+print(min_list(nums)) // 2
+print(max_list(nums)) // 20
 ```
 
 <a name="listsize-num-arr"></a>

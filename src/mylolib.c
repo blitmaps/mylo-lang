@@ -789,6 +789,71 @@ void std_dist(VM *vm) {
     vm_push(dist, T_NUM);
 }
 
+// [mylolib.c]
+
+// Usage: val = list_min(arr)
+void std_list_min(VM *vm) {
+    double list_ref = vm_pop();
+
+    // 1. Validate Type
+    int ptr = (int)list_ref;
+    if (vm->stack_types[vm->sp + 1] != T_OBJ || (int)vm->heap[ptr] != TYPE_ARRAY) {
+        printf("Runtime Error: list_min() expects an array.\n");
+        exit(1);
+    }
+
+    // 2. Validate Length
+    int len = (int)vm->heap[ptr + HEAP_OFFSET_LEN];
+    if (len == 0) {
+        printf("Runtime Error: list_min() called on empty array.\n");
+        exit(1);
+    }
+
+    // 3. Find Min
+    // Initialize with the first element
+    double min_val = vm->heap[ptr + HEAP_HEADER_ARRAY + 0];
+
+    for (int i = 1; i < len; i++) {
+        double val = vm->heap[ptr + HEAP_HEADER_ARRAY + i];
+        if (val < min_val) {
+            min_val = val;
+        }
+    }
+
+    vm_push(min_val, T_NUM);
+}
+
+// Usage: val = list_max(arr)
+void std_list_max(VM *vm) {
+    double list_ref = vm_pop();
+
+    // 1. Validate Type
+    int ptr = (int)list_ref;
+    if (vm->stack_types[vm->sp + 1] != T_OBJ || (int)vm->heap[ptr] != TYPE_ARRAY) {
+        printf("Runtime Error: list_max() expects an array.\n");
+        exit(1);
+    }
+
+    // 2. Validate Length
+    int len = (int)vm->heap[ptr + HEAP_OFFSET_LEN];
+    if (len == 0) {
+        printf("Runtime Error: list_max() called on empty array.\n");
+        exit(1);
+    }
+
+    // 3. Find Max
+    double max_val = vm->heap[ptr + HEAP_HEADER_ARRAY + 0];
+
+    for (int i = 1; i < len; i++) {
+        double val = vm->heap[ptr + HEAP_HEADER_ARRAY + i];
+        if (val > max_val) {
+            max_val = val;
+        }
+    }
+
+    vm_push(max_val, T_NUM);
+}
+
 
 // --- Registry Definition ---
 // Moved from header to here
@@ -821,5 +886,7 @@ const StdLibDef std_library[] = {
     {"min", std_min, "num", 2, {"num", "num"}},
     {"max", std_max, "num", 2, {"num", "num"}},
     {"distance", std_dist, "num", 4, {"num", "num", "num", "num"}},
+    {"min_list", std_list_min, "num", 1, {"arr"}},
+    {"max_list", std_list_max, "num", 1, {"arr"}},
     {NULL, NULL, NULL, 0, {NULL}}
 };

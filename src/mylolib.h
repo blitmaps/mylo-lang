@@ -44,7 +44,8 @@ void std_for_list(VM *vm);
 void std_seed(VM *vm);
 void std_rand(VM *vm);
 void std_rand_normal(VM *vm);
-
+void std_list_min(VM *vm);
+void std_list_max(VM *vm);
 // Registry Declaration (Extern)
 // We do NOT define it here, only say it exists.
 extern const StdLibDef std_library[];

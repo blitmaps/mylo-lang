@@ -1061,6 +1061,16 @@ inline TestOutput test_mix() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_list_min_max() {
+    std::string src = """"
+    "var nums = [10, 5, 20, 2]\n"
+    "print(min_list(nums))\n" // 2
+    "print(max_list(nums))\n"; // 20\n";
+    std::string expected = """"
+        "2\n20\n";
+    return run_source_test(src, expected);
+}
+
 
 
 
@@ -1133,6 +1143,8 @@ inline void test_generate_list() {
     ADD_TEST("Test Math max", test_max);
     ADD_TEST("Test Math dist", test_dist);
     ADD_TEST("Test Math mix", test_mix);
+    ADD_TEST("Test Min-Max Array", test_list_min_max);
+
 
 }
 
