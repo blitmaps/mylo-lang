@@ -36,6 +36,9 @@ void std_split(VM *vm);
 void std_where(VM *vm);
 void std_range(VM *vm);
 void std_for_list(VM *vm);
+void std_seed(VM *vm);
+void std_rand(VM *vm);
+void std_rand_normal(VM *vm);
 
 // Registry Declaration (Extern)
 // We do NOT define it here, only say it exists.

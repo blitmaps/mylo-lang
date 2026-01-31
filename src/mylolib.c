@@ -709,6 +709,39 @@ void std_for_list(VM *vm) {
 
     vm_push((double)res_ptr, T_OBJ);
 }
+
+void std_seed(VM *vm) {
+    double val = vm_pop();
+    srand((unsigned int)val);
+    vm_push(0.0, T_NUM); // Return 0 or Void
+}
+
+// Usage: var x = rand() // 0.0 to 1.0
+void std_rand(VM *vm) {
+    // Standard C rand() is 0 to RAND_MAX
+    double r = (double)rand() / (double)RAND_MAX;
+    vm_push(r, T_NUM);
+}
+
+// Usage: var n = rand_normal()
+// Uses Box-Muller transform to generate Standard Normal Distribution (Mean=0, Sigma=1)
+void std_rand_normal(VM *vm) {
+    // Box-Muller requires two uniform random numbers (0 < u < 1)
+    double u1 = (double)rand() / (double)RAND_MAX;
+    double u2 = (double)rand() / (double)RAND_MAX;
+
+    // Safety: log(0) is undefined
+    if (u1 < 1e-9) u1 = 1e-9;
+
+    // Z0 = sqrt(-2 * ln(u1)) * cos(2 * PI * u2)
+    double z0 = sqrt(-2.0 * log(u1)) * cos(2.0 * 3.14159265358979323846 * u2);
+
+    // This typically produces values between -3.0 and 3.0
+    // To strictly squeeze 'mostly' between -1 and 1 as requested,
+    // you might want to divide by, say, 3.0, but standard "normal" usually implies Sigma=1.
+    // I will return the Standard Normal (Sigma=1).
+    vm_push(z0, T_NUM);
+}
 // --- Registry Definition ---
 // Moved from header to here
 const StdLibDef std_library[] = {
@@ -734,5 +767,8 @@ const StdLibDef std_library[] = {
     {"where", std_where, "num", 2, {"any", "any"}},
     {"range", std_range, "arr", 3, {"num", "num", "num"}},
     {"for_list", std_for_list, "arr", 2, {"str", "arr"}},
+    {"seed", std_seed, "void", 1, {"num"}},
+    {"rand", std_rand, "num", 0, {NULL}},
+    {"rand_normal", std_rand_normal, "num", 0, {NULL}},
     {NULL, NULL, NULL, 0, {NULL}}
 };

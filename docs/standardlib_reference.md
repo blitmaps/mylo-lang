@@ -8,6 +8,12 @@ The Mylo Standard Library provides essential functions for file I/O, math, and d
 - [Mylo Standard Library Documentation](#mylo-standard-library-documentation)
   * [Math Functions](#math-functions)
     + [`sqrt(value: num) -> num`](#sqrtvalue-num-num)
+    + [`sin(value: num) -> num`](#sinangle-num---num)
+    + [`cos(value: num) -> num`](#cosangle-num---num) 
+    + [`tan(value: num) -> num`](#tanangle-num---num)
+    + [`floor(value: num) -> num`](#floorvalue-num---num)
+    + [`ceil(value: num) -> num`](#ceilvalue-num---num)
+    + [`seed() -> None (Random Number Functions)`](#random_numbers)
   * [Utility Functions](#utility-functions)
     + [`len(collection: any) -> num`](#lencollection-any-num)
     + [`contains(haystack: any, needle: any) -> num`](#containshaystack-any-needle-any-num)
@@ -48,6 +54,88 @@ Calculates the square root of a number.
 ```javascript
 var result = sqrt(16)
 print(result) // 4
+```
+
+<a name="sinangle-num-num"></a>
+### `sin(angle: num) -> num`
+
+Calculates the sine of an angle (in radians).
+
+**Arguments:**
+* `angle`: The angle in radians.
+
+**Returns:**
+* The sine of the angle.
+
+<a name="cosangle-num-num"></a>
+### `cos(angle: num) -> num`
+
+Calculates the cosine of an angle (in radians).
+
+**Arguments:**
+* `angle`: The angle in radians.
+
+**Returns:**
+* The cosine of the angle.
+
+<a name="tanangle-num-num"></a>
+### `tan(angle: num) -> num`
+
+Calculates the tangent of an angle (in radians).
+
+**Arguments:**
+* `angle`: The angle in radians.
+
+**Returns:**
+* The tangent of the angle.
+
+<a name="floorvalue-num-num"></a>
+### `floor(value: num) -> num`
+
+Rounds a number down to the nearest integer.
+
+**Arguments:**
+* `value`: The number to round.
+
+**Returns:**
+* The largest integer less than or equal to the given number.
+
+<a name="ceilvalue-num-num"></a>
+### `ceil(value: num) -> num`
+
+Rounds a number up to the nearest integer.
+
+**Arguments:**
+* `value`: The number to round.
+
+**Returns:**
+* The smallest integer greater than or equal to the given number.
+
+
+<!-- TOC --><a name="random_numbers"></a>
+### `seed(val: num) -> None`
+Initializes the random number generator with a specific seed value.
+
+### `rand() -> num`
+Generates a uniform random number between `0.0` and `1.0` (inclusive).
+
+**Example:**
+```javascript
+seed(1234)
+var r = rand() // e.g. 0.832...
+```
+
+### `rand_normal() -> num`
+Generates a random number following a Standard Normal Distribution (Gaussian) with a Mean of `0.0` and a Standard Deviation of `1.0`.
+
+**Behavior:**
+* **Distribution:** Uses the Box-Muller transform.
+* **Range:** While theoretically unbounded, ~68% of values fall between `-1.0` and `1.0`, and ~99.7% fall between `-3.0` and `3.0`.
+
+**Example:**
+```javascript
+// Generate a value, likely close to 0
+var n = rand_normal() 
 ```
 
 <!-- TOC --><a name="utility-functions"></a>
