@@ -1053,6 +1053,14 @@ inline TestOutput test_dist() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_mix() {
+    std::string src = """"
+        "print(mix(0,1,.5))\n";
+    std::string expected = """"
+        "0.5\n";
+    return run_source_test(src, expected);
+}
+
 
 
 
@@ -1124,6 +1132,7 @@ inline void test_generate_list() {
     ADD_TEST("Test Math min", test_min);
     ADD_TEST("Test Math max", test_max);
     ADD_TEST("Test Math dist", test_dist);
+    ADD_TEST("Test Math mix", test_mix);
 
 }
 
