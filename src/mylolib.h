@@ -35,6 +35,7 @@ void std_add(VM *vm);
 void std_split(VM *vm);
 void std_where(VM *vm);
 void std_range(VM *vm);
+void std_for_list(VM *vm);
 
 // Registry Declaration (Extern)
 // We do NOT define it here, only say it exists.

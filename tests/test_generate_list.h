@@ -1007,6 +1007,29 @@ inline TestOutput test_range_dec() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_for_list() {
+    std::string src = """"
+        "fn foo(x) { ret x*2} \n"
+        "var header = range(0,1,3)\n"
+        "var x = for_list(\"foo\", header)\n"
+        "print(x)";
+    std::string expected = """"
+        "[0, 2, 4, 6]\n";
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_for_list_str() {
+    std::string src = """"
+        "fn foo(x) { ret f\"{x}fish\"} \n"
+        "var header = [\"cat\",\"dog\"]\n"
+        "var x = for_list(\"foo\", header)\n"
+        "print(x)";
+    std::string expected = """"
+        "[\"catfish\", \"dogfish\"]\n";
+    return run_source_test(src, expected);
+}
+
+
 
 
 inline void test_generate_list() {
@@ -1072,8 +1095,8 @@ inline void test_generate_list() {
     ADD_TEST("Test range", test_range);
     ADD_TEST("Test range reverse", test_range_rev);
     ADD_TEST("Test range decimal", test_range_dec);
-
-
+    ADD_TEST("Test for-list", test_for_list);
+    ADD_TEST("Test for-list str", test_for_list_str);
 }
 
 #endif //MYLO_TEST_GENERATE_LIST_H

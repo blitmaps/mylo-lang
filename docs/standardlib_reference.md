@@ -14,9 +14,10 @@ The Mylo Standard Library provides essential functions for file I/O, math, and d
     + [`list(size: num) -> arr`](#listsize-num---arr)
     + [`add(array: arr, index: num, value: any) -> arr`](#addarray-arr-index-num-value-any---arr)
     + [`remove(collection: any, key: any) -> obj`](#removecollection-any-key-any---obj)
-	  + [`where(collection: any, item: any) -> num`](#wherecollectionany-itemany-num)
+    + [`where(collection: any, item: any) -> num`](#wherecollectionany-itemany-num)
     + [`range(start: num, step: num, stop: num) -> arr`](#array-range)
     + [`split(source: str, delimiter: str) -> arr`](#splitsourcestr-delimiterstr-arr)
+    + [`for_list(func_name: str, list: arr) -> arr`](#for-list-arr)
   * [Type Conversion](#type-conversion)
     + [`to_string(value: any) -> str`](#to_string)
     + [`to_num(value: any) -> num`](#to_num)
@@ -254,6 +255,45 @@ remove(data, "ver")
 print(data) // {"name"="Mylo"}
 ```
 
+<a name="for-list-arr"></a>
+### `for_list(func_name: str, list: arr) -> arr`
+
+Creates a new array by applying a specified function to every element in the provided list. This is similar to a `map` function in other languages.
+
+**Arguments:**
+* `func_name`: The name of the function to execute for each item. This can be the name of a standard library function (e.g., `"sqrt"`) or a user-defined function.
+* `list`: The array containing the elements to process.
+
+**Behavior:**
+* The function specified by `func_name` must accept exactly one argument (the current element) and return a value.
+* Returns a **new** array of the same length as the input `list`, containing the results.
+* Supports both native functions and user-defined functions.
+
+**Examples:**
+
+```javascript
+// Example 1: Using a user-defined math function
+fn double(x) { 
+    ret x * 2 
+}
+
+var numbers = range(0, 1, 3) // [0, 1, 2, 3]
+var doubled = for_list("double", numbers)
+print(doubled)
+// Result: [0, 2, 4, 6]
+
+
+// Example 2: Using a user-defined string function
+fn add_fish(x) { 
+    ret f"{x}fish" 
+}
+
+var animals = ["cat", "dog"]
+var aquatic = for_list("add_fish", animals)
+print(aquatic)
+// Result: ["catfish", "dogfish"]
+```
+
 <!-- TOC --><a name="type-conversion"></a>
 ## Type Conversion
 <!-- TOC --><a name="to_string"></a>
@@ -271,7 +311,7 @@ Converts a value to its string representation.
 ```javascript
 var n = 123
 var s = to_string(n) 
-print(s + "4") // "1234" (concatenation, not math)
+print(f"{s}4") // "1234"
 ```
 <!-- TOC --><a name="to_num"></a>
 ### `to_num(value: any) -> num`

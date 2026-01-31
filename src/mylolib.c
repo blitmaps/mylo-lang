@@ -6,6 +6,7 @@
 #include "mylolib.h"
 #include "vm.h"
 #include "defines.h"
+#include "compiler.h"
 
 // --- Helpers ---
 
@@ -624,6 +625,90 @@ void std_range(VM *vm) {
     vm_push((double)ptr, T_OBJ);
 }
 
+void std_for_list(VM *vm) {
+    double list_ref = vm_pop();
+    double func_val = vm_pop();
+
+    int list_ptr = (int)list_ref;
+    if (vm->stack_types[vm->sp + 2] != T_OBJ || (int)vm->heap[list_ptr] != TYPE_ARRAY) {
+        printf("Runtime Error: for_list expects an array.\n");
+        exit(1);
+    }
+    if (vm->stack_types[vm->sp + 1] != T_STR) {
+        printf("Runtime Error: for_list expects a function name.\n");
+        exit(1);
+    }
+
+    const char* func_name = get_str(vm, func_val);
+    int len = (int)vm->heap[list_ptr + HEAP_OFFSET_LEN];
+
+    NativeFunc native_target = NULL;
+    for(int i=0; std_library[i].name != NULL; i++) {
+        if(strcmp(std_library[i].name, func_name) == 0) {
+            native_target = std_library[i].func;
+            break;
+        }
+    }
+
+    int user_func_addr = -1;
+    if (!native_target) {
+        for (int i = 0; i < func_count; i++) {
+            if (strcmp(funcs[i].name, func_name) == 0) {
+                user_func_addr = funcs[i].addr;
+                break;
+            }
+        }
+    }
+
+    if (!native_target && user_func_addr == -1) {
+        printf("Runtime Error: for_list could not find function '%s'\n", func_name);
+        exit(1);
+    }
+
+    // CRITICAL FIX: Save the current Instruction Pointer of the main script
+    int saved_ip = vm->ip;
+
+    int res_ptr = heap_alloc(len + HEAP_HEADER_ARRAY);
+    vm->heap[res_ptr] = TYPE_ARRAY;
+    vm->heap[res_ptr + HEAP_OFFSET_LEN] = (double)len;
+
+    for(int i=0; i<len; i++) {
+         double val = vm->heap[list_ptr + HEAP_HEADER_ARRAY + i];
+         int type = vm->heap_types[list_ptr + HEAP_HEADER_ARRAY + i];
+
+         if (native_target) {
+             vm_push(val, type);
+             native_target(vm);
+         } else {
+             // 1. Push Magic Return Address (vm->code_size)
+             vm_push((double)vm->code_size, T_NUM);
+
+             // 2. Push Saved FP
+             vm_push((double)vm->fp, T_NUM);
+
+             // 3. Push Argument
+             vm_push(val, type);
+
+             // 4. Update FP
+             vm->fp = vm->sp;
+
+             // 5. Run User Function
+             // This modifies vm->ip until it hits vm->code_size
+             run_vm_from(user_func_addr, false);
+         }
+
+         double res = vm_pop();
+         int res_type = vm->stack_types[vm->sp + 1];
+
+         vm->heap[res_ptr + HEAP_HEADER_ARRAY + i] = res;
+         vm->heap_types[res_ptr + HEAP_HEADER_ARRAY + i] = res_type;
+    }
+
+    // CRITICAL FIX: Restore the Instruction Pointer so the main script continues
+    vm->ip = saved_ip;
+
+    vm_push((double)res_ptr, T_OBJ);
+}
 // --- Registry Definition ---
 // Moved from header to here
 const StdLibDef std_library[] = {
@@ -648,5 +733,6 @@ const StdLibDef std_library[] = {
     {"split", std_split, "arr", 2, {"str", "str"}},
     {"where", std_where, "num", 2, {"any", "any"}},
     {"range", std_range, "arr", 3, {"num", "num", "num"}},
+    {"for_list", std_for_list, "arr", 2, {"str", "arr"}},
     {NULL, NULL, NULL, 0, {NULL}}
 };
