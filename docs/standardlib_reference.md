@@ -18,6 +18,7 @@ The Mylo Standard Library provides essential functions for file I/O, math, and d
     + [`max(val1: num, val2:num) -> num`](#maxval1-num-val2-num---num)
     + [`distance(x1: num, y1: num, x2: num, y2: num) -> num`](#distancex1-num-y1-num-x2-num-y2-num---num)
     + [`seed() -> None (Random Number Functions)`](#random_numbers)
+    + [` noise(x: num, y: num, z: num) -> num`](#noisex-num-y-num-z-num---num)
   * [Utility Functions](#utility-functions)
     + [`len(collection: any) -> num`](#lencollection-any-num)
     + [`contains(haystack: any, needle: any) -> num`](#containshaystack-any-needle-any-num)
@@ -30,7 +31,6 @@ The Mylo Standard Library provides essential functions for file I/O, math, and d
     + [`for_list(func_name: str, list: arr) -> arr`](#for-list-arr)
     + [`min_list(list: arr) -> num`](#min_listlist-arr---num)
     + [`max_list(list: arr) -> num`](#max_listlist-arr---num)
-
   * [Type Conversion](#type-conversion)
     + [`to_string(value: any) -> str`](#to_string)
     + [`to_num(value: any) -> num`](#to_num)
@@ -194,6 +194,31 @@ Generates a random number following a Standard Normal Distribution (Gaussian) wi
 ```javascript
 // Generate a value, likely close to 0
 var n = rand_normal() 
+```
+
+<a name="noisex-y-z-num"></a>
+### `noise(x: num, y: num, z: num) -> num`
+
+Calculates 3D Perlin Noise for the given coordinates.
+
+**Arguments:**
+* `x`: The X coordinate.
+* `y`: The Y coordinate.
+* `z`: The Z coordinate (use `0.0` for 2D noise).
+
+**Returns:**
+* A smooth random number roughly between `-1.0` and `1.0`.
+
+**Example:**
+```javascript
+// 2D Noise sample
+var val = noise(x * 0.1, y * 0.1, 0)
+
+// Animated Noise
+var t = 0
+// Loop...
+var val = noise(x * 0.1, y * 0.1, t)
+t = t + 0.01
 ```
 
 <!-- TOC --><a name="utility-functions"></a>
