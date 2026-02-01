@@ -1072,6 +1072,20 @@ inline TestOutput test_list_min_max() {
 }
 
 
+inline TestOutput test_strong_types_list() {
+    std::string src = """"
+    "var pixels: byte[] = [255, 0, 128]\n"  // Stored as bytes in heap
+    "var mesh: f32[] = [1.5, 0.2, -3.4]\n" // Stored as floats in heap
+    "var counts: i32[] = [1000, 2000]\n"   // Stored as ints in heap
+    "print(pixels)\n"
+    "print(mesh)\n"
+    "print(counts)\n";
+    std::string expected = """"
+        "b\"\\xFF\\x00\\x80\"\n[1.5, 0.2, -3.4]\n[1000, 2000]\n";
+    return run_source_test(src, expected);
+}
+
+
 
 
 inline void test_generate_list() {
@@ -1144,6 +1158,8 @@ inline void test_generate_list() {
     ADD_TEST("Test Math dist", test_dist);
     ADD_TEST("Test Math mix", test_mix);
     ADD_TEST("Test Min-Max Array", test_list_min_max);
+    ADD_TEST("Test Strongly Types Arrays", test_strong_types_list);
+
 }
 
 #endif //MYLO_TEST_GENERATE_LIST_H
