@@ -338,7 +338,7 @@ int main(int argc, char** argv) {
     // --- INTERPRETER SAFETY CHECK ---
     // If we have C blocks that were NOT bound via native modules, we must stop.
     if ((ffi_count - bound_ffi_count) > 0) {
-        printf("Error: This program contains Native C blocks and cannot be interpreted.\n");
+        printf("Error: This program contains Native C blocks and no shared objects are found, so it cannot be interpreted.\n");
         printf("Please compile it using: mylo --build %s\n", fn);
         free(content);
         return 1;
