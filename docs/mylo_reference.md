@@ -191,7 +191,7 @@ Arrays of a given struct are defined as usual with type information, and specifi
 struct Color {
     var rgba
 }
-var my_list: Color = [{rgba=1000}, {rgba=2000}]
+var my_list: Color[] = [{rgba=1000}, {rgba=2000}]
 ```
 
 <a name="adding-to-or-concatenating-arrays"></a>
@@ -204,7 +204,7 @@ struct Color {
     var rgba
 }
 // Empty list of Colors
-var my_list: Color = []
+var my_list: Color[] = []
 // Add an element
 my_list = mylist + [{rgba: 500}]
 
@@ -225,7 +225,7 @@ struct Color {
 }
 
 // Start empty
-var my_list: Color = []
+var my_list: Color[] = []
 // Put some values in
 my_list = my_list + [{rgba=500}, {rgba=400}, {rgba=300}, {rgba=700}, {rgba=900}]
 
@@ -654,7 +654,7 @@ struct Color {
     var b
 }
 
-var pixel = C() -> Color {
+var pixel : Color = C() -> Color {
     struct color_rgb { char r; char g; char b; };
     // Simulated native data: 255 (0xFF), 0 (0x00), 128 (0x80)
     struct color_rgb raw = { 255, 0, 128 };
@@ -676,7 +676,7 @@ print(pixel.b) // Now prints 128
 #### Getting Arrays from C
 ```javascript
 // Unknown return type falls back to 'MyloReturn'
-fn get_bytes() -> any {
+fn get_bytes() {
     var x = C(){
         const char* my_data = "\x01\x02\x03\x00\x04";
         int len = 5;
@@ -709,7 +709,7 @@ fn get_bytes() -> any {
 Here we send an int, and a string to c, and print them using
 printf.
 ````javascript
-var a = 100
+var a: i32 = 100
 var b = "200"
 
 struct MyStruct {
@@ -718,7 +718,7 @@ struct MyStruct {
 
 var X : MyStruct = {x=9}
 
-var result: num = C(val: int = a, val2 : str = b, val3 : MyStruct = X) {
+var result: num = C(val: i32 = a, val2 : str = b, val3 : MyStruct = X) {
     printf("Inside C: %d, %s, %d\n", (int)val, val2, (int)val3->x);
 }
 ````
