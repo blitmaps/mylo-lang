@@ -27,27 +27,83 @@ void disassemble() {
     int i = 0;
     while (i < vm.code_size) {
         int op = vm.bytecode[i];
-        if (op < 0 || op > OP_MK_BYTES) { printf("%04d UNKNOWN %d\n", i, op); i++; continue; }
+
+        // Updated range check to include OP_EMBED
+        if (op < 0 || op > OP_EMBED) {
+            printf("%04d UNKNOWN %d\n", i, op);
+            i++;
+            continue;
+        }
 
         printf("%04d %-10s ", i, OP_NAMES[op]);
         i++;
 
         switch (op) {
-            case OP_PSH_NUM: { int idx = vm.bytecode[i++]; printf("[%d] (%g)", idx, vm.constants[idx]); break; }
-            case OP_PSH_STR: { int idx = vm.bytecode[i++]; printf("[%d] (\"%s\")", idx, vm.string_pool[idx]); break; }
+            case OP_PSH_NUM: {
+                int idx = vm.bytecode[i++];
+                printf("[%d] (%g)", idx, vm.constants[idx]);
+                break;
+            }
+            case OP_PSH_STR: {
+                int idx = vm.bytecode[i++];
+                printf("[%d] (\"%s\")", idx, vm.string_pool[idx]);
+                break;
+            }
             case OP_JMP:
             case OP_JZ:
-            case OP_JNZ: { int addr = vm.bytecode[i++]; printf("-> %04d", addr); break; }
+            case OP_JNZ: {
+                int addr = vm.bytecode[i++];
+                printf("-> %04d", addr);
+                break;
+            }
             case OP_SET:
-            case OP_GET: { int idx = vm.bytecode[i++]; printf("G[%d]", idx); break; }
+            case OP_GET: {
+                int idx = vm.bytecode[i++];
+                printf("G[%d]", idx);
+                break;
+            }
             case OP_LVAR:
-            case OP_SVAR: { int off = vm.bytecode[i++]; printf("FP[%d]", off); break; }
-            case OP_CALL: { int target = vm.bytecode[i++]; int args = vm.bytecode[i++]; printf("-> %04d (%d args)", target, args); break; }
-            case OP_ALLOC: { int size = vm.bytecode[i++]; printf("(size: %d)", size); break; }
+            case OP_SVAR: {
+                int off = vm.bytecode[i++];
+                printf("FP[%d]", off);
+                break;
+            }
+            case OP_CALL: {
+                int target = vm.bytecode[i++];
+                int args = vm.bytecode[i++];
+                printf("-> %04d (%d args)", target, args);
+                break;
+            }
+            case OP_ALLOC: {
+                int size = vm.bytecode[i++];
+                int type_id = vm.bytecode[i++]; // Consumes 2nd arg
+                printf("(fields: %d, type_id: %d)", size, type_id);
+                break;
+            }
             case OP_HSET:
-            case OP_HGET: { int off = vm.bytecode[i++]; printf("Offset: %d", off); break; }
-            case OP_NATIVE: { int id = vm.bytecode[i++]; printf("Native[%d]", id); break; }
-            case OP_ARR: { int count = vm.bytecode[i++]; printf("(count: %d)", count); break; }
+            case OP_HGET: {
+                int off = vm.bytecode[i++];
+                int type_id = vm.bytecode[i++]; // Consumes 2nd arg
+                printf("(offset: %d, type_id: %d)", off, type_id);
+                break;
+            }
+            case OP_NATIVE: {
+                int id = vm.bytecode[i++];
+                printf("Native[%d]", id);
+                break;
+            }
+            case OP_ARR: {
+                int count = vm.bytecode[i++];
+                printf("(count: %d)", count);
+                break;
+            }
+            case OP_EMBED: {
+                int len = vm.bytecode[i++];
+                printf("(len: %d) <embedded data>", len);
+                // Important: Skip the raw data bytes so we don't interpret them as opcodes
+                i += len;
+                break;
+            }
             default: break;
         }
         printf("\n");
