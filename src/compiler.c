@@ -2303,7 +2303,9 @@ void compile_to_c_source(const char *output_filename) {
 
     fprintf(fp, "#include \"vm.h\"\n");
     fprintf(fp, "#include \"mylolib.h\"\n\n");
-
+    // Fix for binding heap
+    fprintf(fp, "// Compatibility for C-blocks written for bindings\n");
+    fprintf(fp, "#define host_heap_ptr vm.heap\n");
     fprintf(fp, "// --- GENERATED C STRUCTS ---\n");
     for (int i = 0; i < struct_count; i++) {
         fprintf(fp, "typedef struct { ");
