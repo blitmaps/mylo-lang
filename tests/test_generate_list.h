@@ -474,7 +474,7 @@ inline TestOutput test_list_concat() {
     "struct Color {\n"
         "var rgba\n"
     "}\n"
-    "var my_list: Color = []\n"
+    "var my_list: Color[] = []\n"
     "my_list = my_list + [{rgba=500}, {rgba=800}, {rgba=22}]\n"
     "print(my_list[1].rgba)\n";
 

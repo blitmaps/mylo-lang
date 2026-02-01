@@ -38,6 +38,7 @@ typedef enum {
     TK_MUL, TK_DIV,
     TK_MOD_OP, // % operator
     TK_EMBED,
+    TK_TYPE_DEF, // f32, i32, etc. (Generic token for built-in types)
 } MyloTokenType;
 
 typedef struct {
@@ -374,6 +375,14 @@ void next_token() {
         else if (strcmp(curr.text, "false") == 0) curr.type = TK_FALSE;
         else if (strcmp(curr.text, "forever") == 0) curr.type = TK_FOREVER;
         else if (strcmp(curr.text, "embed") == 0) curr.type = TK_EMBED;
+        // Types, here these can be simplified but we will leave them for the time being.
+        else if (strcmp(curr.text, "f64") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "f32") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "i32") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "i16") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "i64") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "byte") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "bool") == 0) curr.type = TK_TYPE_DEF;
         else curr.type = TK_ID;
         return;
     }
@@ -462,6 +471,17 @@ void next_token() {
             break;
         default: error("Unknown char '%c'", *(src - 1));
     }
+}
+
+int get_type_id_from_token(const char* txt) {
+    if (strcmp(txt, "byte") == 0) return TYPE_BYTES;
+    if (strcmp(txt, "i32") == 0) return TYPE_I32_ARRAY;
+    if (strcmp(txt, "f32") == 0) return TYPE_F32_ARRAY;
+    if (strcmp(txt, "i16") == 0) return TYPE_I16_ARRAY;
+    if (strcmp(txt, "i64") == 0) return TYPE_I64_ARRAY;
+    if (strcmp(txt, "bool") == 0) return TYPE_BOOL_ARRAY;
+    // f64 is default list
+    return TYPE_ARRAY;
 }
 
 void match(MyloTokenType t) {
@@ -1443,37 +1463,82 @@ void statement() {
         while (std_library[std_count].name != NULL) std_count++;
         emit(std_count + ffi_idx);
         emit(OP_POP);
-    } else if (curr.type == TK_VAR) {
+    }else if (curr.type == TK_VAR) {
         match(TK_VAR);
         char name[MAX_IDENTIFIER];
         strcpy(name, curr.text);
         match(TK_ID);
-        int st = -1;
+
+        int explicit_struct = -1;
+        int explicit_primitive = TYPE_ARRAY; // Default generic list
         bool is_arr = false;
+
+        // Check for Type Annotation
         if (curr.type == TK_COLON) {
             match(TK_COLON);
-            char tn[MAX_IDENTIFIER];
-            parse_namespaced_id(tn);
-            if (curr.type == TK_LBRACKET) {
-                match(TK_LBRACKET);
-                match(TK_RBRACKET);
-                is_arr = true;
+
+            // Case A: Primitive Typed Array (e.g. byte[], f32[])
+            if (curr.type == TK_TYPE_DEF) {
+                explicit_primitive = get_type_id_from_token(curr.text);
+                match(TK_TYPE_DEF);
+
+                if (curr.type == TK_LBRACKET) {
+                    match(TK_LBRACKET);
+                    match(TK_RBRACKET);
+                    is_arr = true;
+                }
             }
-            st = find_struct(tn);
-            if (st == -1) {
-                char m[MAX_IDENTIFIER * 2];
-                get_mangled_name(m, tn);
-                st = find_struct(m);
+            // Case B: Struct or Struct Array (e.g. Point, Point[])
+            else {
+                char tn[MAX_IDENTIFIER];
+                parse_namespaced_id(tn);
+
+                if (curr.type == TK_LBRACKET) {
+                    match(TK_LBRACKET);
+                    match(TK_RBRACKET);
+                    is_arr = true;
+                }
+
+                explicit_struct = find_struct(tn);
+                if (explicit_struct == -1) {
+                    char m[MAX_IDENTIFIER * 2];
+                    get_mangled_name(m, tn);
+                    explicit_struct = find_struct(m);
+                }
             }
         }
+
         match(TK_EQ_ASSIGN);
 
-        if (st != -1 && curr.type == TK_LBRACKET) {
+        // --- ASSIGNMENT LOGIC ---
+
+        // 1. Primitive Typed Array Literal: var x: byte[] = [1, 2, 3]
+        if (is_arr && explicit_primitive != TYPE_ARRAY && curr.type == TK_LBRACKET) {
             match(TK_LBRACKET);
             int count = 0;
             if (curr.type != TK_RBRACKET) {
                 do {
-                    parse_struct_literal(st);
+                    expression();
+                    count++;
+                    if (curr.type == TK_COMMA) match(TK_COMMA);
+                } while (curr.type != TK_RBRACKET && curr.type != TK_EOF);
+            }
+            match(TK_RBRACKET);
+
+            emit(OP_MAKE_ARR);
+            emit(count);
+            emit(explicit_primitive);
+        }
+        // 2. Struct Array Literal: var x: Point[] = [{...}, {...}]
+        else if (is_arr && explicit_struct != -1 && curr.type == TK_LBRACKET) {
+            match(TK_LBRACKET);
+            int count = 0;
+            if (curr.type != TK_RBRACKET) {
+                do {
+                    // Auto-infer struct type for elements inside the array
+                    if (curr.type == TK_LBRACE) parse_struct_literal(explicit_struct);
+                    else expression(); // Allow variables/returns too
+
                     count++;
                     if (curr.type == TK_COMMA) match(TK_COMMA);
                 } while (curr.type != TK_RBRACKET && curr.type != TK_EOF);
@@ -1481,9 +1546,18 @@ void statement() {
             match(TK_RBRACKET);
             emit(OP_ARR);
             emit(count);
-            is_arr = true;
-        } else if (st != -1 && curr.type == TK_LBRACKET) { parse_struct_literal(st); } else if (
-            st != -1 && curr.type == TK_LBRACE) { parse_struct_literal(st); } else if (curr.type == TK_LBRACE) {
+        }
+        // 3. Single Struct Literal: var p: Point = {...}
+        else if (explicit_struct != -1 && curr.type == TK_LBRACE) {
+            parse_struct_literal(explicit_struct);
+        }
+        // 4. Inferred Struct Literal (if type not specified but fields match)
+        else if (explicit_struct == -1 && curr.type == TK_LBRACE) {
+             // Look ahead or use existing inference logic
+             // For now, fall back to existing map/struct inference in expression() or similar
+             // But here we specifically handle the TK_VAR logic
+
+             // Reuse the existing inference logic:
             char *safe_src = src;
             Token safe_curr = curr;
             int safe_line = line;
@@ -1492,16 +1566,22 @@ void statement() {
             src = safe_src;
             curr = safe_curr;
             line = safe_line;
-            if (is_map) parse_map_literal();
-            else error("Struct literal without type");
-        } else { expression(); }
 
-        alloc_var(inside_function, name, st, is_arr);
+            if (is_map) parse_map_literal();
+            else error("Struct literal requires type annotation (var x: Type = ...)");
+        }
+        // 5. Standard Expression
+        else {
+            expression();
+        }
+
+        alloc_var(inside_function, name, explicit_struct, is_arr);
         if (!inside_function) {
             emit(OP_SET);
             emit(global_count - 1);
         }
-    } else if (curr.type == TK_FOR) { for_statement(); } else if (curr.type == TK_ID) {
+    }
+    else if (curr.type == TK_FOR) { for_statement(); } else if (curr.type == TK_ID) {
         char name[MAX_IDENTIFIER];
         parse_namespaced_id(name);
 

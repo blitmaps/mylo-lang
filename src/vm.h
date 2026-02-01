@@ -58,6 +58,7 @@ typedef enum {
     OP_IT_VAL,
     OP_IT_DEF,
     OP_EMBED,
+    OP_MAKE_ARR // [Count] [TypeID] -> Creates a specific typed array
 } OpCode;
 
 extern const char *OP_NAMES[];
