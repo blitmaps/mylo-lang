@@ -263,6 +263,8 @@ void print_raw(const char* str) {
     }
 }
 
+// [vm.c]
+
 void print_recursive(double val, int type, int depth) {
     // Recursion Guard
     if (depth > 10) { print_raw("..."); return; }
@@ -270,13 +272,11 @@ void print_recursive(double val, int type, int depth) {
     char buf[64];
 
     if (type == T_NUM) {
-        // Integer check for cleaner output (1 instead of 1.0)
         if (val == (int)val) sprintf(buf, "%d", (int)val);
         else sprintf(buf, "%g", val);
         print_raw(buf);
     }
     else if (type == T_STR) {
-        // Quote strings if they are inside a collection
         if (depth > 0) print_raw("\"");
         print_raw(vm.string_pool[(int)val]);
         if (depth > 0) print_raw("\"");
@@ -290,49 +290,69 @@ void print_recursive(double val, int type, int depth) {
             int len = (int)vm.heap[ptr + HEAP_OFFSET_LEN];
             for (int i = 0; i < len; i++) {
                 if (i > 0) print_raw(", ");
-                // Recurse
                 print_recursive(vm.heap[ptr + 2 + i], vm.heap_types[ptr + 2 + i], depth + 1);
             }
             print_raw("]");
         }
         else if (obj_type == TYPE_MAP) {
-            print_raw("[");
+            print_raw("{"); // Changed to curly braces for maps
             int count = (int)vm.heap[ptr + HEAP_OFFSET_COUNT];
             int data = (int)vm.heap[ptr + HEAP_OFFSET_DATA];
 
             for (int i = 0; i < count; i++) {
                 if (i > 0) print_raw(", ");
-
-                // Key (Assumed String for now)
                 double k = vm.heap[data + i * 2];
                 print_raw(vm.string_pool[(int)k]);
-                print_raw("=");
-
-                // Value (Recurse)
+                print_raw(": ");
                 print_recursive(vm.heap[data + i * 2 + 1], vm.heap_types[data + i * 2 + 1], depth + 1);
             }
-            print_raw("]");
+            print_raw("}");
         }
         else if (obj_type == TYPE_BYTES) {
             int len = (int)vm.heap[ptr + HEAP_OFFSET_LEN];
             unsigned char* b = (unsigned char*)&vm.heap[ptr + HEAP_HEADER_ARRAY];
             print_raw("b\"");
             for (int i = 0; i < len; i++) {
-                // Print basic ASCII, hex for others
                 if (b[i] >= 32 && b[i] <= 126) sprintf(buf, "%c", b[i]);
                 else sprintf(buf, "\\x%02X", b[i]);
                 print_raw(buf);
             }
             print_raw("\"");
         }
+        // --- NEW: Typed Array Printing ---
+        else if (obj_type <= TYPE_I16_ARRAY && obj_type >= TYPE_BOOL_ARRAY) {
+            print_raw("[");
+            int len = (int)vm.heap[ptr + HEAP_OFFSET_LEN];
+            char* data = (char*)&vm.heap[ptr + HEAP_HEADER_ARRAY];
+
+            for (int i = 0; i < len; i++) {
+                if (i > 0) print_raw(", ");
+
+                if (obj_type == TYPE_I32_ARRAY) {
+                    sprintf(buf, "%d", ((int*)data)[i]);
+                } else if (obj_type == TYPE_F32_ARRAY) {
+                    sprintf(buf, "%g", ((float*)data)[i]);
+                } else if (obj_type == TYPE_I16_ARRAY) {
+                    sprintf(buf, "%d", ((short*)data)[i]);
+                } else if (obj_type == TYPE_I64_ARRAY) {
+                    sprintf(buf, "%lld", ((long long*)data)[i]);
+                } else if (obj_type == TYPE_BOOL_ARRAY) {
+                    print_raw(((unsigned char*)data)[i] ? "true" : "false");
+                    continue; // Skip the print_raw(buf) at the end
+                } else {
+                    sprintf(buf, "?");
+                }
+                print_raw(buf);
+            }
+            print_raw("]");
+        }
+        // ---------------------------------
         else {
-            // Structs (No length/name metadata available at runtime yet)
             sprintf(buf, "[Struct Ref:%d]", ptr);
             print_raw(buf);
         }
     }
 }
-
 // --- SINGLE STEP EXECUTION ---
 // Returns the opcode executed, or OP_HLT (-1) if finished
 int vm_step(bool debug_trace) {

@@ -2032,6 +2032,24 @@ void generate_binding_c_source(const char *output_filename) {
                 fprintf(fp, "char* %s", ffi_blocks[i].args[a].name);
             else if (strcmp(type, "num") == 0)
                 fprintf(fp, "double %s", ffi_blocks[i].args[a].name);
+            else if (strcmp(type, "bytes") == 0 || strcmp(type, "byte") == 0) {
+                fprintf(fp, "unsigned char* %s", ffi_blocks[i].args[a].name);
+            }
+            else if (strcmp(type, "i32") == 0) {
+                fprintf(fp, "int* %s", ffi_blocks[i].args[a].name);
+            }
+            else if (strcmp(type, "f32") == 0) {
+                fprintf(fp, "float* %s", ffi_blocks[i].args[a].name);
+            }
+            else if (strcmp(type, "i16") == 0) {
+                fprintf(fp, "short* %s", ffi_blocks[i].args[a].name);
+            }
+            else if (strcmp(type, "i64") == 0) {
+                fprintf(fp, "long long* %s", ffi_blocks[i].args[a].name);
+            }
+            else if (strcmp(type, "bool") == 0) {
+                fprintf(fp, "unsigned char* %s", ffi_blocks[i].args[a].name);
+            }
             else
                 // It is a struct! Generate a pointer to the C struct (e.g. c_RGB*)
                 fprintf(fp, "c_%s* %s", type, ffi_blocks[i].args[a].name);
@@ -2061,7 +2079,26 @@ void generate_binding_c_source(const char *output_filename) {
                 fprintf(fp, "vm->string_pool[(int)_raw_%s]", ffi_blocks[i].args[a].name);
             } else if (strcmp(type, "num") == 0) {
                 fprintf(fp, "_raw_%s", ffi_blocks[i].args[a].name);
-            } else {
+            }
+            else if (strcmp(type, "bytes") == 0 || strcmp(type, "byte") == 0) {
+                fprintf(fp, "(unsigned char*)&vm->heap[(int)_raw_%s + HEAP_HEADER_ARRAY]", ffi_blocks[i].args[a].name);
+            }
+            else if (strcmp(type, "i32") == 0) {
+                fprintf(fp, "(int*)&vm->heap[(int)_raw_%s + HEAP_HEADER_ARRAY]", ffi_blocks[i].args[a].name);
+            }
+            else if (strcmp(type, "f32") == 0) {
+                fprintf(fp, "(float*)&vm->heap[(int)_raw_%s + HEAP_HEADER_ARRAY]", ffi_blocks[i].args[a].name);
+            }
+            else if (strcmp(type, "i16") == 0) {
+                fprintf(fp, "(short*)&vm->heap[(int)_raw_%s + HEAP_HEADER_ARRAY]", ffi_blocks[i].args[a].name);
+            }
+            else if (strcmp(type, "i64") == 0) {
+                fprintf(fp, "(long long*)&vm->heap[(int)_raw_%s + HEAP_HEADER_ARRAY]", ffi_blocks[i].args[a].name);
+            }
+            else if (strcmp(type, "bool") == 0) {
+                fprintf(fp, "(unsigned char*)&vm->heap[(int)_raw_%s + HEAP_HEADER_ARRAY]", ffi_blocks[i].args[a].name);
+            }
+            else {
                 // Cast the heap index to a pointer to the struct data
                 // We add HEAP_HEADER_STRUCT to skip the Type ID in the heap header
                 fprintf(fp, "(c_%s*)&vm->heap[(int)_raw_%s + HEAP_HEADER_STRUCT]", type, ffi_blocks[i].args[a].name);
