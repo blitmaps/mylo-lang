@@ -185,7 +185,7 @@ void print_help() {
     printf("Mylo Language v%s\n", VERSION_INFO);
 
     SET_COLOUR(FG_GRAY, BG_DEFAULT);
-    printf("A lightweight, embeddable scripting language.\n\n");
+    printf("A lightweight, embeddable language.\n\n");
     SET_COLOUR(FG_DEFAULT, BG_DEFAULT);
 
     // Usage
