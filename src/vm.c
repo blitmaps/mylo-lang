@@ -55,8 +55,23 @@ const char *OP_NAMES[] = {
     "IT_KEY",
     "IT_VAL",
     "IT_DEF",
-    "EMBED"
+    "EMBED",
+    "MAKE_ARR" // Added missing name
 };
+
+// Helper to get element size in bytes
+int get_type_size(int heap_type) {
+    switch(heap_type) {
+        case TYPE_BYTES:
+        case TYPE_BOOL_ARRAY: return 1;
+        case TYPE_I16_ARRAY:
+        case TYPE_F16_ARRAY:  return 2; // Treat as i16 storage for now
+        case TYPE_I32_ARRAY:
+        case TYPE_F32_ARRAY:  return 4;
+        case TYPE_I64_ARRAY:
+        default: return 8; // TYPE_ARRAY (doubles)
+    }
+}
 
 // --- REFERENCE MANAGEMENT ---
 // This allows C-Blocks to store generic pointers/structs in the VM
@@ -248,6 +263,8 @@ void print_raw(const char* str) {
     }
 }
 
+// [vm.c]
+
 void print_recursive(double val, int type, int depth) {
     // Recursion Guard
     if (depth > 10) { print_raw("..."); return; }
@@ -255,13 +272,11 @@ void print_recursive(double val, int type, int depth) {
     char buf[64];
 
     if (type == T_NUM) {
-        // Integer check for cleaner output (1 instead of 1.0)
         if (val == (int)val) sprintf(buf, "%d", (int)val);
         else sprintf(buf, "%g", val);
         print_raw(buf);
     }
     else if (type == T_STR) {
-        // Quote strings if they are inside a collection
         if (depth > 0) print_raw("\"");
         print_raw(vm.string_pool[(int)val]);
         if (depth > 0) print_raw("\"");
@@ -275,49 +290,69 @@ void print_recursive(double val, int type, int depth) {
             int len = (int)vm.heap[ptr + HEAP_OFFSET_LEN];
             for (int i = 0; i < len; i++) {
                 if (i > 0) print_raw(", ");
-                // Recurse
                 print_recursive(vm.heap[ptr + 2 + i], vm.heap_types[ptr + 2 + i], depth + 1);
             }
             print_raw("]");
         }
         else if (obj_type == TYPE_MAP) {
-            print_raw("[");
+            print_raw("{"); // Changed to curly braces for maps
             int count = (int)vm.heap[ptr + HEAP_OFFSET_COUNT];
             int data = (int)vm.heap[ptr + HEAP_OFFSET_DATA];
 
             for (int i = 0; i < count; i++) {
                 if (i > 0) print_raw(", ");
-
-                // Key (Assumed String for now)
                 double k = vm.heap[data + i * 2];
                 print_raw(vm.string_pool[(int)k]);
-                print_raw("=");
-
-                // Value (Recurse)
+                print_raw(": ");
                 print_recursive(vm.heap[data + i * 2 + 1], vm.heap_types[data + i * 2 + 1], depth + 1);
             }
-            print_raw("]");
+            print_raw("}");
         }
         else if (obj_type == TYPE_BYTES) {
             int len = (int)vm.heap[ptr + HEAP_OFFSET_LEN];
             unsigned char* b = (unsigned char*)&vm.heap[ptr + HEAP_HEADER_ARRAY];
             print_raw("b\"");
             for (int i = 0; i < len; i++) {
-                // Print basic ASCII, hex for others
                 if (b[i] >= 32 && b[i] <= 126) sprintf(buf, "%c", b[i]);
                 else sprintf(buf, "\\x%02X", b[i]);
                 print_raw(buf);
             }
             print_raw("\"");
         }
+        // --- NEW: Typed Array Printing ---
+        else if (obj_type <= TYPE_I16_ARRAY && obj_type >= TYPE_BOOL_ARRAY) {
+            print_raw("[");
+            int len = (int)vm.heap[ptr + HEAP_OFFSET_LEN];
+            char* data = (char*)&vm.heap[ptr + HEAP_HEADER_ARRAY];
+
+            for (int i = 0; i < len; i++) {
+                if (i > 0) print_raw(", ");
+
+                if (obj_type == TYPE_I32_ARRAY) {
+                    sprintf(buf, "%d", ((int*)data)[i]);
+                } else if (obj_type == TYPE_F32_ARRAY) {
+                    sprintf(buf, "%g", ((float*)data)[i]);
+                } else if (obj_type == TYPE_I16_ARRAY) {
+                    sprintf(buf, "%d", ((short*)data)[i]);
+                } else if (obj_type == TYPE_I64_ARRAY) {
+                    sprintf(buf, "%lld", ((long long*)data)[i]);
+                } else if (obj_type == TYPE_BOOL_ARRAY) {
+                    print_raw(((unsigned char*)data)[i] ? "true" : "false");
+                    continue; // Skip the print_raw(buf) at the end
+                } else {
+                    sprintf(buf, "?");
+                }
+                print_raw(buf);
+            }
+            print_raw("]");
+        }
+        // ---------------------------------
         else {
-            // Structs (No length/name metadata available at runtime yet)
             sprintf(buf, "[Struct Ref:%d]", ptr);
             print_raw(buf);
         }
     }
 }
-
 // --- SINGLE STEP EXECUTION ---
 // Returns the opcode executed, or OP_HLT (-1) if finished
 int vm_step(bool debug_trace) {
@@ -325,7 +360,7 @@ int vm_step(bool debug_trace) {
 
     if (debug_trace) {
         int op = vm.bytecode[vm.ip];
-        if (op >= 0 && op <= OP_MK_BYTES) {
+        if (op >= 0 && op <= OP_MAKE_ARR) {
             printf("[TRACE] IP:%04d Line:%d SP:%2d OP:%s\n", vm.ip, vm.lines[vm.ip], vm.sp, OP_NAMES[op]);
         }
     }
@@ -355,15 +390,12 @@ int vm_step(bool debug_trace) {
                 vm.stack[vm.sp] = valA + valB;
                 vm.stack_types[vm.sp] = T_NUM;
             }
-            // 2. String + String (Concatenation) --> NEW FIX
+            // 2. String + String (Concatenation)
             else if (typeA == T_STR && typeB == T_STR) {
                 const char* s1 = vm.string_pool[(int)valA];
                 const char* s2 = vm.string_pool[(int)valB];
-
-                // Using a temp buffer large enough for 2 max strings
                 char buf[MAX_STRING_LENGTH * 2];
                 snprintf(buf, sizeof(buf), "%s%s", s1, s2);
-
                 int id = make_string(buf);
                 vm.stack[vm.sp] = (double)id;
                 vm.stack_types[vm.sp] = T_STR;
@@ -418,7 +450,7 @@ int vm_step(bool debug_trace) {
                     RUNTIME_ERROR("Cannot add these object types");
                 }
             }
-            // 4. Array/Bytes + Scalar (Broadcast Addition)
+            // 4. Array + Scalar (Broadcast Addition)
             else if (typeA == T_OBJ || typeB == T_OBJ) {
                 double arrVal = (typeA == T_OBJ) ? valA : valB;
                 double scalVal = (typeA == T_OBJ) ? valB : valA;
@@ -427,10 +459,10 @@ int vm_step(bool debug_trace) {
                 int ptr = (int)arrVal;
                 int hType = (int)vm.heap[ptr];
 
-                if (hType != TYPE_ARRAY && hType != TYPE_BYTES) RUNTIME_ERROR("Invalid object type for addition");
-
                 int len = (int)vm.heap[ptr + HEAP_OFFSET_LEN];
                 int newPtr = heap_alloc(len + HEAP_HEADER_ARRAY);
+
+                // Result is always a generic array (TYPE_ARRAY) for simplicity
                 vm.heap[newPtr] = TYPE_ARRAY;
                 vm.heap[newPtr + 1] = (double)len;
 
@@ -439,12 +471,21 @@ int vm_step(bool debug_trace) {
                 for (int i = 0; i < len; i++) {
                     double elVal;
                     int elType;
+
                     if (hType == TYPE_BYTES) {
                         elVal = (double)byteData[i];
                         elType = T_NUM;
-                    } else {
+                    } else if (hType == TYPE_ARRAY) {
                         elVal = vm.heap[ptr + 2 + i];
                         elType = vm.heap_types[ptr + 2 + i];
+                    } else {
+                        // Handle packed types (Simple fallback to get double from packed)
+                         char* data = (char*)&vm.heap[ptr + HEAP_HEADER_ARRAY];
+                         if(hType == TYPE_I32_ARRAY) elVal = (double)((int*)data)[i];
+                         else if(hType == TYPE_F32_ARRAY) elVal = (double)((float*)data)[i];
+                         else if(hType == TYPE_I16_ARRAY) elVal = (double)((short*)data)[i];
+                         else elVal = 0;
+                         elType = T_NUM;
                     }
 
                     if (elType == T_NUM && scalType == T_NUM) {
@@ -452,14 +493,16 @@ int vm_step(bool debug_trace) {
                         vm.heap_types[newPtr + 2 + i] = T_NUM;
                     }
                     else if (scalType == T_STR) {
-                        char buf[1024];
-                        if (elType == T_NUM) sprintf(buf, "%g", elVal);
-                        else strcpy(buf, vm.string_pool[(int)elVal]);
-                        const char* sScal = vm.string_pool[(int)scalVal];
-                        if (typeA == T_OBJ) strcat(buf, sScal);
-                        else { char temp[1024]; strcpy(temp, sScal); strcat(temp, buf); strcpy(buf, temp); }
-                        vm.heap[newPtr + 2 + i] = (double)make_string(buf);
-                        vm.heap_types[newPtr + 2 + i] = T_STR;
+                         char buf[1024];
+                         if (elType == T_NUM) sprintf(buf, "%g", elVal);
+                         else strcpy(buf, vm.string_pool[(int)elVal]);
+                         const char* sScal = vm.string_pool[(int)scalVal];
+
+                         if (typeA == T_OBJ) strcat(buf, sScal);
+                         else { char temp[1024]; strcpy(temp, sScal); strcat(temp, buf); strcpy(buf, temp); }
+
+                         vm.heap[newPtr + 2 + i] = (double)make_string(buf);
+                         vm.heap_types[newPtr + 2 + i] = T_STR;
                     }
                     else {
                         RUNTIME_ERROR("Invalid types for array broadcast");
@@ -487,10 +530,6 @@ int vm_step(bool debug_trace) {
                 double scalar = (typeA == T_OBJ) ? valB : valA;
 
                 int hType = (int)vm.heap[ptr];
-                if (hType != TYPE_ARRAY && hType != TYPE_BYTES) RUNTIME_ERROR("Invalid object type for SUB");
-                if (typeA == T_OBJ && typeB != T_NUM) RUNTIME_ERROR("Can only subtract number from array");
-                if (typeB == T_OBJ && typeA != T_NUM) RUNTIME_ERROR("Can only subtract array from number");
-
                 int len = (int)vm.heap[ptr + HEAP_OFFSET_LEN];
                 int newPtr = heap_alloc(len + HEAP_HEADER_ARRAY);
                 vm.heap[newPtr] = TYPE_ARRAY;
@@ -501,9 +540,15 @@ int vm_step(bool debug_trace) {
                 for (int i = 0; i < len; i++) {
                     double elVal;
                     if (hType == TYPE_BYTES) elVal = (double)byteData[i];
-                    else {
+                    else if (hType == TYPE_ARRAY) {
                         elVal = vm.heap[ptr + 2 + i];
                         if (vm.heap_types[ptr + 2 + i] != T_NUM) RUNTIME_ERROR("Non-number element in SUB");
+                    } else {
+                         // Typed Array Fallback
+                         char* data = (char*)&vm.heap[ptr + HEAP_HEADER_ARRAY];
+                         if(hType == TYPE_I32_ARRAY) elVal = (double)((int*)data)[i];
+                         else if(hType == TYPE_F32_ARRAY) elVal = (double)((float*)data)[i];
+                         else elVal = 0;
                     }
 
                     if (typeA == T_OBJ) vm.heap[newPtr + 2 + i] = elVal - scalar;
@@ -532,7 +577,7 @@ int vm_step(bool debug_trace) {
 
                 int ptr = (int)arrVal;
                 int hType = (int)vm.heap[ptr];
-                if (hType != TYPE_ARRAY && hType != TYPE_BYTES) RUNTIME_ERROR("Invalid object type for MUL");
+                // Removed strict check here to allow typed arrays
 
                 int len = (int)vm.heap[ptr + HEAP_OFFSET_LEN];
                 int newPtr = heap_alloc(len + HEAP_HEADER_ARRAY);
@@ -544,9 +589,14 @@ int vm_step(bool debug_trace) {
                 for(int i = 0; i < len; i++) {
                      double elVal;
                      if (hType == TYPE_BYTES) elVal = (double)byteData[i];
-                     else {
+                     else if (hType == TYPE_ARRAY) {
                          elVal = vm.heap[ptr + 2 + i];
                          if (vm.heap_types[ptr + 2 + i] != T_NUM) RUNTIME_ERROR("Non-number element in MUL");
+                     } else {
+                         char* data = (char*)&vm.heap[ptr + HEAP_HEADER_ARRAY];
+                         if(hType == TYPE_I32_ARRAY) elVal = (double)((int*)data)[i];
+                         else if(hType == TYPE_F32_ARRAY) elVal = (double)((float*)data)[i];
+                         else elVal = 0;
                      }
 
                      vm.heap[newPtr + 2 + i] = elVal * scalVal;
@@ -574,9 +624,7 @@ int vm_step(bool debug_trace) {
                 double scalar = (typeA == T_OBJ) ? valB : valA;
 
                 int hType = (int)vm.heap[ptr];
-                if (hType != TYPE_ARRAY && hType != TYPE_BYTES) RUNTIME_ERROR("Invalid object type for DIV");
 
-                // Div Zero Check
                 if (typeA == T_OBJ && scalar == 0) RUNTIME_ERROR("Div by zero");
 
                 int len = (int)vm.heap[ptr + HEAP_OFFSET_LEN];
@@ -589,9 +637,14 @@ int vm_step(bool debug_trace) {
                 for (int i = 0; i < len; i++) {
                     double elVal;
                     if (hType == TYPE_BYTES) elVal = (double)byteData[i];
-                    else {
+                    else if (hType == TYPE_ARRAY) {
                         elVal = vm.heap[ptr + 2 + i];
                         if (vm.heap_types[ptr + 2 + i] != T_NUM) RUNTIME_ERROR("Non-number element in DIV");
+                    } else {
+                         char* data = (char*)&vm.heap[ptr + HEAP_HEADER_ARRAY];
+                         if(hType == TYPE_I32_ARRAY) elVal = (double)((int*)data)[i];
+                         else if(hType == TYPE_F32_ARRAY) elVal = (double)((float*)data)[i];
+                         else elVal = 0;
                     }
 
                     if (typeA == T_OBJ) vm.heap[newPtr + 2 + i] = elVal / scalar;
@@ -623,7 +676,6 @@ int vm_step(bool debug_trace) {
                 double scalar = (typeA == T_OBJ) ? valB : valA;
 
                 int hType = (int)vm.heap[ptr];
-                if (hType != TYPE_ARRAY && hType != TYPE_BYTES) RUNTIME_ERROR("Invalid object type for MOD");
 
                 if (typeA == T_OBJ && scalar == 0) RUNTIME_ERROR("Mod by zero");
 
@@ -637,9 +689,14 @@ int vm_step(bool debug_trace) {
                 for (int i = 0; i < len; i++) {
                     double elVal;
                     if (hType == TYPE_BYTES) elVal = (double)byteData[i];
-                    else {
+                    else if (hType == TYPE_ARRAY) {
                         elVal = vm.heap[ptr + 2 + i];
                         if (vm.heap_types[ptr + 2 + i] != T_NUM) RUNTIME_ERROR("Non-number element in MOD");
+                    } else {
+                         char* data = (char*)&vm.heap[ptr + HEAP_HEADER_ARRAY];
+                         if(hType == TYPE_I32_ARRAY) elVal = (double)((int*)data)[i];
+                         else if(hType == TYPE_F32_ARRAY) elVal = (double)((float*)data)[i];
+                         else elVal = 0;
                     }
 
                     if (typeA == T_OBJ) vm.heap[newPtr + 2 + i] = fmod(elVal, scalar);
@@ -821,19 +878,31 @@ int vm_step(bool debug_trace) {
             int ptr = (int)vm_pop();
             int type = (int)vm.heap[ptr];
 
-            if (type == TYPE_ARRAY || type == TYPE_BYTES) {
+            if (type <= TYPE_ARRAY && type != TYPE_MAP) { // It's an array/buffer
                 int idx = (int)key;
-                int len = (int)vm.heap[ptr+1];
+                int len = (int)vm.heap[ptr + HEAP_OFFSET_LEN];
                 if (idx < 0) idx += len;
                 if (idx < 0 || idx >= len) RUNTIME_ERROR("Index OOB");
 
-                if (type == TYPE_BYTES) {
-                    unsigned char* b = (unsigned char*)&vm.heap[ptr+HEAP_HEADER_ARRAY];
-                    vm_push((double)b[idx], T_NUM);
-                } else {
+                if (type == TYPE_ARRAY) {
                     vm_push(vm.heap[ptr+2+idx], vm.heap_types[ptr+2+idx]);
+                } else {
+                    // Packed Array Logic
+                    char* data = (char*)&vm.heap[ptr + HEAP_HEADER_ARRAY];
+                    double res = 0;
+
+                    switch(type) {
+                        case TYPE_BYTES:      res = (double)((unsigned char*)data)[idx]; break;
+                        case TYPE_BOOL_ARRAY: res = (double)((unsigned char*)data)[idx]; break;
+                        case TYPE_I16_ARRAY:  res = (double)((short*)data)[idx]; break;
+                        case TYPE_I32_ARRAY:  res = (double)((int*)data)[idx]; break;
+                        case TYPE_F32_ARRAY:  res = (double)((float*)data)[idx]; break;
+                        case TYPE_I64_ARRAY:  res = (double)((long long*)data)[idx]; break;
+                    }
+                    vm_push(res, T_NUM);
                 }
-            } else if (type == TYPE_MAP) {
+            }
+            else if (type == TYPE_MAP) {
                 int count = (int)vm.heap[ptr+2];
                 int data = (int)vm.heap[ptr+3];
                 bool found = false;
@@ -908,9 +977,6 @@ int vm_step(bool debug_trace) {
                 char* dst = (char*)&vm.heap[newptr + HEAP_HEADER_ARRAY];
 
                 if (newlen > 0) {
-                    // +2 accounts for the Heap Header (Type, Len) offset in bytes?
-                    // No, &vm.heap[ptr + 2] points to the start of the data payload.
-                    // We simply offset the src pointer by 'start' bytes.
                     for (int i = 0; i < newlen; i++) {
                         dst[i] = src[start + i];
                     }
@@ -1137,6 +1203,54 @@ int vm_step(bool debug_trace) {
             }
 
             // 4. Push Result
+            vm_push((double)ptr, T_OBJ);
+            break;
+        }
+        case OP_MAKE_ARR: {
+            int count = vm.bytecode[vm.ip++];
+            int type_id = vm.bytecode[vm.ip++];
+
+            // 1. Calculate Size
+            int elem_size = get_type_size(type_id);
+            int total_bytes = count * elem_size;
+            int doubles_needed = (total_bytes + 7) / 8;
+
+            // 2. Alloc
+            int ptr = heap_alloc(doubles_needed + HEAP_HEADER_ARRAY);
+            vm.heap[ptr] = (double)type_id;
+            vm.heap[ptr + HEAP_OFFSET_LEN] = (double)count;
+
+            // 3. Fill (Pop from stack backwards)
+            // Access raw byte memory of the heap payload
+            char* data_ptr = (char*)&vm.heap[ptr + HEAP_HEADER_ARRAY];
+
+            for(int i = count - 1; i >= 0; i--) {
+                double val = vm.stack[vm.sp];
+                vm.sp--; // Pop manually
+
+                // Pack Value based on type
+                switch(type_id) {
+                    case TYPE_BYTES:
+                    case TYPE_BOOL_ARRAY:
+                        data_ptr[i] = (unsigned char)val;
+                        break;
+                    case TYPE_I16_ARRAY:
+                        ((short*)data_ptr)[i] = (short)val;
+                        break;
+                    case TYPE_I32_ARRAY:
+                        ((int*)data_ptr)[i] = (int)val;
+                        break;
+                    case TYPE_F32_ARRAY:
+                        ((float*)data_ptr)[i] = (float)val;
+                        break;
+                    case TYPE_I64_ARRAY:
+                        ((long long*)data_ptr)[i] = (long long)val;
+                        break;
+                    default:
+                        // Should use OP_ARR for generic lists, but safety fallback:
+                        break;
+                }
+            }
             vm_push((double)ptr, T_OBJ);
             break;
         }

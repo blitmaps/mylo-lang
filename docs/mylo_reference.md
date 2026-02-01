@@ -13,6 +13,7 @@ It is fast to write, fast to run, and can run anywhere.
     * [Variables](#variables)
         + [Numbers and Strings](#numbers-and-strings)
     * [Types](#types)
+        + [Primitives](#primitive-types)
         + [Structs](#structs)
         + [Enums](#enums)
         + [Bools](#bools)
@@ -72,6 +73,52 @@ my_var = "Oh no!"
 
 <a name="types"></a>
 ## Types
+
+Mylo is dynamically typed at runtime (math operations always use 64-bit floats), but supports **Typed Storage** and **Type Annotations**. This allows for efficient memory usage, precise binary layouts, and seamless interoperability with C functions.
+<a name="primitives"></a>
+### Primitive Types
+
+| Type   | Description              | Size (Bytes) | C Equivalent    |
+|:-------|:-------------------------|:-------------|:----------------|
+| `num`  | Standard Number (Double) | 8            | `double`        |
+| `bool` | Boolean (0 or 1)         | 1            | `unsigned char` |
+| `byte` | Unsigned Byte            | 1            | `unsigned char` |
+| `i16`  | 16-bit Signed Integer    | 2            | `short`         |
+| `i32`  | 32-bit Signed Integer    | 4            | `int`           |
+| `i64`  | 64-bit Signed Integer    | 8            | `long long`     |
+| `f32`  | 32-bit Floating Point    | 4            | `float`         |
+| `str`  | String                   | -            | `char*`         |
+
+#### Variable Annotations
+
+You can annotate variables to enforce types or define specific storage formats.
+
+**Standard Dynamic Variables:**
+```javascript
+var x = 10          // Defaults to 'num' (f64)
+var list = [1, 2]   // Defaults to generic list of 'num'
+```
+
+**Typed Arrays:**
+To create a compact, typed array (packed binary data), use the `[]` syntax in the annotation.
+
+```javascript
+// 32-bit Integer Array (Compact Storage)
+var counts: i32[] = [100, 200, 300]
+
+// Byte Array (Buffer)
+var pixels: byte[] = [255, 0, 128, 255]
+
+// Float Array (Good for Geometry/GPU data)
+var vertices: f32[] = [1.0, 0.5, -1.0]
+```
+
+#### Type Behavior
+
+1.  **Storage:** Typed arrays (`i32[]`, `byte[]`, etc.) store elements tightly packed in memory, not as generic Mylo values. This significantly reduces memory overhead.
+2.  **Runtime:** When you access a value from a typed array (e.g. `val = counts[0]`), it is converted to a standard `num` (double) on the stack so you can perform standard math on it.
+3.  **C-Bindings:** When passing a typed array to a C binding (via `C(...)`), Mylo passes the raw pointer (e.g. `int*`, `unsigned char*`), allowing for zero-copy overhead.
+
 <a name="structs"></a>
 ### Structs
 You can make your own types using the `struct` keyword.
@@ -86,6 +133,16 @@ struct Color {
 // Very red
 var my_colour: Colour = { r=255, g=0, b=0 }
 ```
+
+#### Structs can also be annotated.
+
+```javascript
+struct Vec3 { var x, y, z }
+
+var pos: Vec3 = {x: 10, y: 20, z: 0}
+var mesh: Vec3[] = [{x:1}, {x:2}]
+```
+
 <a name="enums"></a>
 ### Enums
 You can also define your own enumerated variations on types like this:
@@ -134,7 +191,7 @@ Arrays of a given struct are defined as usual with type information, and specifi
 struct Color {
     var rgba
 }
-var my_list: Color = [{rgba=1000}, {rgba=2000}]
+var my_list: Color[] = [{rgba=1000}, {rgba=2000}]
 ```
 
 <a name="adding-to-or-concatenating-arrays"></a>
@@ -147,7 +204,7 @@ struct Color {
     var rgba
 }
 // Empty list of Colors
-var my_list: Color = []
+var my_list: Color[] = []
 // Add an element
 my_list = mylist + [{rgba: 500}]
 
@@ -168,7 +225,7 @@ struct Color {
 }
 
 // Start empty
-var my_list: Color = []
+var my_list: Color[] = []
 // Put some values in
 my_list = my_list + [{rgba=500}, {rgba=400}, {rgba=300}, {rgba=700}, {rgba=900}]
 
@@ -597,7 +654,7 @@ struct Color {
     var b
 }
 
-var pixel = C() -> Color {
+var pixel : Color = C() -> Color {
     struct color_rgb { char r; char g; char b; };
     // Simulated native data: 255 (0xFF), 0 (0x00), 128 (0x80)
     struct color_rgb raw = { 255, 0, 128 };
@@ -619,7 +676,7 @@ print(pixel.b) // Now prints 128
 #### Getting Arrays from C
 ```javascript
 // Unknown return type falls back to 'MyloReturn'
-fn get_bytes() -> any {
+fn get_bytes() {
     var x = C(){
         const char* my_data = "\x01\x02\x03\x00\x04";
         int len = 5;
@@ -652,7 +709,7 @@ fn get_bytes() -> any {
 Here we send an int, and a string to c, and print them using
 printf.
 ````javascript
-var a = 100
+var a: i32 = 100
 var b = "200"
 
 struct MyStruct {
@@ -661,7 +718,7 @@ struct MyStruct {
 
 var X : MyStruct = {x=9}
 
-var result: num = C(val: int = a, val2 : str = b, val3 : MyStruct = X) {
+var result: num = C(val: i32 = a, val2 : str = b, val3 : MyStruct = X) {
     printf("Inside C: %d, %s, %d\n", (int)val, val2, (int)val3->x);
 }
 ````

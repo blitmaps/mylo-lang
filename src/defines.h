@@ -32,6 +32,14 @@
 #define TYPE_BYTES -2
 #define TYPE_MAP -3
 
+#define TYPE_I16_ARRAY  -10
+#define TYPE_I32_ARRAY  -11
+#define TYPE_I64_ARRAY  -12 // Note: Stack is double, i64 > 2^53 will lose precision
+#define TYPE_F16_ARRAY  -13 // Storage only
+#define TYPE_F32_ARRAY  -14
+
+#define TYPE_BOOL_ARRAY -20
+
 // Heap Layout Constants
 #define HEAP_OFFSET_TYPE 0
 #define HEAP_OFFSET_LEN 1     // For Arrays

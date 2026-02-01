@@ -38,6 +38,7 @@ typedef enum {
     TK_MUL, TK_DIV,
     TK_MOD_OP, // % operator
     TK_EMBED,
+    TK_TYPE_DEF, // f32, i32, etc. (Generic token for built-in types)
 } MyloTokenType;
 
 typedef struct {
@@ -144,7 +145,7 @@ void error(const char *fmt, ...) {
     if (MyloConfig.debug_mode && MyloConfig.error_callback) {
         MyloConfig.error_callback(buffer);
         // Debugger usually handles exit, but if we want to stay alive:
-        if (MyloConfig.repl_jmp_buf) longjmp(*(jmp_buf*)MyloConfig.repl_jmp_buf, 1);
+        if (MyloConfig.repl_jmp_buf) longjmp(*(jmp_buf *) MyloConfig.repl_jmp_buf, 1);
         exit(1); // Still exit, but after sending the message
     }
     // -------------------------------
@@ -153,7 +154,7 @@ void error(const char *fmt, ...) {
 
     // 3. RECOVERY: Jump back to REPL loop
     if (MyloConfig.repl_jmp_buf) {
-        longjmp(*(jmp_buf*)MyloConfig.repl_jmp_buf, 1);
+        longjmp(*(jmp_buf *) MyloConfig.repl_jmp_buf, 1);
     }
     exit(1);
 }
@@ -374,6 +375,14 @@ void next_token() {
         else if (strcmp(curr.text, "false") == 0) curr.type = TK_FALSE;
         else if (strcmp(curr.text, "forever") == 0) curr.type = TK_FOREVER;
         else if (strcmp(curr.text, "embed") == 0) curr.type = TK_EMBED;
+            // Types, here these can be simplified but we will leave them for the time being.
+        else if (strcmp(curr.text, "f64") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "f32") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "i32") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "i16") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "i64") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "byte") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "bool") == 0) curr.type = TK_TYPE_DEF;
         else curr.type = TK_ID;
         return;
     }
@@ -462,6 +471,17 @@ void next_token() {
             break;
         default: error("Unknown char '%c'", *(src - 1));
     }
+}
+
+int get_type_id_from_token(const char *txt) {
+    if (strcmp(txt, "byte") == 0) return TYPE_BYTES;
+    if (strcmp(txt, "i32") == 0) return TYPE_I32_ARRAY;
+    if (strcmp(txt, "f32") == 0) return TYPE_F32_ARRAY;
+    if (strcmp(txt, "i16") == 0) return TYPE_I16_ARRAY;
+    if (strcmp(txt, "i64") == 0) return TYPE_I64_ARRAY;
+    if (strcmp(txt, "bool") == 0) return TYPE_BOOL_ARRAY;
+    // f64 is default list
+    return TYPE_ARRAY;
 }
 
 void match(MyloTokenType t) {
@@ -571,17 +591,28 @@ void factor() {
         ffi_blocks[ffi_idx].id = ffi_idx;
         ffi_blocks[ffi_idx].arg_count = 0;
         ffi_blocks[ffi_idx].return_type[0] = '\0';
+
         if (curr.type == TK_LPAREN) {
             match(TK_LPAREN);
             while (curr.type != TK_RPAREN) {
                 if (ffi_blocks[ffi_idx].arg_count >= MAX_FFI_ARGS) exit(1);
                 strcpy(ffi_blocks[ffi_idx].args[ffi_blocks[ffi_idx].arg_count].name, curr.text);
                 match(TK_ID);
+
                 if (curr.type == TK_COLON) {
                     match(TK_COLON);
-                    strcpy(ffi_blocks[ffi_idx].args[ffi_blocks[ffi_idx].arg_count].type, curr.text);
-                    match(TK_ID);
-                } else { strcpy(ffi_blocks[ffi_idx].args[ffi_blocks[ffi_idx].arg_count].type, "num"); }
+                    // FIX: Allow TK_TYPE_DEF (i32, f32) or TK_ID (structs)
+                    if (curr.type == TK_TYPE_DEF) {
+                        strcpy(ffi_blocks[ffi_idx].args[ffi_blocks[ffi_idx].arg_count].type, curr.text);
+                        match(TK_TYPE_DEF);
+                    } else {
+                        strcpy(ffi_blocks[ffi_idx].args[ffi_blocks[ffi_idx].arg_count].type, curr.text);
+                        match(TK_ID);
+                    }
+                } else {
+                    strcpy(ffi_blocks[ffi_idx].args[ffi_blocks[ffi_idx].arg_count].type, "num");
+                }
+
                 match(TK_EQ_ASSIGN);
                 expression();
                 ffi_blocks[ffi_idx].arg_count++;
@@ -589,11 +620,19 @@ void factor() {
             }
             match(TK_RPAREN);
         }
+
         if (curr.type == TK_ARROW) {
             match(TK_ARROW);
-            strcpy(ffi_blocks[ffi_idx].return_type, curr.text);
-            match(TK_ID);
+            // FIX: Allow TK_TYPE_DEF or TK_ID for return type
+            if (curr.type == TK_TYPE_DEF) {
+                strcpy(ffi_blocks[ffi_idx].return_type, curr.text);
+                match(TK_TYPE_DEF);
+            } else {
+                strcpy(ffi_blocks[ffi_idx].return_type, curr.text);
+                match(TK_ID);
+            }
         }
+
         if (curr.type != TK_LBRACE) exit(1);
         char *start = src + 1;
         int braces = 1;
@@ -889,16 +928,14 @@ int alloc_var(bool is_loc, char *name, int type_id, bool is_array) {
 }
 
 // Helper to find or alloc variable
-int get_var_addr(char* n, bool is_local, int explicit_type)
-{
+int get_var_addr(char *n, bool is_local, int explicit_type) {
     if (is_local) {
         int loc = find_local(n);
         if (loc != -1) return loc;
         emit(OP_PSH_NUM);
         emit(make_const(0.0)); // Init
         return alloc_var(true, n, explicit_type, false);
-    }
-    else {
+    } else {
         char m[MAX_IDENTIFIER * 2];
         get_mangled_name(m, n);
         int glob = find_global(m);
@@ -1326,20 +1363,78 @@ void statement() {
             }
 
             return;
-        }
-
-        if (curr.type == TK_ID && strcmp(curr.text, "C") == 0) {
+        } else if (curr.type == TK_ID && strcmp(curr.text, "C") == 0) {
             match(TK_ID);
 
-            if (curr.type != TK_STR) error("Expected string literal after 'import C'");
+            int ffi_idx = ffi_count++;
+            ffi_blocks[ffi_idx].id = ffi_idx;
+            ffi_blocks[ffi_idx].arg_count = 0;
 
-            if (c_header_count >= MAX_C_HEADERS) {
-                error("Too many C imports (Max %d)", MAX_C_HEADERS);
+            strcpy(ffi_blocks[ffi_idx].return_type, "void");
+
+            if (curr.type == TK_LPAREN) {
+                match(TK_LPAREN);
+                while (curr.type != TK_RPAREN) {
+                    if (ffi_blocks[ffi_idx].arg_count >= MAX_FFI_ARGS) exit(1);
+                    strcpy(ffi_blocks[ffi_idx].args[ffi_blocks[ffi_idx].arg_count].name, curr.text);
+                    match(TK_ID);
+
+                    if (curr.type == TK_COLON) {
+                        match(TK_COLON);
+                        // FIX: Allow TK_TYPE_DEF or TK_ID
+                        if (curr.type == TK_TYPE_DEF) {
+                            strcpy(ffi_blocks[ffi_idx].args[ffi_blocks[ffi_idx].arg_count].type, curr.text);
+                            match(TK_TYPE_DEF);
+                        } else {
+                            strcpy(ffi_blocks[ffi_idx].args[ffi_blocks[ffi_idx].arg_count].type, curr.text);
+                            match(TK_ID);
+                        }
+                    } else {
+                        strcpy(ffi_blocks[ffi_idx].args[ffi_blocks[ffi_idx].arg_count].type, "num");
+                    }
+
+                    match(TK_EQ_ASSIGN);
+                    expression();
+                    ffi_blocks[ffi_idx].arg_count++;
+                    if (curr.type == TK_COMMA) match(TK_COMMA);
+                }
+                match(TK_RPAREN);
             }
 
-            strcpy(c_headers[c_header_count++], curr.text);
-            match(TK_STR);
-            return;
+            // Check for return type arrow in statements too (e.g. C(...) -> i32 { ... })
+            if (curr.type == TK_ARROW) {
+                match(TK_ARROW);
+                if (curr.type == TK_TYPE_DEF) {
+                    strcpy(ffi_blocks[ffi_idx].return_type, curr.text);
+                    match(TK_TYPE_DEF);
+                } else {
+                    strcpy(ffi_blocks[ffi_idx].return_type, curr.text);
+                    match(TK_ID);
+                }
+            }
+
+            if (curr.type != TK_LBRACE) error("Expected '{' after C arguments");
+            char *start = src + 1;
+            int braces = 1;
+            char *end = start;
+            while (*end && braces > 0) {
+                if (*end == '{') braces++;
+                if (*end == '}') braces--;
+                if (*end == '\n') line++;
+                if (braces > 0) end++;
+            }
+            int len = (int) (end - start);
+            if (len >= MAX_C_BLOCK_SIZE) len = MAX_C_BLOCK_SIZE - 1;
+            strncpy(ffi_blocks[ffi_idx].code_body, start, len);
+            ffi_blocks[ffi_idx].code_body[len] = '\0';
+            src = end + 1;
+            next_token();
+
+            emit(OP_NATIVE);
+            int std_count = 0;
+            while (std_library[std_count].name != NULL) std_count++;
+            emit(std_count + ffi_idx);
+            emit(OP_POP); // Statement result is discarded
         }
         char f[MAX_STRING_LENGTH];
         strcpy(f, curr.text);
@@ -1448,32 +1543,77 @@ void statement() {
         char name[MAX_IDENTIFIER];
         strcpy(name, curr.text);
         match(TK_ID);
-        int st = -1;
+
+        int explicit_struct = -1;
+        int explicit_primitive = TYPE_ARRAY; // Default generic list
         bool is_arr = false;
+
+        // Check for Type Annotation
         if (curr.type == TK_COLON) {
             match(TK_COLON);
-            char tn[MAX_IDENTIFIER];
-            parse_namespaced_id(tn);
-            if (curr.type == TK_LBRACKET) {
-                match(TK_LBRACKET);
-                match(TK_RBRACKET);
-                is_arr = true;
+
+            // Case A: Primitive Typed Array (e.g. byte[], f32[])
+            if (curr.type == TK_TYPE_DEF) {
+                explicit_primitive = get_type_id_from_token(curr.text);
+                match(TK_TYPE_DEF);
+
+                if (curr.type == TK_LBRACKET) {
+                    match(TK_LBRACKET);
+                    match(TK_RBRACKET);
+                    is_arr = true;
+                }
             }
-            st = find_struct(tn);
-            if (st == -1) {
-                char m[MAX_IDENTIFIER * 2];
-                get_mangled_name(m, tn);
-                st = find_struct(m);
+            // Case B: Struct or Struct Array (e.g. Point, Point[])
+            else {
+                char tn[MAX_IDENTIFIER];
+                parse_namespaced_id(tn);
+
+                if (curr.type == TK_LBRACKET) {
+                    match(TK_LBRACKET);
+                    match(TK_RBRACKET);
+                    is_arr = true;
+                }
+
+                explicit_struct = find_struct(tn);
+                if (explicit_struct == -1) {
+                    char m[MAX_IDENTIFIER * 2];
+                    get_mangled_name(m, tn);
+                    explicit_struct = find_struct(m);
+                }
             }
         }
+
         match(TK_EQ_ASSIGN);
 
-        if (st != -1 && curr.type == TK_LBRACKET) {
+        // --- ASSIGNMENT LOGIC ---
+
+        // 1. Primitive Typed Array Literal: var x: byte[] = [1, 2, 3]
+        if (is_arr && explicit_primitive != TYPE_ARRAY && curr.type == TK_LBRACKET) {
             match(TK_LBRACKET);
             int count = 0;
             if (curr.type != TK_RBRACKET) {
                 do {
-                    parse_struct_literal(st);
+                    expression();
+                    count++;
+                    if (curr.type == TK_COMMA) match(TK_COMMA);
+                } while (curr.type != TK_RBRACKET && curr.type != TK_EOF);
+            }
+            match(TK_RBRACKET);
+
+            emit(OP_MAKE_ARR);
+            emit(count);
+            emit(explicit_primitive);
+        }
+        // 2. Struct Array Literal: var x: Point[] = [{...}, {...}]
+        else if (is_arr && explicit_struct != -1 && curr.type == TK_LBRACKET) {
+            match(TK_LBRACKET);
+            int count = 0;
+            if (curr.type != TK_RBRACKET) {
+                do {
+                    // Auto-infer struct type for elements inside the array
+                    if (curr.type == TK_LBRACE) parse_struct_literal(explicit_struct);
+                    else expression(); // Allow variables/returns too
+
                     count++;
                     if (curr.type == TK_COMMA) match(TK_COMMA);
                 } while (curr.type != TK_RBRACKET && curr.type != TK_EOF);
@@ -1481,9 +1621,18 @@ void statement() {
             match(TK_RBRACKET);
             emit(OP_ARR);
             emit(count);
-            is_arr = true;
-        } else if (st != -1 && curr.type == TK_LBRACKET) { parse_struct_literal(st); } else if (
-            st != -1 && curr.type == TK_LBRACE) { parse_struct_literal(st); } else if (curr.type == TK_LBRACE) {
+        }
+        // 3. Single Struct Literal: var p: Point = {...}
+        else if (explicit_struct != -1 && curr.type == TK_LBRACE) {
+            parse_struct_literal(explicit_struct);
+        }
+        // 4. Inferred Struct Literal (if type not specified but fields match)
+        else if (explicit_struct == -1 && curr.type == TK_LBRACE) {
+            // Look ahead or use existing inference logic
+            // For now, fall back to existing map/struct inference in expression() or similar
+            // But here we specifically handle the TK_VAR logic
+
+            // Reuse the existing inference logic:
             char *safe_src = src;
             Token safe_curr = curr;
             int safe_line = line;
@@ -1492,11 +1641,16 @@ void statement() {
             src = safe_src;
             curr = safe_curr;
             line = safe_line;
-            if (is_map) parse_map_literal();
-            else error("Struct literal without type");
-        } else { expression(); }
 
-        alloc_var(inside_function, name, st, is_arr);
+            if (is_map) parse_map_literal();
+            else error("Struct literal requires type annotation (var x: Type = ...)");
+        }
+        // 5. Standard Expression
+        else {
+            expression();
+        }
+
+        alloc_var(inside_function, name, explicit_struct, is_arr);
         if (!inside_function) {
             emit(OP_SET);
             emit(global_count - 1);
@@ -1684,8 +1838,7 @@ void statement() {
         emit(loop_start);
 
         pop_loop(loop_start, vm.code_size);
-    }
-    else if (curr.type == TK_EMBED) {
+    } else if (curr.type == TK_EMBED) {
         // Syntax: embed(varName, "filename")
         match(TK_EMBED);
         match(TK_LPAREN);
@@ -1722,7 +1875,7 @@ void statement() {
         long fsize = ftell(f);
         fseek(f, 0, SEEK_SET);
 
-        unsigned char *data = (unsigned char*)malloc(fsize);
+        unsigned char *data = (unsigned char *) malloc(fsize);
         if (!data) error("Memory error parsing embed");
         fread(data, 1, fsize, f);
         fclose(f);
@@ -1730,15 +1883,15 @@ void statement() {
         // 4. Emit Bytecode
         // Check Limits
         if (vm.code_size + fsize + 2 >= MAX_CODE) {
-             error("File too large to embed. Increase MAX_CODE in defines.h");
+            error("File too large to embed. Increase MAX_CODE in defines.h");
         }
 
         emit(OP_EMBED);
-        emit((int)fsize);
+        emit((int) fsize);
 
         // Inject raw bytes as integer instructions
-        for(long i=0; i<fsize; i++) {
-            emit((int)data[i]);
+        for (long i = 0; i < fsize; i++) {
+            emit((int) data[i]);
         }
 
         free(data);
@@ -1754,8 +1907,7 @@ void statement() {
             emit(OP_SET);
             emit(globals[var_idx].addr);
         }
-    }
-    else if (curr.type == TK_RET) {
+    } else if (curr.type == TK_RET) {
         match(TK_RET);
         if (curr.type == TK_RBRACE) {
             emit(OP_PSH_NUM);
@@ -1901,7 +2053,7 @@ void generate_binding_c_source(const char *output_filename) {
     fprintf(fp, "int (*host_make_string)(const char*);\n");
     fprintf(fp, "int (*host_heap_alloc)(int);\n");
 
-    // NEW: Ref Bridge Pointers
+    // Ref Bridge Pointers
     fprintf(fp, "double (*host_vm_store_copy)(void*, size_t, const char*);\n");
     fprintf(fp, "double (*host_vm_store_ptr)(void*, const char*);\n");
     fprintf(fp, "void* (*host_vm_get_ref)(int, const char*);\n");
@@ -1916,15 +2068,13 @@ void generate_binding_c_source(const char *output_filename) {
     fprintf(fp, "#define make_string (*host_make_string)\n");
     fprintf(fp, "#define heap_alloc (*host_heap_alloc)\n");
 
-    // NEW: Ref Bridge Macros
+    // Ref Bridge Macros
     fprintf(fp, "#define vm_store_copy (*host_vm_store_copy)\n");
     fprintf(fp, "#define vm_store_ptr (*host_vm_store_ptr)\n");
     fprintf(fp, "#define vm_get_ref (*host_vm_get_ref)\n");
     fprintf(fp, "#define vm_free_ref (*host_vm_free_ref)\n");
 
     fprintf(fp, "#define natives host_natives_array\n");
-
-    // ... (Structs, User Functions, Wrappers logic remains the same) ...
 
     // Structs
     for (int i = 0; i < struct_count; i++) {
@@ -1939,21 +2089,47 @@ void generate_binding_c_source(const char *output_filename) {
     // User Functions
     for (int i = 0; i < ffi_count; i++) {
         char *ret_type = ffi_blocks[i].return_type;
+
+        // Return Type Mapping
         if (strcmp(ret_type, "num") == 0) fprintf(fp, "double");
-        else if (strcmp(ret_type, "string") == 0) fprintf(fp, "char*");
+        else if (strcmp(ret_type, "string") == 0 || strcmp(ret_type, "str") == 0) fprintf(fp, "char*");
         else if (strcmp(ret_type, "void") == 0) fprintf(fp, "void");
+        else if (strcmp(ret_type, "i32") == 0) fprintf(fp, "int");
+        else if (strcmp(ret_type, "i64") == 0) fprintf(fp, "long long");
+        else if (strcmp(ret_type, "f32") == 0) fprintf(fp, "float");
+        else if (strcmp(ret_type, "i16") == 0) fprintf(fp, "short");
+        else if (strcmp(ret_type, "bool") == 0 || strcmp(ret_type, "byte") == 0) fprintf(fp, "unsigned char");
         else if (strlen(ret_type) > 0) fprintf(fp, "c_%s", ret_type);
         else fprintf(fp, "MyloReturn");
 
         fprintf(fp, " __mylo_user_%d(", i);
+
+        // Argument Type Mapping
         for (int a = 0; a < ffi_blocks[i].arg_count; a++) {
             char *type = ffi_blocks[i].args[a].type;
+
             if (strcmp(type, "str") == 0 || strcmp(type, "string") == 0)
                 fprintf(fp, "char* %s", ffi_blocks[i].args[a].name);
             else if (strcmp(type, "num") == 0)
                 fprintf(fp, "double %s", ffi_blocks[i].args[a].name);
+            else if (strcmp(type, "i32") == 0)
+                fprintf(fp, "int %s", ffi_blocks[i].args[a].name);
+            else if (strcmp(type, "i64") == 0)
+                fprintf(fp, "long long %s", ffi_blocks[i].args[a].name);
+            else if (strcmp(type, "f32") == 0)
+                fprintf(fp, "float %s", ffi_blocks[i].args[a].name);
+            else if (strcmp(type, "i16") == 0)
+                fprintf(fp, "short %s", ffi_blocks[i].args[a].name);
+            else if (strcmp(type, "bool") == 0 || strcmp(type, "byte") == 0)
+                fprintf(fp, "unsigned char %s", ffi_blocks[i].args[a].name);
+            // Array Types (Pointers)
+            else if (strcmp(type, "bytes") == 0) {
+                fprintf(fp, "unsigned char* %s", ffi_blocks[i].args[a].name);
+            }
+            else if (strstr(type, "[]")) {
+                fprintf(fp, "void* %s", ffi_blocks[i].args[a].name);
+            }
             else
-                // It is a struct! Generate a pointer to the C struct (e.g. c_RGB*)
                 fprintf(fp, "c_%s* %s", type, ffi_blocks[i].args[a].name);
 
             if (a < ffi_blocks[i].arg_count - 1) fprintf(fp, ", ");
@@ -1964,37 +2140,77 @@ void generate_binding_c_source(const char *output_filename) {
     // Wrappers
     for (int i = 0; i < ffi_count; i++) {
         fprintf(fp, "void __wrapper_%d(VM* vm) {\n", i);
+        // Pop args in reverse order
         for (int a = ffi_blocks[i].arg_count - 1; a >= 0; a--) {
             fprintf(fp, "    double _raw_%s = vm_pop();\n", ffi_blocks[i].args[a].name);
         }
 
         char *ret_type = ffi_blocks[i].return_type;
+
+        // Determine Wrapper Return Variable
         if (strcmp(ret_type, "num") == 0) fprintf(fp, "    double res = __mylo_user_%d(", i);
         else if (strcmp(ret_type, "void") == 0) fprintf(fp, "    __mylo_user_%d(", i);
-        else if (strcmp(ret_type, "string") == 0) fprintf(fp, "    char* s = __mylo_user_%d(", i);
+        else if (strcmp(ret_type, "string") == 0 || strcmp(ret_type, "str") == 0) fprintf(fp, "    char* s = __mylo_user_%d(", i);
+        else if (strcmp(ret_type, "i32") == 0) fprintf(fp, "    int res = __mylo_user_%d(", i);
+        else if (strcmp(ret_type, "i64") == 0) fprintf(fp, "    long long res = __mylo_user_%d(", i);
+        else if (strcmp(ret_type, "f32") == 0) fprintf(fp, "    float res = __mylo_user_%d(", i);
+        else if (strcmp(ret_type, "i16") == 0) fprintf(fp, "    short res = __mylo_user_%d(", i);
+        else if (strcmp(ret_type, "byte") == 0 || strcmp(ret_type, "bool") == 0) fprintf(fp, "    unsigned char res = __mylo_user_%d(", i);
         else if (strlen(ret_type) > 0) fprintf(fp, "    c_%s val = __mylo_user_%d(", ret_type, i);
         else fprintf(fp, "    MyloReturn res = __mylo_user_%d(", i);
 
+        // Pass Arguments with Casts
         for (int a = 0; a < ffi_blocks[i].arg_count; a++) {
             char *type = ffi_blocks[i].args[a].type;
+
             if (strcmp(type, "str") == 0 || strcmp(type, "string") == 0) {
                 fprintf(fp, "vm->string_pool[(int)_raw_%s]", ffi_blocks[i].args[a].name);
-            } else if (strcmp(type, "num") == 0) {
+            }
+            else if (strcmp(type, "num") == 0) {
                 fprintf(fp, "_raw_%s", ffi_blocks[i].args[a].name);
-            } else {
-                // Cast the heap index to a pointer to the struct data
-                // We add HEAP_HEADER_STRUCT to skip the Type ID in the heap header
-                fprintf(fp, "(c_%s*)&vm->heap[(int)_raw_%s + HEAP_HEADER_STRUCT]", type, ffi_blocks[i].args[a].name);
+            }
+            // Primitive Casts
+            else if (strcmp(type, "i32") == 0) {
+                fprintf(fp, "(int)_raw_%s", ffi_blocks[i].args[a].name);
+            }
+            else if (strcmp(type, "i64") == 0) {
+                fprintf(fp, "(long long)_raw_%s", ffi_blocks[i].args[a].name);
+            }
+            else if (strcmp(type, "f32") == 0) {
+                fprintf(fp, "(float)_raw_%s", ffi_blocks[i].args[a].name);
+            }
+            else if (strcmp(type, "i16") == 0) {
+                fprintf(fp, "(short)_raw_%s", ffi_blocks[i].args[a].name);
+            }
+            else if (strcmp(type, "bool") == 0 || strcmp(type, "byte") == 0) {
+                fprintf(fp, "(unsigned char)_raw_%s", ffi_blocks[i].args[a].name);
+            }
+            // Heap Objects
+            else if (strcmp(type, "bytes") == 0) {
+                fprintf(fp, "(unsigned char*)&host_heap_ptr[(int)_raw_%s + HEAP_HEADER_ARRAY]", ffi_blocks[i].args[a].name);
+            }
+            else if (strstr(type, "[]")) {
+                fprintf(fp, "(void*)&host_heap_ptr[(int)_raw_%s + HEAP_HEADER_ARRAY]", ffi_blocks[i].args[a].name);
+            }
+            else {
+                // Struct Pointer
+                fprintf(fp, "(c_%s*)&host_heap_ptr[(int)_raw_%s + HEAP_HEADER_STRUCT]", type, ffi_blocks[i].args[a].name);
             }
             if (a < ffi_blocks[i].arg_count - 1) fprintf(fp, ", ");
         }
         fprintf(fp, ");\n");
 
+        // Push Return Value
         if (strcmp(ret_type, "num") == 0) fprintf(fp, "    vm_push(res, T_NUM);\n");
         else if (strcmp(ret_type, "void") == 0) fprintf(fp, "    vm_push(0.0, T_NUM);\n");
-        else if (strcmp(ret_type, "string") == 0)
-            fprintf(
-                fp, "    int id = make_string(s);\n    vm_push((double)id, T_STR);\n");
+        else if (strcmp(ret_type, "string") == 0 || strcmp(ret_type, "str") == 0)
+            fprintf(fp, "    int id = make_string(s);\n    vm_push((double)id, T_STR);\n");
+        // Primitives -> T_NUM
+        else if (strcmp(ret_type, "i32") == 0 || strcmp(ret_type, "i64") == 0 ||
+                 strcmp(ret_type, "f32") == 0 || strcmp(ret_type, "i16") == 0 ||
+                 strcmp(ret_type, "byte") == 0 || strcmp(ret_type, "bool") == 0) {
+            fprintf(fp, "    vm_push((double)res, T_NUM);\n");
+        }
         else if (strlen(ret_type) > 0) {
             int st_idx = -1;
             for (int s = 0; s < struct_count; s++) if (strcmp(struct_defs[s].name, ret_type) == 0) st_idx = s;
@@ -2019,7 +2235,6 @@ void generate_binding_c_source(const char *output_filename) {
     fprintf(fp, "#undef make_string\n");
     fprintf(fp, "#undef heap_alloc\n");
     fprintf(fp, "#undef natives\n");
-    // NEW: Cleanup Ref Macros
     fprintf(fp, "#undef vm_store_copy\n");
     fprintf(fp, "#undef vm_store_ptr\n");
     fprintf(fp, "#undef vm_get_ref\n");
@@ -2037,7 +2252,6 @@ void generate_binding_c_source(const char *output_filename) {
     fprintf(fp, "    host_make_string = api->make_string;\n");
     fprintf(fp, "    host_heap_alloc = api->heap_alloc;\n");
 
-    // NEW: Init Ref Pointers
     fprintf(fp, "    host_vm_store_copy = api->store_copy;\n");
     fprintf(fp, "    host_vm_store_ptr = api->store_ptr;\n");
     fprintf(fp, "    host_vm_get_ref = api->get_ref;\n");
@@ -2063,27 +2277,8 @@ void generate_binding_c_source(const char *output_filename) {
     printf(" %s\n", output_filename);
     setTerminalColor(MyloFgBlue, MyloBgColorDefault);
     printf("----------------------------------------------------------------------------------------\n\n");
+    // ... rest of print messages ...
     setTerminalColor(MyloFgDefault, MyloBgColorDefault);
-    setTerminalColor(MyloFgWhite, MyloBgColorDefault);
-    printf("  To build %s into an shared object you need:\n\n", output_filename);
-    setTerminalColor(MyloFgYellow, MyloBgColorDefault); printf("    + "); setTerminalColor(MyloFgDefault, MyloBgColorDefault);
-    printf("The Mylo VM header (vm.h), located in 'mylo-lang/src'\n");
-    setTerminalColor(MyloFgYellow, MyloBgColorDefault); printf("    + "); setTerminalColor(MyloFgDefault, MyloBgColorDefault);
-    printf("The Mylo Standard Library header (mylolib.h), located in 'mylo-lang/src'\n");
-    setTerminalColor(MyloFgYellow, MyloBgColorDefault); printf("    + "); setTerminalColor(MyloFgDefault, MyloBgColorDefault);
-    printf("A 'C' Compiler (GCC, MSVC, Clang, Zig etc.), referred to as ('cc' below.)\n");
-    setTerminalColor(MyloFgYellow, MyloBgColorDefault); printf("    + "); setTerminalColor(MyloFgDefault, MyloBgColorDefault);
-    printf("The Shared Object (.so) file to have the same name as your .mylo wrapper `libname.so`\n");
-    setTerminalColor(MyloFgYellow, MyloBgColorDefault); printf("    + "); setTerminalColor(MyloFgDefault, MyloBgColorDefault);
-    printf("Position independent code, so the .so can be loaded at runtime by the interpreter \n\n");
-    setTerminalColor(MyloFgCyan, MyloBgColorDefault); printf("  ! "); setTerminalColor(MyloFgDefault, MyloBgColorDefault);
-    printf("To build into a single executable instead, use --build on your main mylo file \n");
-    setTerminalColor(MyloFgBlue, MyloBgColorDefault);
-    printf("----------------------------------------------------------------------------------------\n");
-    setTerminalColor(MyloFgYellow, MyloBgColorDefault); printf("  Example Command:\n\n"); setTerminalColor(MyloFgWhite, MyloBgColorDefault);
-    printf("     cc -shared -fPIC %s -Isrc/ -o libname.so\n", output_filename);
-    setTerminalColor(MyloFgDefault, MyloBgColorDefault);
-
 }
 
 void compile_to_c_source(const char *output_filename) {
@@ -2108,7 +2303,9 @@ void compile_to_c_source(const char *output_filename) {
 
     fprintf(fp, "#include \"vm.h\"\n");
     fprintf(fp, "#include \"mylolib.h\"\n\n");
-
+    // Fix for binding heap
+    fprintf(fp, "// Compatibility for C-blocks written for bindings\n");
+    fprintf(fp, "#define host_heap_ptr vm.heap\n");
     fprintf(fp, "// --- GENERATED C STRUCTS ---\n");
     for (int i = 0; i < struct_count; i++) {
         fprintf(fp, "typedef struct { ");
@@ -2123,22 +2320,57 @@ void compile_to_c_source(const char *output_filename) {
     for (int i = 0; i < ffi_count; i++) {
         char *ret_type = ffi_blocks[i].return_type;
 
+        // 1. Determine C Return Type
         if (strcmp(ret_type, "num") == 0) fprintf(fp, "double");
-        else if (strcmp(ret_type, "string") == 0) fprintf(fp, "char*");
         else if (strcmp(ret_type, "void") == 0) fprintf(fp, "void");
-        else if (strlen(ret_type) > 0) fprintf(fp, "c_%s", ret_type);
+        else if (strcmp(ret_type, "string") == 0 || strcmp(ret_type, "str") == 0) fprintf(fp, "char*");
+        else if (strcmp(ret_type, "i32") == 0) fprintf(fp, "int");
+        else if (strcmp(ret_type, "i64") == 0) fprintf(fp, "long long");
+        else if (strcmp(ret_type, "f32") == 0) fprintf(fp, "float");
+        else if (strcmp(ret_type, "i16") == 0) fprintf(fp, "short");
+        else if (strcmp(ret_type, "bool") == 0 || strcmp(ret_type, "byte") == 0) fprintf(fp, "unsigned char");
+        else if (strlen(ret_type) > 0) fprintf(fp, "c_%s", ret_type); // Struct by value
         else fprintf(fp, "MyloReturn");
 
         fprintf(fp, " __mylo_user_%d(", i);
+
+        // 2. Generate Arguments
         for (int a = 0; a < ffi_blocks[i].arg_count; a++) {
             char *type = ffi_blocks[i].args[a].type;
+
             if (strcmp(type, "str") == 0 || strcmp(type, "string") == 0) {
                 fprintf(fp, "char* %s", ffi_blocks[i].args[a].name);
-            } else if (strcmp(type, "num") == 0) {
+            }
+            else if (strcmp(type, "num") == 0) {
                 fprintf(fp, "double %s", ffi_blocks[i].args[a].name);
-            } else {
+            }
+            else if (strcmp(type, "i32") == 0) {
+                fprintf(fp, "int %s", ffi_blocks[i].args[a].name);
+            }
+            else if (strcmp(type, "i64") == 0) {
+                fprintf(fp, "long long %s", ffi_blocks[i].args[a].name);
+            }
+            else if (strcmp(type, "f32") == 0) {
+                fprintf(fp, "float %s", ffi_blocks[i].args[a].name);
+            }
+            else if (strcmp(type, "i16") == 0) {
+                fprintf(fp, "short %s", ffi_blocks[i].args[a].name);
+            }
+            else if (strcmp(type, "byte") == 0 || strcmp(type, "bool") == 0) {
+                fprintf(fp, "unsigned char %s", ffi_blocks[i].args[a].name);
+            }
+            // Heap Objects (Arrays/Bytes)
+            else if (strcmp(type, "bytes") == 0) {
+                fprintf(fp, "unsigned char* %s", ffi_blocks[i].args[a].name);
+            }
+            else if (strstr(type, "[]")) {
+                fprintf(fp, "void* %s", ffi_blocks[i].args[a].name);
+            }
+            else {
+                // Struct Pointer
                 fprintf(fp, "c_%s* %s", type, ffi_blocks[i].args[a].name);
             }
+
             if (a < ffi_blocks[i].arg_count - 1) fprintf(fp, ", ");
         }
         fprintf(fp, ") {\n%s\n}\n\n", ffi_blocks[i].code_body);
@@ -2150,44 +2382,84 @@ void compile_to_c_source(const char *output_filename) {
 
     for (int i = 0; i < ffi_count; i++) {
         fprintf(fp, "void __wrapper_%d(VM* vm) {\n", i);
+        // Pop args in reverse order
         for (int a = ffi_blocks[i].arg_count - 1; a >= 0; a--) {
             fprintf(fp, "    double _raw_%s = vm_pop();\n", ffi_blocks[i].args[a].name);
         }
 
         char *ret_type = ffi_blocks[i].return_type;
 
-        if (strcmp(ret_type, "num") == 0) {
-            fprintf(fp, "    double res = __mylo_user_%d(", i);
-        } else if (strcmp(ret_type, "void") == 0) {
-            fprintf(fp, "    __mylo_user_%d(", i);
-        } else if (strcmp(ret_type, "string") == 0) {
-            fprintf(fp, "    char* s = __mylo_user_%d(", i);
-        } else if (strlen(ret_type) > 0) {
-            fprintf(fp, "    c_%s val = __mylo_user_%d(", ret_type, i);
-        } else {
-            fprintf(fp, "    MyloReturn res = __mylo_user_%d(", i);
-        }
+        // Determine Return Variable Type
+        if (strcmp(ret_type, "num") == 0) fprintf(fp, "    double res = __mylo_user_%d(", i);
+        else if (strcmp(ret_type, "void") == 0) fprintf(fp, "    __mylo_user_%d(", i);
+        else if (strcmp(ret_type, "string") == 0 || strcmp(ret_type, "str") == 0) fprintf(fp, "    char* s = __mylo_user_%d(", i);
+        else if (strcmp(ret_type, "i32") == 0) fprintf(fp, "    int res = __mylo_user_%d(", i);
+        else if (strcmp(ret_type, "i64") == 0) fprintf(fp, "    long long res = __mylo_user_%d(", i);
+        else if (strcmp(ret_type, "f32") == 0) fprintf(fp, "    float res = __mylo_user_%d(", i);
+        else if (strcmp(ret_type, "i16") == 0) fprintf(fp, "    short res = __mylo_user_%d(", i);
+        else if (strcmp(ret_type, "byte") == 0 || strcmp(ret_type, "bool") == 0) fprintf(fp, "    unsigned char res = __mylo_user_%d(", i);
+        else if (strlen(ret_type) > 0) fprintf(fp, "    c_%s val = __mylo_user_%d(", ret_type, i);
+        else fprintf(fp, "    MyloReturn res = __mylo_user_%d(", i);
 
+        // Pass Arguments
         for (int a = 0; a < ffi_blocks[i].arg_count; a++) {
             char *type = ffi_blocks[i].args[a].type;
+
             if (strcmp(type, "str") == 0 || strcmp(type, "string") == 0) {
                 fprintf(fp, "vm->string_pool[(int)_raw_%s]", ffi_blocks[i].args[a].name);
-            } else if (strcmp(type, "num") == 0) {
+            }
+            else if (strcmp(type, "num") == 0) {
                 fprintf(fp, "_raw_%s", ffi_blocks[i].args[a].name);
-            } else {
+            }
+            // Primitives: Cast Stack Double -> C Type
+            else if (strcmp(type, "i32") == 0) {
+                fprintf(fp, "(int)_raw_%s", ffi_blocks[i].args[a].name);
+            }
+            else if (strcmp(type, "i64") == 0) {
+                fprintf(fp, "(long long)_raw_%s", ffi_blocks[i].args[a].name);
+            }
+            else if (strcmp(type, "f32") == 0) {
+                fprintf(fp, "(float)_raw_%s", ffi_blocks[i].args[a].name);
+            }
+            else if (strcmp(type, "i16") == 0) {
+                fprintf(fp, "(short)_raw_%s", ffi_blocks[i].args[a].name);
+            }
+            else if (strcmp(type, "byte") == 0 || strcmp(type, "bool") == 0) {
+                fprintf(fp, "(unsigned char)_raw_%s", ffi_blocks[i].args[a].name);
+            }
+            // Objects: Unwrap Heap Pointer
+            else if (strcmp(type, "bytes") == 0) {
+                fprintf(fp, "(unsigned char*)&vm->heap[(int)_raw_%s + HEAP_HEADER_ARRAY]", ffi_blocks[i].args[a].name);
+            }
+            else if (strstr(type, "[]")) {
+                fprintf(fp, "(void*)&vm->heap[(int)_raw_%s + HEAP_HEADER_ARRAY]", ffi_blocks[i].args[a].name);
+            }
+            else {
+                // Struct Pointer
                 fprintf(fp, "(c_%s*)&vm->heap[(int)_raw_%s + HEAP_HEADER_STRUCT]", type, ffi_blocks[i].args[a].name);
             }
             if (a < ffi_blocks[i].arg_count - 1) fprintf(fp, ", ");
         }
         fprintf(fp, ");\n");
 
+        // Handle Return Value Pushing
         if (strcmp(ret_type, "num") == 0) {
             fprintf(fp, "    vm_push(res, T_NUM);\n");
-        } else if (strcmp(ret_type, "void") == 0) {
+        }
+        else if (strcmp(ret_type, "void") == 0) {
             fprintf(fp, "    vm_push(0.0, T_NUM);\n");
-        } else if (strcmp(ret_type, "string") == 0) {
+        }
+        else if (strcmp(ret_type, "string") == 0 || strcmp(ret_type, "str") == 0) {
             fprintf(fp, "    int id = make_string(s);\n    vm_push((double)id, T_STR);\n");
-        } else if (strlen(ret_type) > 0) {
+        }
+        // Primitives -> Push as Num
+        else if (strcmp(ret_type, "i32") == 0 || strcmp(ret_type, "i64") == 0 ||
+                 strcmp(ret_type, "f32") == 0 || strcmp(ret_type, "i16") == 0 ||
+                 strcmp(ret_type, "byte") == 0 || strcmp(ret_type, "bool") == 0) {
+            fprintf(fp, "    vm_push((double)res, T_NUM);\n");
+        }
+        // Struct Return (Copy to Heap)
+        else if (strlen(ret_type) > 0) {
             int st_idx = -1;
             for (int s = 0; s < struct_count; s++) if (strcmp(struct_defs[s].name, ret_type) == 0) st_idx = s;
             if (st_idx != -1) {
@@ -2201,7 +2473,9 @@ void compile_to_c_source(const char *output_filename) {
             } else {
                 fprintf(fp, "    // Error: Unknown struct type for marshalling\n");
             }
-        } else {
+        }
+        // Fallback: MyloReturn
+        else {
             fprintf(fp, "    vm_push(res.value, res.type);\n");
         }
         fprintf(fp, "}\n");
@@ -2292,7 +2566,7 @@ void compile_to_c_source(const char *output_filename) {
     setTerminalColor(MyloFgDefault, MyloBgColorDefault);
 }
 
-void compile_repl(char* source, int* out_start_ip) {
+void compile_repl(char *source, int *out_start_ip) {
     src = source;
     next_token();
 
@@ -2303,23 +2577,22 @@ void compile_repl(char* source, int* out_start_ip) {
     // FIX 1: Explicitly handle Top-Level Declarations
     if (curr.type == TK_FN) {
         function(); // <--- Call function() directly
-    }
-    else if (curr.type == TK_STRUCT) {
+    } else if (curr.type == TK_STRUCT) {
         struct_decl(); // <--- Call struct_decl() directly
     }
     // FIX 2: Handle standard statements
     else if (curr.type == TK_VAR || curr.type == TK_IF || curr.type == TK_FOR ||
-        curr.type == TK_FOREVER || curr.type == TK_PRINT ||
-        curr.type == TK_IMPORT || curr.type == TK_RET ||
-        curr.type == TK_BREAK || curr.type == TK_CONTINUE ||
-        curr.type == TK_ENUM) {
+             curr.type == TK_FOREVER || curr.type == TK_PRINT ||
+             curr.type == TK_IMPORT || curr.type == TK_RET ||
+             curr.type == TK_BREAK || curr.type == TK_CONTINUE ||
+             curr.type == TK_ENUM) {
         statement();
     }
     // FIX 3: Ambiguous Identifiers (Statement vs Expression)
     else if (curr.type == TK_ID) {
         int saved_code_size = vm.code_size;
         int saved_line = line;
-        char* saved_src = src;
+        char *saved_src = src;
         Token saved_curr = curr;
 
         // Try statement (e.g. "x = 1" or "func()")
@@ -2332,8 +2605,7 @@ void compile_repl(char* source, int* out_start_ip) {
             next_token();
             expression();
         }
-    }
-    else {
+    } else {
         expression();
     }
 

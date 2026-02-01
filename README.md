@@ -118,7 +118,7 @@ is a VSCode plugin, in `editors/mylo-vscode` that configures Mylo automatically.
 Here is some Mylo code jumping into C and back...
 ```javascript
 // 1. Explicit return: num
-var result: num = C(val: int = 25) -> num {
+var result: num = C(val: i32 = 25) -> num {
     double res = sqrt(val);
     printf("Inside C: sqrt(%d) = %f\n", (int)val, res);
     return res;
