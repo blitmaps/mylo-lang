@@ -1712,6 +1712,8 @@ void function() {
     strcpy(funcs[func_count].name, m);
     funcs[func_count++].addr = vm.code_size;
 
+    vm_register_function(&vm, name, vm.code_size);
+
     // Capture the index where this function's locals start in our debug table
     int start_debug_idx = debug_symbol_count;
 

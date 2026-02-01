@@ -45,4 +45,7 @@
 
 #define MAP_INITIAL_CAP 16
 
+// VM function table
+#define MAX_VM_FUNCTIONS 1024  // Adjust as needed
+
 #endif

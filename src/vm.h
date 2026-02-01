@@ -61,6 +61,12 @@ typedef enum {
 
 extern const char *OP_NAMES[];
 
+// New Struct to hold metadata
+typedef struct {
+    char name[64];
+    int addr;
+} VMFunction;
+
 typedef struct {
     double stack[STACK_SIZE];
     double globals[MAX_GLOBALS];
@@ -87,6 +93,9 @@ typedef struct {
 
     char output_char_buffer[OUTPUT_BUFFER_SIZE];
     int output_mem_pos;
+
+    VMFunction functions[MAX_VM_FUNCTIONS];
+    int function_count;
 } VM;
 
 extern VM vm;
@@ -133,6 +142,10 @@ double vm_store_copy(void* data, size_t size, const char* type_name);
 double vm_store_ptr(void* ptr, const char* type_name);
 void* vm_get_ref(int id, const char* expected_type_name);
 void vm_free_ref(int id);
+
+// Prototype for function finder helper
+int vm_find_function(VM* vm, const char* name);
+void vm_register_function(VM* vm, const char* name, int addr);
 
 // Macros
 #define MYLO_STORE(val, type_name) vm_store_copy(&(val), sizeof(val), type_name)

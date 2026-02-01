@@ -630,6 +630,8 @@ void std_for_list(VM *vm) {
     double func_val = vm_pop();
 
     int list_ptr = (int)list_ref;
+
+    // 1. Validation
     if (vm->stack_types[vm->sp + 2] != T_OBJ || (int)vm->heap[list_ptr] != TYPE_ARRAY) {
         printf("Runtime Error: for_list expects an array.\n");
         exit(1);
@@ -642,6 +644,9 @@ void std_for_list(VM *vm) {
     const char* func_name = get_str(vm, func_val);
     int len = (int)vm->heap[list_ptr + HEAP_OFFSET_LEN];
 
+    // 2. Lookup Strategy
+
+    // A. Check Standard Library (Native)
     NativeFunc native_target = NULL;
     for(int i=0; std_library[i].name != NULL; i++) {
         if(strcmp(std_library[i].name, func_name) == 0) {
@@ -650,14 +655,11 @@ void std_for_list(VM *vm) {
         }
     }
 
+    // B. Check User Functions (VM Bytecode)
+    // REFACTOR: No longer uses compiler.h/funcs[]
     int user_func_addr = -1;
     if (!native_target) {
-        for (int i = 0; i < func_count; i++) {
-            if (strcmp(funcs[i].name, func_name) == 0) {
-                user_func_addr = funcs[i].addr;
-                break;
-            }
-        }
+        user_func_addr = vm_find_function(vm, func_name);
     }
 
     if (!native_target && user_func_addr == -1) {
@@ -665,7 +667,6 @@ void std_for_list(VM *vm) {
         exit(1);
     }
 
-    // CRITICAL FIX: Save the current Instruction Pointer of the main script
     int saved_ip = vm->ip;
 
     int res_ptr = heap_alloc(len + HEAP_HEADER_ARRAY);
@@ -680,20 +681,11 @@ void std_for_list(VM *vm) {
              vm_push(val, type);
              native_target(vm);
          } else {
-             // 1. Push Magic Return Address (vm->code_size)
-             vm_push((double)vm->code_size, T_NUM);
+             vm_push((double)vm->code_size, T_NUM); // Magic Return
+             vm_push((double)vm->fp, T_NUM);        // Saved FP
+             vm_push(val, type);                    // Argument
+             vm->fp = vm->sp;                       // New FP
 
-             // 2. Push Saved FP
-             vm_push((double)vm->fp, T_NUM);
-
-             // 3. Push Argument
-             vm_push(val, type);
-
-             // 4. Update FP
-             vm->fp = vm->sp;
-
-             // 5. Run User Function
-             // This modifies vm->ip until it hits vm->code_size
              run_vm_from(user_func_addr, false);
          }
 
@@ -704,9 +696,7 @@ void std_for_list(VM *vm) {
          vm->heap_types[res_ptr + HEAP_HEADER_ARRAY + i] = res_type;
     }
 
-    // CRITICAL FIX: Restore the Instruction Pointer so the main script continues
     vm->ip = saved_ip;
-
     vm_push((double)res_ptr, T_OBJ);
 }
 

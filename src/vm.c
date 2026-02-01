@@ -132,6 +132,26 @@ void vm_init() {
 //    exit(1); \
 //}
 
+void vm_register_function(VM* vm, const char* name, int addr) {
+    if (vm->function_count >= MAX_VM_FUNCTIONS) {
+        printf("VM Limit: Too many functions registered.\n");
+        exit(1);
+    }
+    VMFunction* f = &vm->functions[vm->function_count++];
+    strncpy(f->name, name, 63);
+    f->name[63] = '\0';
+    f->addr = addr;
+}
+
+int vm_find_function(VM* vm, const char* name) {
+    for (int i = 0; i < vm->function_count; i++) {
+        if (strcmp(vm->functions[i].name, name) == 0) {
+            return vm->functions[i].addr;
+        }
+    }
+    return -1;
+}
+
 #define CHECK_STACK(count) if (vm.sp < (count) - 1) RUNTIME_ERROR("Stack Underflow")
 #define CHECK_OBJ(depth) if (vm.stack_types[vm.sp - (depth)] != T_OBJ) RUNTIME_ERROR("Expected Object/Array")
 
