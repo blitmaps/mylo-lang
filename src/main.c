@@ -242,16 +242,19 @@ void print_help() {
     printf(" Then inside your mylo applications:\n");
 
     SET_COLOUR(FG_PURPLE, BG_DEFAULT);
-    printf("   ```mylo\n");
+    printf("  ```\n");
     SET_COLOUR(FG_YELLOW, BG_DEFAULT); printf("    import ");
     SET_COLOUR(FG_PURPLE, BG_DEFAULT); printf("native ");
     SET_COLOUR(FG_GREEN, BG_DEFAULT); printf("test_lib.mylo     ");
     SET_COLOUR(FG_GRAY, BG_DEFAULT); printf("   <-- Mylo will look for test_lib.so and load compiled C functions \n "); SET_COLOUR(FG_DEFAULT, BG_DEFAULT);
     printf("   print(my_cool_c_func())");  SET_COLOUR(FG_GRAY, BG_DEFAULT); printf("            <-- C functions from shared objects can be run in the interpreter, or compiled. \n "); SET_COLOUR(FG_DEFAULT, BG_DEFAULT);
     SET_COLOUR(FG_PURPLE, BG_DEFAULT);
-    printf("  ```\n");
+    printf(" ```\n\n");
     // Reset at end just in case
+    SET_COLOUR(FG_GRAY, BG_DEFAULT);
+    printf(" More examples, documentation and guides at "); SET_COLOUR(FG_CYAN, BG_DEFAULT); printf("https://github.com/blitmaps/mylo-lang/tree/main/docs\n");
     SET_COLOUR(FG_DEFAULT, BG_DEFAULT);
+
 }
 #undef PRINT_ARG
 
