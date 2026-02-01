@@ -56,7 +56,8 @@ typedef enum {
     OP_SLICE_SET,
     OP_IT_KEY,
     OP_IT_VAL,
-    OP_IT_DEF
+    OP_IT_DEF,
+    OP_EMBED,
 } OpCode;
 
 extern const char *OP_NAMES[];
@@ -68,21 +69,25 @@ typedef struct {
 } VMFunction;
 
 typedef struct {
-    double stack[STACK_SIZE];
-    double globals[MAX_GLOBALS];
-    double constants[MAX_CONSTANTS];
-    double heap[MAX_HEAP];
+    // Change arrays to pointers
+    double* stack;       // Was: double stack[STACK_SIZE];
+    double* globals;     // Was: double globals[MAX_GLOBALS];
+    double* constants;   // Was: double constants[MAX_CONSTANTS];
+    double* heap;        // Was: double heap[MAX_HEAP];
 
-    int bytecode[MAX_CODE];
-    int lines[MAX_CODE]; // Map bytecode index to source line
+    int* bytecode;       // Was: int bytecode[MAX_CODE];
+    int* lines;          // Was: int lines[MAX_CODE];
 
-    // Type tracking
-    int stack_types[STACK_SIZE];
-    int global_types[MAX_GLOBALS];
-    int heap_types[MAX_HEAP];
+    int* stack_types;    // Was: int stack_types[STACK_SIZE];
+    int* global_types;   // Was: int global_types[MAX_GLOBALS];
+    int* heap_types;     // Was: int heap_types[MAX_HEAP];
 
-    char string_pool[MAX_STRINGS][MAX_STRING_LENGTH];
+    // Note: String pool is 2D. We can malloc it as a flat block or keep it if it's small.
+    // Given MAX_STRINGS=1024, this is only ~1MB, so it can stay or be malloc'd.
+    // For consistency with the fix, let's malloc it too.
+    char (*string_pool)[MAX_STRING_LENGTH];
 
+    // ... Keep scalars the same ...
     int code_size;
     int sp;
     int fp;

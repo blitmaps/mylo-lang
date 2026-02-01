@@ -36,7 +36,8 @@ typedef enum {
     TK_MODULE_PATH,
     TK_TRUE, TK_FALSE,
     TK_MUL, TK_DIV,
-    TK_MOD_OP // % operator
+    TK_MOD_OP, // % operator
+    TK_EMBED,
 } MyloTokenType;
 
 typedef struct {
@@ -372,6 +373,7 @@ void next_token() {
         else if (strcmp(curr.text, "true") == 0) curr.type = TK_TRUE;
         else if (strcmp(curr.text, "false") == 0) curr.type = TK_FALSE;
         else if (strcmp(curr.text, "forever") == 0) curr.type = TK_FOREVER;
+        else if (strcmp(curr.text, "embed") == 0) curr.type = TK_EMBED;
         else curr.type = TK_ID;
         return;
     }
@@ -1682,7 +1684,78 @@ void statement() {
         emit(loop_start);
 
         pop_loop(loop_start, vm.code_size);
-    } else if (curr.type == TK_RET) {
+    }
+    else if (curr.type == TK_EMBED) {
+        // Syntax: embed(varName, "filename")
+        match(TK_EMBED);
+        match(TK_LPAREN);
+
+        // 1. Parse Variable Name
+        char name[MAX_IDENTIFIER];
+        strcpy(name, curr.text);
+        match(TK_ID);
+
+        match(TK_COMMA);
+
+        // 2. Parse Filename
+        if (curr.type != TK_STR) error("embed expects a filename string");
+        char filename[MAX_STRING_LENGTH];
+        strcpy(filename, curr.text);
+        match(TK_STR);
+
+        match(TK_RPAREN);
+
+        // 3. Read File Immediate
+        FILE *f = fopen(filename, "rb");
+        if (!f) {
+            // Try search paths if direct open fails
+            for (int i = 0; i < search_path_count; i++) {
+                char tmp[MAX_STRING_LENGTH];
+                sprintf(tmp, "%s/%s", search_paths[i], filename);
+                f = fopen(tmp, "rb");
+                if (f) break;
+            }
+        }
+        if (!f) error("embed: Could not open file '%s'", filename);
+
+        fseek(f, 0, SEEK_END);
+        long fsize = ftell(f);
+        fseek(f, 0, SEEK_SET);
+
+        unsigned char *data = (unsigned char*)malloc(fsize);
+        if (!data) error("Memory error parsing embed");
+        fread(data, 1, fsize, f);
+        fclose(f);
+
+        // 4. Emit Bytecode
+        // Check Limits
+        if (vm.code_size + fsize + 2 >= MAX_CODE) {
+             error("File too large to embed. Increase MAX_CODE in defines.h");
+        }
+
+        emit(OP_EMBED);
+        emit((int)fsize);
+
+        // Inject raw bytes as integer instructions
+        for(long i=0; i<fsize; i++) {
+            emit((int)data[i]);
+        }
+
+        free(data);
+
+        // 5. Assign to Variable
+        // This puts the resulting object (on stack from OP_EMBED) into the variable
+        int var_idx = alloc_var(inside_function, name, -1, false);
+
+        if (inside_function) {
+            emit(OP_SVAR);
+            emit(locals[var_idx].offset);
+        } else {
+            emit(OP_SET);
+            emit(globals[var_idx].addr);
+        }
+    }
+    else if (curr.type == TK_RET) {
         match(TK_RET);
         if (curr.type == TK_RBRACE) {
             emit(OP_PSH_NUM);

@@ -54,7 +54,8 @@ const char *OP_NAMES[] = {
     "SLICE_SET",
     "IT_KEY",
     "IT_VAL",
-    "IT_DEF"
+    "IT_DEF",
+    "EMBED"
 };
 
 // --- REFERENCE MANAGEMENT ---
@@ -121,16 +122,49 @@ void vm_free_ref(int id) {
 // --- VM CORE ---
 
 void vm_init() {
-    memset(&vm, 0, sizeof(VM));
-    vm.sp = -1;
-    memset(natives, 0, sizeof(natives));
-    ref_next_id = 0;
-}
 
-//#define RUNTIME_ERROR(fmt, ...) { \
-//    printf("[Line %d] Runtime Error: " fmt "\n", vm.lines[vm.ip - 1], ##__VA_ARGS__); \
-//    exit(1); \
-//}
+    // 1. Allocate arrays if they haven't been allocated yet
+    // This prevents re-allocating (and leaking) when mylo_reset() calls vm_init()
+    if (!vm.bytecode) vm.bytecode = (int*)malloc(MAX_CODE * sizeof(int));
+    if (!vm.lines)    vm.lines    = (int*)malloc(MAX_CODE * sizeof(int));
+
+    if (!vm.stack)       vm.stack       = (double*)malloc(STACK_SIZE * sizeof(double));
+    if (!vm.stack_types) vm.stack_types = (int*)malloc(STACK_SIZE * sizeof(int));
+
+    if (!vm.globals)      vm.globals      = (double*)malloc(MAX_GLOBALS * sizeof(double));
+    if (!vm.global_types) vm.global_types = (int*)malloc(MAX_GLOBALS * sizeof(int));
+
+    if (!vm.constants) vm.constants = (double*)malloc(MAX_CONSTANTS * sizeof(double));
+
+    if (!vm.heap)       vm.heap       = (double*)malloc(MAX_HEAP * sizeof(double));
+    if (!vm.heap_types) vm.heap_types = (int*)malloc(MAX_HEAP * sizeof(int));
+
+    if (!vm.string_pool) vm.string_pool = malloc(MAX_STRINGS * MAX_STRING_LENGTH);
+
+    // Verify allocation
+    if (!vm.bytecode || !vm.heap || !vm.stack) {
+        fprintf(stderr, "Critical Error: Failed to allocate VM memory (MAX_CODE=%d)\n", MAX_CODE);
+        exit(1);
+    }
+
+    // 2. Reset State (Manual reset since we can't memset the whole struct)
+    vm.sp = -1;
+    vm.ip = 0;
+    vm.fp = 0;
+    vm.code_size = 0;
+    vm.str_count = 0;
+    vm.const_count = 0;
+    vm.heap_ptr = 0;
+    vm.function_count = 0;
+    vm.output_mem_pos = 0;
+
+    // Clear Output Buffer
+    vm.output_char_buffer[0] = '\0';
+
+    // Clear Natives Table
+    memset(natives, 0, sizeof(natives));
+
+}
 
 void vm_register_function(VM* vm, const char* name, int addr) {
     if (vm->function_count >= MAX_VM_FUNCTIONS) {
@@ -309,7 +343,7 @@ int vm_step(bool debug_trace) {
             vm_push((double) index, T_STR);
             break;
         }
-case OP_ADD: {
+        case OP_ADD: {
             CHECK_STACK(2);
             int typeB = vm.stack_types[vm.sp];
             double valB = vm_pop();
@@ -1027,7 +1061,7 @@ case OP_ADD: {
             vm_push(val, vt); // Assignment evaluates to the value assigned
             break;
         }
-            case OP_IT_KEY:
+        case OP_IT_KEY:
         case OP_IT_VAL:
         case OP_IT_DEF: {
             CHECK_STACK(2);
@@ -1077,6 +1111,33 @@ case OP_ADD: {
             else {
                 RUNTIME_ERROR("Type not iterable");
             }
+            break;
+        }
+        case OP_EMBED: {
+            // Structure in bytecode: [OP_EMBED] [LENGTH] [BYTE 1] [BYTE 2] ...
+
+            // 1. Read Length
+            int len = vm.bytecode[vm.ip++];
+
+            // 2. Allocate Heap Object (TYPE_BYTES)
+            // Calculate how many doubles we need to store 'len' bytes
+            int d_needed = (len + 7) / 8;
+            int ptr = heap_alloc(d_needed + HEAP_HEADER_ARRAY);
+
+            vm.heap[ptr] = TYPE_BYTES;
+            vm.heap[ptr + HEAP_OFFSET_LEN] = (double)len;
+
+            // 3. Read Data Stream from Bytecode
+            unsigned char* dst = (unsigned char*)&vm.heap[ptr + HEAP_HEADER_ARRAY];
+
+            for(int i=0; i<len; i++) {
+                // We emitted them as individual ints in the bytecode array
+                int b = vm.bytecode[vm.ip++];
+                dst[i] = (unsigned char)b;
+            }
+
+            // 4. Push Result
+            vm_push((double)ptr, T_OBJ);
             break;
         }
         case OP_HLT: return -1;
