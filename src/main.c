@@ -1,4 +1,4 @@
-#define VERSION_INFO "0.1.6"
+#define VERSION_INFO "0.2.0"
 #define MAX_INPUT 4096
 
 #include <setjmp.h>
@@ -319,7 +319,11 @@ int main(int argc, char** argv) {
 
     vm_init();
 
-    if (argc < 2) { print_help(); return 1; }
+    if (argc < 2) {
+        print_help();
+        vm_cleanup();
+        return 1;
+    }
 
     bool build_mode = false;
     bool bind_mode = false;
@@ -342,6 +346,7 @@ int main(int argc, char** argv) {
         else if (strcmp(argv[i], "--repl") == 0) repl_mode = true;
         else if (strcmp(argv[i], "--help") == 0) {
             print_help();
+            vm_cleanup();
             return 0;
         }
         else fn = argv[i];
@@ -349,20 +354,27 @@ int main(int argc, char** argv) {
 
     if (version) {
         printf("Mylo version %s\n", VERSION_INFO);
+        vm_cleanup();
         return 0;
     }
     
     if (repl_mode) {
         start_repl();
+        vm_cleanup();
         return 0;
     }
     // Disable dlopen
     MyloConfig.build_mode = build_mode;
-    if(!fn) { printf("No input file provided.\n"); return 1; }
+    if(!fn) {
+        printf("No input file provided.\n");
+        vm_cleanup();
+        return 1;
+    }
 
     char* content = read_file(fn);
     if (!content) {
         printf("Error: Cannot read file %s\n", fn);
+        vm_cleanup();
         return 1;
     }
 
@@ -370,6 +382,7 @@ int main(int argc, char** argv) {
     if (debug_mode) { // assuming you kept the debug_mode flag from previous steps
         start_debug_adapter(fn, content);
         free(content);
+        vm_cleanup();
         return 0;
     }
 
@@ -382,21 +395,27 @@ int main(int argc, char** argv) {
         snprintf(out_name, 1024, "%s_bind.c", fn);
         generate_binding_c_source(out_name);
         free(content);
+        vm_cleanup();
         return 0;
     }
 
     if (build_mode) {
         compile_to_c_source("out.c");
         free(content);
+        vm_cleanup();
         return 0;
     }
 
     // --- INTERPRETER SAFETY CHECK ---
     // If we have C blocks that were NOT bound via native modules, we must stop.
     if ((ffi_count - bound_ffi_count) > 0) {
+        setTerminalColor(MyloFgMagenta, MyloBgColorDefault);
         printf("Error: This program contains Native C blocks and no shared objects are found, so it cannot be interpreted.\n");
+        setTerminalColor(MyloFgCyan, MyloBgColorDefault);
         printf("Please compile it using: mylo --build %s\n", fn);
+        setTerminalColor(MyloFgDefault, MyloBgColorDefault);
         free(content);
+        vm_cleanup();
         return 1;
     }
 
@@ -405,5 +424,6 @@ int main(int argc, char** argv) {
     run_vm(trace);
 
     free(content);
+    vm_cleanup();
     return 0;
 }

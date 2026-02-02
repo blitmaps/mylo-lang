@@ -677,28 +677,33 @@ print(pixel.b) // Now prints 128
 ```javascript
 // Unknown return type falls back to 'MyloReturn'
 fn get_bytes() {
-    var x = C(){
+    var x = C() {
         const char* my_data = "\x01\x02\x03\x00\x04";
         int len = 5;
 
-        // 1. Calculate size in Mylo Heap Units (doubles)
-        // 8 bytes per double. Round up.
+        // 1. Calculate size (Same as before)
         int doubles_needed = (len + 7) / 8;
-        
-        // 2. Allocate (Header is 2 doubles: Type + Length)
-        int ptr = heap_alloc(2 + doubles_needed);
-        
-        // 3. Write Header
-        host_heap_ptr[ptr] = -2; // TYPE_BYTES
-        host_heap_ptr[ptr + 1] = len;
 
-        // 4. Copy Data
-        // We cast the heap location (after header) to char*
-        memcpy(&host_heap_ptr[ptr + 2], my_data, len);
+        // 2. Allocate (NOW RETURNS DOUBLE)
+        // heap_alloc now returns a packed handle, not a raw index.
+        double ptr = heap_alloc(2 + doubles_needed);
 
-        // 5. Return as Object
+        // 3. Resolve Pointer (CRITICAL NEW STEP)
+        // You must convert the handle into a raw C pointer to the memory.
+        double* base = vm_resolve_ptr(ptr);
+
+        // 4. Write Header to 'base'
+        // TYPE_BYTES is -2
+        base[0] = -2;
+        base[1] = (double)len;
+
+        // 5. Copy Data
+        // We take the address of the 3rd double (&base[2]) and write bytes there.
+        memcpy(&base[2], my_data, len);
+
+        // 6. Return the handle (ptr), NOT the raw pointer (base)
         // T_OBJ is 2
-        return (MyloReturn){ .value = (double)ptr, .type = 2 };
+        return (MyloReturn){ .value = ptr, .type = 2 };
     }
     ret x
 }

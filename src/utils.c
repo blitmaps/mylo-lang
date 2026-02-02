@@ -3,36 +3,40 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-
 char *read_file(const char *fn) {
   FILE *f = fopen(fn, "rb");
-  if (!f) {
-    // Changed: Return NULL instead of exit(1) to allow search paths
-    return NULL;
-  }
+  if (!f) return NULL;
 
   fseek(f, 0, SEEK_END);
   long len = ftell(f);
   fseek(f, 0, SEEK_SET);
 
   char *b = (char *)malloc(len + 1);
-  if (len > 0)
-    fread(b, 1, len, f);
+  if (len > 0) fread(b, 1, len, f);
   b[len] = '\0';
   fclose(f);
   return b;
 }
 
-// Function to set colors
+// Wrapper for stdout
 void setTerminalColor(enum MyloColor fg, enum MyloColor bg) {
-  #ifdef ENABLE_TERMINAL_COLOURS
-  printf("\033[%d;%dm", (int)fg, (int)bg);
-  #endif
+  fsetTerminalColor(stdout, fg, bg);
 }
 
-// Function to reset to default
-void resetTerminal() { 
-  #ifdef ENABLE_TERMINAL_COLOURS
-  printf("\033[0m"); 
-  #endif
+// Wrapper for stdout
+void resetTerminal() {
+  fresetTerminal(stdout);
+}
+
+// Actual Implementation
+void fsetTerminalColor(FILE* f, enum MyloColor fg, enum MyloColor bg) {
+#ifdef ENABLE_TERMINAL_COLOURS
+  fprintf(f, "\033[%d;%dm", (int)fg, (int)bg);
+#endif
+}
+
+void fresetTerminal(FILE* f) {
+#ifdef ENABLE_TERMINAL_COLOURS
+  fprintf(f, "\033[0m");
+#endif
 }
