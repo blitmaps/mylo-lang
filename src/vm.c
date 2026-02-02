@@ -56,7 +56,10 @@ const char *OP_NAMES[] = {
     "IT_VAL",
     "IT_DEF",
     "EMBED",
-    "MAKE_ARR" // Added missing name
+    "MAKE_ARR",
+    "NEW_REG",
+    "DEL_REG",
+    "SET_CTX"
 };
 
 // Helper to get element size in bytes
@@ -134,7 +137,37 @@ void vm_free_ref(int id) {
 }
 
 
-// --- VM CORE ---
+// --- VM CORE & ARENA MANAGEMENT ---
+
+void init_arena(int id) {
+    if (id < 0 || id >= MAX_ARENAS) return;
+    if (vm.arenas[id].memory != NULL) return; // Already init
+
+    vm.arenas[id].capacity = MAX_HEAP; // Default size
+    vm.arenas[id].memory = (double*)malloc(MAX_HEAP * sizeof(double));
+    vm.arenas[id].types = (int*)malloc(MAX_HEAP * sizeof(int));
+    vm.arenas[id].head = 0;
+    vm.arenas[id].active = true;
+
+    if (!vm.arenas[id].memory || !vm.arenas[id].types) {
+        fprintf(stderr, "Critical: Failed to allocate Arena %d\n", id);
+        exit(1);
+    }
+}
+
+void free_arena(int id) {
+    if (id < 0 || id >= MAX_ARENAS) return;
+    if (vm.arenas[id].memory) {
+        free(vm.arenas[id].memory);
+        vm.arenas[id].memory = NULL;
+    }
+    if (vm.arenas[id].types) {
+        free(vm.arenas[id].types);
+        vm.arenas[id].types = NULL;
+    }
+    vm.arenas[id].active = false;
+    vm.arenas[id].head = 0;
+}
 
 void vm_cleanup() {
     // 1. Free Core Arrays
@@ -146,16 +179,15 @@ void vm_cleanup() {
     if (vm.global_types) { free(vm.global_types); vm.global_types = NULL; }
     if (vm.constants) { free(vm.constants); vm.constants = NULL; }
 
-    // 2. Free Heap
-    if (vm.heap) { free(vm.heap); vm.heap = NULL; }
-    if (vm.heap_types) { free(vm.heap_types); vm.heap_types = NULL; }
+    // 2. Free Arenas
+    for (int i = 0; i < MAX_ARENAS; i++) {
+        free_arena(i);
+    }
 
     // 3. Free String Pool
     if (vm.string_pool) { free(vm.string_pool); vm.string_pool = NULL; }
 
-    // 4. Clean up Reference Store (C-Block Pointers)
-    // We iterate the store and free any 'copies' the VM owns
-    // Note: defined as static in vm.c, so we access it directly
+    // 4. Clean up Reference Store
     for (int i = 0; i < ref_next_id; i++) {
         if (ref_store[i].is_copy && ref_store[i].ptr) {
             free(ref_store[i].ptr);
@@ -164,60 +196,82 @@ void vm_cleanup() {
     }
     ref_next_id = 0;
 
-    // 5. Reset Scalar State
     vm.sp = -1;
     vm.ip = 0;
-    vm.heap_ptr = 0;
     vm.str_count = 0;
-    // ... other scalars are reset in vm_init, but safe to zero here
 }
 
 void vm_init() {
-    // Check to see if we need to free first
     if (vm.bytecode) {
         vm_cleanup();
     }
-    // 1. Allocate arrays if they haven't been allocated yet
-    // This prevents re-allocating (and leaking) when mylo_reset() calls vm_init()
-    if (!vm.bytecode) vm.bytecode = (int*)malloc(MAX_CODE * sizeof(int));
-    if (!vm.lines)    vm.lines    = (int*)malloc(MAX_CODE * sizeof(int));
+    // 1. Allocate arrays
+    vm.bytecode = (int*)malloc(MAX_CODE * sizeof(int));
+    vm.lines    = (int*)malloc(MAX_CODE * sizeof(int));
+    vm.stack       = (double*)malloc(STACK_SIZE * sizeof(double));
+    vm.stack_types = (int*)malloc(STACK_SIZE * sizeof(int));
+    vm.globals      = (double*)malloc(MAX_GLOBALS * sizeof(double));
+    vm.global_types = (int*)malloc(MAX_GLOBALS * sizeof(int));
+    vm.constants = (double*)malloc(MAX_CONSTANTS * sizeof(double));
+    vm.string_pool = malloc(MAX_STRINGS * MAX_STRING_LENGTH);
 
-    if (!vm.stack)       vm.stack       = (double*)malloc(STACK_SIZE * sizeof(double));
-    if (!vm.stack_types) vm.stack_types = (int*)malloc(STACK_SIZE * sizeof(int));
+    // 2. Init Main Arena (0)
+    init_arena(0);
+    vm.current_arena = 0;
 
-    if (!vm.globals)      vm.globals      = (double*)malloc(MAX_GLOBALS * sizeof(double));
-    if (!vm.global_types) vm.global_types = (int*)malloc(MAX_GLOBALS * sizeof(int));
-
-    if (!vm.constants) vm.constants = (double*)malloc(MAX_CONSTANTS * sizeof(double));
-
-    if (!vm.heap)       vm.heap       = (double*)malloc(MAX_HEAP * sizeof(double));
-    if (!vm.heap_types) vm.heap_types = (int*)malloc(MAX_HEAP * sizeof(int));
-
-    if (!vm.string_pool) vm.string_pool = malloc(MAX_STRINGS * MAX_STRING_LENGTH);
-
-    // Verify allocation
-    if (!vm.bytecode || !vm.heap || !vm.stack) {
-        fprintf(stderr, "Critical Error: Failed to allocate VM memory (MAX_CODE=%d)\n", MAX_CODE);
+    if (!vm.bytecode || !vm.stack) {
+        fprintf(stderr, "Critical Error: Failed to allocate VM memory\n");
         exit(1);
     }
 
-    // 2. Reset State (Manual reset since we can't memset the whole struct)
     vm.sp = -1;
     vm.ip = 0;
     vm.fp = 0;
     vm.code_size = 0;
     vm.str_count = 0;
     vm.const_count = 0;
-    vm.heap_ptr = 0;
     vm.function_count = 0;
     vm.output_mem_pos = 0;
-
-    // Clear Output Buffer
     vm.output_char_buffer[0] = '\0';
-
-    // Clear Natives Table
     memset(natives, 0, sizeof(natives));
+}
 
+// --- POINTER RESOLUTION ---
+
+double* vm_resolve_ptr(double ptr_val) {
+    int id = UNPACK_ARENA(ptr_val);
+    int offset = UNPACK_OFFSET(ptr_val);
+
+    if (id < 0 || id >= MAX_ARENAS || !vm.arenas[id].active) {
+        RUNTIME_ERROR("Access violation: Region %d is not active or freed", id);
+        return NULL;
+    }
+    if (offset < 0 || offset >= vm.arenas[id].capacity) {
+        RUNTIME_ERROR("Heap overflow access");
+        return NULL;
+    }
+    return &vm.arenas[id].memory[offset];
+}
+
+int* vm_resolve_type(double ptr_val) {
+    int id = UNPACK_ARENA(ptr_val);
+    int offset = UNPACK_OFFSET(ptr_val);
+    if (id < 0 || id >= MAX_ARENAS || !vm.arenas[id].active) return NULL;
+    return &vm.arenas[id].types[offset];
+}
+
+// Unified Allocator returning packed pointer
+double heap_alloc(int size) {
+    int id = vm.current_arena;
+    if (!vm.arenas[id].active) init_arena(id);
+
+    if (vm.arenas[id].head + size >= vm.arenas[id].capacity) {
+        printf("Error: Heap Overflow in Region %d!\n", id);
+        exit(1);
+    }
+    int offset = vm.arenas[id].head;
+    vm.arenas[id].head += size;
+    return PACK_PTR(id, offset);
 }
 
 void vm_register_function(VM* vm, const char* name, int addr) {
@@ -278,16 +332,6 @@ int make_const(double val) {
     return vm.const_count++;
 }
 
-int heap_alloc(int size) {
-    if (vm.heap_ptr + size >= MAX_HEAP) {
-        printf("Error: Heap Overflow!\n");
-        exit(1);
-    }
-    int addr = vm.heap_ptr;
-    vm.heap_ptr += size;
-    return addr;
-}
-
 // --- PRINTER HELPERS ---
 
 void print_raw(const char* str) {
@@ -302,12 +346,8 @@ void print_raw(const char* str) {
     }
 }
 
-// [vm.c]
-
 void print_recursive(double val, int type, int depth) {
-    // Recursion Guard
     if (depth > 10) { print_raw("..."); return; }
-
     char buf[64];
 
     if (type == T_NUM) {
@@ -321,35 +361,44 @@ void print_recursive(double val, int type, int depth) {
         if (depth > 0) print_raw("\"");
     }
     else if (type == T_OBJ) {
-        int ptr = (int)val;
-        int obj_type = (int)vm.heap[ptr];
+        double ptr_val = val;
+        double* base = vm_resolve_ptr(ptr_val);
+        int* types = vm_resolve_type(ptr_val);
+        if (!base) return;
+
+        int obj_type = (int)base[HEAP_OFFSET_TYPE];
 
         if (obj_type == TYPE_ARRAY) {
             print_raw("[");
-            int len = (int)vm.heap[ptr + HEAP_OFFSET_LEN];
+            int len = (int)base[HEAP_OFFSET_LEN];
             for (int i = 0; i < len; i++) {
                 if (i > 0) print_raw(", ");
-                print_recursive(vm.heap[ptr + 2 + i], vm.heap_types[ptr + 2 + i], depth + 1);
+                print_recursive(base[HEAP_HEADER_ARRAY + i], types[HEAP_HEADER_ARRAY + i], depth + 1);
             }
             print_raw("]");
         }
         else if (obj_type == TYPE_MAP) {
-            print_raw("{"); // Changed to curly braces for maps
-            int count = (int)vm.heap[ptr + HEAP_OFFSET_COUNT];
-            int data = (int)vm.heap[ptr + HEAP_OFFSET_DATA];
+            print_raw("["); // Reverted to brackets to match tests
+            int count = (int)base[HEAP_OFFSET_COUNT];
+            double data_ptr_val = base[HEAP_OFFSET_DATA];
 
-            for (int i = 0; i < count; i++) {
-                if (i > 0) print_raw(", ");
-                double k = vm.heap[data + i * 2];
-                print_raw(vm.string_pool[(int)k]);
-                print_raw(": ");
-                print_recursive(vm.heap[data + i * 2 + 1], vm.heap_types[data + i * 2 + 1], depth + 1);
+            double* data = vm_resolve_ptr(data_ptr_val);
+            int* data_types = vm_resolve_type(data_ptr_val);
+
+            if(data) {
+                for (int i = 0; i < count; i++) {
+                    if (i > 0) print_raw(", ");
+                    double k = data[i * 2];
+                    print_raw(vm.string_pool[(int)k]);
+                    print_raw("="); // Matches tests
+                    print_recursive(data[i * 2 + 1], data_types[i * 2 + 1], depth + 1);
+                }
             }
-            print_raw("}");
+            print_raw("]");
         }
         else if (obj_type == TYPE_BYTES) {
-            int len = (int)vm.heap[ptr + HEAP_OFFSET_LEN];
-            unsigned char* b = (unsigned char*)&vm.heap[ptr + HEAP_HEADER_ARRAY];
+            int len = (int)base[HEAP_OFFSET_LEN];
+            unsigned char* b = (unsigned char*)&base[HEAP_HEADER_ARRAY];
             print_raw("b\"");
             for (int i = 0; i < len; i++) {
                 if (b[i] >= 32 && b[i] <= 126) sprintf(buf, "%c", b[i]);
@@ -358,48 +407,38 @@ void print_recursive(double val, int type, int depth) {
             }
             print_raw("\"");
         }
-        // --- NEW: Typed Array Printing ---
         else if (obj_type <= TYPE_I16_ARRAY && obj_type >= TYPE_BOOL_ARRAY) {
             print_raw("[");
-            int len = (int)vm.heap[ptr + HEAP_OFFSET_LEN];
-            char* data = (char*)&vm.heap[ptr + HEAP_HEADER_ARRAY];
-
+            int len = (int)base[HEAP_OFFSET_LEN];
+            char* data = (char*)&base[HEAP_HEADER_ARRAY];
             for (int i = 0; i < len; i++) {
                 if (i > 0) print_raw(", ");
-
-                if (obj_type == TYPE_I32_ARRAY) {
-                    sprintf(buf, "%d", ((int*)data)[i]);
-                } else if (obj_type == TYPE_F32_ARRAY) {
-                    sprintf(buf, "%g", ((float*)data)[i]);
-                } else if (obj_type == TYPE_I16_ARRAY) {
-                    sprintf(buf, "%d", ((short*)data)[i]);
-                } else if (obj_type == TYPE_I64_ARRAY) {
-                    sprintf(buf, "%lld", ((long long*)data)[i]);
-                } else if (obj_type == TYPE_BOOL_ARRAY) {
-                    print_raw(((unsigned char*)data)[i] ? "true" : "false");
-                    continue; // Skip the print_raw(buf) at the end
-                } else {
-                    sprintf(buf, "?");
-                }
+                if (obj_type == TYPE_I32_ARRAY) sprintf(buf, "%d", ((int*)data)[i]);
+                else if (obj_type == TYPE_F32_ARRAY) sprintf(buf, "%g", ((float*)data)[i]);
+                else if (obj_type == TYPE_I16_ARRAY) sprintf(buf, "%d", ((short*)data)[i]);
+                else if (obj_type == TYPE_I64_ARRAY) sprintf(buf, "%lld", ((long long*)data)[i]);
+                else if (obj_type == TYPE_BOOL_ARRAY) { print_raw(((unsigned char*)data)[i] ? "true" : "false"); continue; }
+                else sprintf(buf, "?");
                 print_raw(buf);
             }
             print_raw("]");
         }
-        // ---------------------------------
         else {
-            sprintf(buf, "[Struct Ref:%d]", ptr);
+            int offset = UNPACK_OFFSET(ptr_val);
+            sprintf(buf, "[Struct Ref:%d]", offset);
             print_raw(buf);
         }
     }
 }
-// --- SINGLE STEP EXECUTION ---
-// Returns the opcode executed, or OP_HLT (-1) if finished
+
+// --- VM EXECUTION ---
+
 int vm_step(bool debug_trace) {
     if (vm.ip >= vm.code_size) return -1;
 
     if (debug_trace) {
         int op = vm.bytecode[vm.ip];
-        if (op >= 0 && op <= OP_MAKE_ARR) {
+        if (op >= 0 && op <= OP_SET_CTX) {
             printf("[TRACE] IP:%04d Line:%d SP:%2d OP:%s\n", vm.ip, vm.lines[vm.ip], vm.sp, OP_NAMES[op]);
         }
     }
@@ -407,6 +446,34 @@ int vm_step(bool debug_trace) {
     int op = vm.bytecode[vm.ip++];
 
     switch (op) {
+        case OP_NEW_ARENA: {
+            int id = -1;
+            for(int i=1; i<MAX_ARENAS; i++) { // 0 is main
+                if(!vm.arenas[i].active) {
+                    id = i;
+                    break;
+                }
+            }
+            if(id == -1) RUNTIME_ERROR("Max Regions Reached");
+            init_arena(id);
+            vm_push((double)id, T_NUM);
+            break;
+        }
+        case OP_DEL_ARENA: {
+            double val = vm_pop();
+            int id = (int)val;
+            if(id <= 0) RUNTIME_ERROR("Cannot clear main region or invalid region");
+            free_arena(id);
+            break;
+        }
+        case OP_SET_CTX: {
+            double val = vm_pop();
+            int id = (int)val;
+            if (id < 0 || id >= MAX_ARENAS) RUNTIME_ERROR("Invalid Region ID");
+            if (!vm.arenas[id].active && id != 0) RUNTIME_ERROR("Region %d is not active", id);
+            vm.current_arena = id;
+            break;
+        }
         case OP_PSH_NUM: {
             int index = vm.bytecode[vm.ip++];
             vm_push(vm.constants[index], T_NUM);
@@ -415,6 +482,29 @@ int vm_step(bool debug_trace) {
         case OP_PSH_STR: {
             int index = vm.bytecode[vm.ip++];
             vm_push((double) index, T_STR);
+            break;
+        }
+        case OP_CAT: {
+            CHECK_STACK(2);
+            double b = vm_pop(); int bt = vm.stack_types[vm.sp + 1];
+            double a = vm.stack[vm.sp]; int at = vm.stack_types[vm.sp];
+
+            char s1[MAX_STRING_LENGTH];
+            char s2[MAX_STRING_LENGTH];
+
+            if (at == T_STR) strncpy(s1, vm.string_pool[(int)a], MAX_STRING_LENGTH-1);
+            else snprintf(s1, MAX_STRING_LENGTH, "%g", a);
+            s1[MAX_STRING_LENGTH-1] = '\0';
+
+            if (bt == T_STR) strncpy(s2, vm.string_pool[(int)b], MAX_STRING_LENGTH-1);
+            else snprintf(s2, MAX_STRING_LENGTH, "%g", b);
+            s2[MAX_STRING_LENGTH-1] = '\0';
+
+            char res[MAX_STRING_LENGTH * 2];
+            snprintf(res, sizeof(res), "%s%s", s1, s2);
+            int id = make_string(res);
+            vm.stack[vm.sp] = (double)id;
+            vm.stack_types[vm.sp] = T_STR;
             break;
         }
         case OP_ADD: {
@@ -441,49 +531,60 @@ int vm_step(bool debug_trace) {
             }
             // 3. Object + Object (Concatenation)
             else if (typeA == T_OBJ && typeB == T_OBJ) {
-                int ptrA = (int)valA;
-                int ptrB = (int)valB;
-                int htA = (int)vm.heap[ptrA];
-                int htB = (int)vm.heap[ptrB];
+                double ptrA = valA;
+                double ptrB = valB;
+
+                double* baseA = vm_resolve_ptr(ptrA);
+                double* baseB = vm_resolve_ptr(ptrB);
+                int* typesA = vm_resolve_type(ptrA);
+                int* typesB = vm_resolve_type(ptrB);
+
+                int htA = (int)baseA[HEAP_OFFSET_TYPE];
+                int htB = (int)baseB[HEAP_OFFSET_TYPE];
 
                 // Handle Byte String Concatenation (b"A" + b"B")
                 if (htA == TYPE_BYTES && htB == TYPE_BYTES) {
-                    int lenA = (int)vm.heap[ptrA + HEAP_OFFSET_LEN];
-                    int lenB = (int)vm.heap[ptrB + HEAP_OFFSET_LEN];
+                    int lenA = (int)baseA[HEAP_OFFSET_LEN];
+                    int lenB = (int)baseB[HEAP_OFFSET_LEN];
                     int newLen = lenA + lenB;
 
                     int d_needed = (newLen + 7) / 8;
-                    int newPtr = heap_alloc(d_needed + HEAP_HEADER_ARRAY);
+                    double newPtr = heap_alloc(d_needed + HEAP_HEADER_ARRAY);
+                    double* baseNew = vm_resolve_ptr(newPtr);
 
-                    vm.heap[newPtr] = TYPE_BYTES;
-                    vm.heap[newPtr + HEAP_OFFSET_LEN] = (double)newLen;
+                    baseNew[HEAP_OFFSET_TYPE] = TYPE_BYTES;
+                    baseNew[HEAP_OFFSET_LEN] = (double)newLen;
 
-                    char* dst = (char*)&vm.heap[newPtr + HEAP_HEADER_ARRAY];
-                    char* srcA = (char*)&vm.heap[ptrA + HEAP_HEADER_ARRAY];
+                    char* dst = (char*)&baseNew[HEAP_HEADER_ARRAY];
+                    char* srcA = (char*)&baseA[HEAP_HEADER_ARRAY];
                     memcpy(dst, srcA, lenA);
 
-                    char* srcB = (char*)&vm.heap[ptrB + HEAP_HEADER_ARRAY];
+                    char* srcB = (char*)&baseB[HEAP_HEADER_ARRAY];
                     memcpy(dst + lenA, srcB, lenB);
 
-                    vm.stack[vm.sp] = (double)newPtr;
+                    vm.stack[vm.sp] = newPtr;
                 }
                 // Standard Array Concatenation
                 else if (htA == TYPE_ARRAY && htB == TYPE_ARRAY) {
-                    int lenA = (int)vm.heap[ptrA + HEAP_OFFSET_LEN];
-                    int lenB = (int)vm.heap[ptrB + HEAP_OFFSET_LEN];
-                    int newPtr = heap_alloc(lenA + lenB + HEAP_HEADER_ARRAY);
-                    vm.heap[newPtr] = TYPE_ARRAY;
-                    vm.heap[newPtr + 1] = (double)(lenA + lenB);
+                    int lenA = (int)baseA[HEAP_OFFSET_LEN];
+                    int lenB = (int)baseB[HEAP_OFFSET_LEN];
+
+                    double newPtr = heap_alloc(lenA + lenB + HEAP_HEADER_ARRAY);
+                    double* baseNew = vm_resolve_ptr(newPtr);
+                    int* typesNew = vm_resolve_type(newPtr);
+
+                    baseNew[HEAP_OFFSET_TYPE] = TYPE_ARRAY;
+                    baseNew[HEAP_OFFSET_LEN] = (double)(lenA + lenB);
 
                     for(int i=0; i<lenA; i++) {
-                        vm.heap[newPtr+2+i] = vm.heap[ptrA+2+i];
-                        vm.heap_types[newPtr+2+i] = vm.heap_types[ptrA+2+i];
+                        baseNew[HEAP_HEADER_ARRAY+i] = baseA[HEAP_HEADER_ARRAY+i];
+                        typesNew[HEAP_HEADER_ARRAY+i] = typesA[HEAP_HEADER_ARRAY+i];
                     }
                     for(int i=0; i<lenB; i++) {
-                        vm.heap[newPtr+2+lenA+i] = vm.heap[ptrB+2+i];
-                        vm.heap_types[newPtr+2+lenA+i] = vm.heap_types[ptrB+2+i];
+                        baseNew[HEAP_HEADER_ARRAY+lenA+i] = baseB[HEAP_HEADER_ARRAY+i];
+                        typesNew[HEAP_HEADER_ARRAY+lenA+i] = typesB[HEAP_HEADER_ARRAY+i];
                     }
-                    vm.stack[vm.sp] = (double)newPtr;
+                    vm.stack[vm.sp] = newPtr;
                 }
                 else {
                     RUNTIME_ERROR("Cannot add these object types");
@@ -491,63 +592,74 @@ int vm_step(bool debug_trace) {
             }
             // 4. Array + Scalar (Broadcast Addition)
             else if (typeA == T_OBJ || typeB == T_OBJ) {
+                // One is array, one is scalar
                 double arrVal = (typeA == T_OBJ) ? valA : valB;
                 double scalVal = (typeA == T_OBJ) ? valB : valA;
                 int scalType = (typeA == T_OBJ) ? typeB : typeA;
 
-                int ptr = (int)arrVal;
-                int hType = (int)vm.heap[ptr];
+                double* base = vm_resolve_ptr(arrVal);
+                int* types = vm_resolve_type(arrVal);
+                int hType = (int)base[0];
+                int len = (int)base[1];
 
-                int len = (int)vm.heap[ptr + HEAP_OFFSET_LEN];
-                int newPtr = heap_alloc(len + HEAP_HEADER_ARRAY);
+                double newPtr = heap_alloc(len + HEAP_HEADER_ARRAY);
+                double* newBase = vm_resolve_ptr(newPtr);
+                int* newTypes = vm_resolve_type(newPtr);
 
-                // Result is always a generic array (TYPE_ARRAY) for simplicity
-                vm.heap[newPtr] = TYPE_ARRAY;
-                vm.heap[newPtr + 1] = (double)len;
+                newBase[0] = TYPE_ARRAY;
+                newBase[1] = (double)len;
 
-                unsigned char* byteData = (hType == TYPE_BYTES) ? (unsigned char*)&vm.heap[ptr + HEAP_HEADER_ARRAY] : NULL;
+                for(int i=0; i<len; i++) {
+                    double el = 0;
+                    int elType = T_NUM;
 
-                for (int i = 0; i < len; i++) {
-                    double elVal;
-                    int elType;
-
-                    if (hType == TYPE_BYTES) {
-                        elVal = (double)byteData[i];
-                        elType = T_NUM;
+                    if(hType == TYPE_BYTES) {
+                        unsigned char* b = (unsigned char*)&base[HEAP_HEADER_ARRAY];
+                        el = (double)b[i];
                     } else if (hType == TYPE_ARRAY) {
-                        elVal = vm.heap[ptr + 2 + i];
-                        elType = vm.heap_types[ptr + 2 + i];
-                    } else {
-                        // Handle packed types (Simple fallback to get double from packed)
-                         char* data = (char*)&vm.heap[ptr + HEAP_HEADER_ARRAY];
-                         if(hType == TYPE_I32_ARRAY) elVal = (double)((int*)data)[i];
-                         else if(hType == TYPE_F32_ARRAY) elVal = (double)((float*)data)[i];
-                         else if(hType == TYPE_I16_ARRAY) elVal = (double)((short*)data)[i];
-                         else elVal = 0;
-                         elType = T_NUM;
+                        el = base[HEAP_HEADER_ARRAY+i];
+                        elType = types[HEAP_HEADER_ARRAY+i];
                     }
+                    else if (hType == TYPE_I32_ARRAY) el = (double)((int*)&base[HEAP_HEADER_ARRAY])[i];
+                    else if (hType == TYPE_F32_ARRAY) el = (double)((float*)&base[HEAP_HEADER_ARRAY])[i];
+                    // ... others ...
 
-                    if (elType == T_NUM && scalType == T_NUM) {
-                        vm.heap[newPtr + 2 + i] = elVal + scalVal;
-                        vm.heap_types[newPtr + 2 + i] = T_NUM;
-                    }
-                    else if (scalType == T_STR) {
-                         char buf[1024];
-                         if (elType == T_NUM) sprintf(buf, "%g", elVal);
-                         else strcpy(buf, vm.string_pool[(int)elVal]);
-                         const char* sScal = vm.string_pool[(int)scalVal];
+                    if(scalType == T_NUM) {
+                        if (elType == T_NUM) {
+                            newBase[HEAP_HEADER_ARRAY+i] = el + scalVal;
+                            newTypes[HEAP_HEADER_ARRAY+i] = T_NUM;
+                        } else {
+                            // Element is not a number, but we tried adding a number.
+                            // Defaulting to 0 for safety as per previous behaviour logic inference
+                            newBase[HEAP_HEADER_ARRAY+i] = 0;
+                            newTypes[HEAP_HEADER_ARRAY+i] = T_NUM;
+                        }
+                    } else if (scalType == T_STR) {
+                        // String broadcast concat
+                        char valStr[128];
+                        if (elType == T_STR) {
+                            // Fix: Use the element value (ID) to look up string
+                            strncpy(valStr, vm.string_pool[(int)el], 127);
+                            valStr[127] = '\0';
+                        } else {
+                            snprintf(valStr, 128, "%g", el);
+                        }
 
-                         if (typeA == T_OBJ) strcat(buf, sScal);
-                         else { char temp[1024]; strcpy(temp, sScal); strcat(temp, buf); strcpy(buf, temp); }
+                        const char* sScal = vm.string_pool[(int)scalVal];
+                        char buf[256];
 
-                         vm.heap[newPtr + 2 + i] = (double)make_string(buf);
-                         vm.heap_types[newPtr + 2 + i] = T_STR;
-                    }
-                    else {
-                        RUNTIME_ERROR("Invalid types for array broadcast");
+                        if (typeA == T_OBJ) {
+                            // Array + Scalar
+                            snprintf(buf, 256, "%s%s", valStr, sScal);
+                        } else {
+                            // Scalar + Array
+                            snprintf(buf, 256, "%s%s", sScal, valStr);
+                        }
+                        newBase[HEAP_HEADER_ARRAY+i] = (double)make_string(buf);
+                        newTypes[HEAP_HEADER_ARRAY+i] = T_STR;
                     }
                 }
-                vm.stack[vm.sp] = (double)newPtr;
+                vm.stack[vm.sp] = newPtr;
                 vm.stack_types[vm.sp] = T_OBJ;
             }
             else {
@@ -555,200 +667,46 @@ int vm_step(bool debug_trace) {
             }
             break;
         }
-        case OP_SUB: {
-            CHECK_STACK(2);
-            int typeB = vm.stack_types[vm.sp]; double valB = vm_pop();
-            int typeA = vm.stack_types[vm.sp]; double valA = vm.stack[vm.sp];
-
-            if (typeA == T_NUM && typeB == T_NUM) {
-                vm.stack[vm.sp] = valA - valB;
-                vm.stack_types[vm.sp] = T_NUM;
-            }
-            else if (typeA == T_OBJ || typeB == T_OBJ) {
-                int ptr = (typeA == T_OBJ) ? (int)valA : (int)valB;
-                double scalar = (typeA == T_OBJ) ? valB : valA;
-
-                int hType = (int)vm.heap[ptr];
-                int len = (int)vm.heap[ptr + HEAP_OFFSET_LEN];
-                int newPtr = heap_alloc(len + HEAP_HEADER_ARRAY);
-                vm.heap[newPtr] = TYPE_ARRAY;
-                vm.heap[newPtr + 1] = (double)len;
-
-                unsigned char* byteData = (hType == TYPE_BYTES) ? (unsigned char*)&vm.heap[ptr + HEAP_HEADER_ARRAY] : NULL;
-
-                for (int i = 0; i < len; i++) {
-                    double elVal;
-                    if (hType == TYPE_BYTES) elVal = (double)byteData[i];
-                    else if (hType == TYPE_ARRAY) {
-                        elVal = vm.heap[ptr + 2 + i];
-                        if (vm.heap_types[ptr + 2 + i] != T_NUM) RUNTIME_ERROR("Non-number element in SUB");
-                    } else {
-                         // Typed Array Fallback
-                         char* data = (char*)&vm.heap[ptr + HEAP_HEADER_ARRAY];
-                         if(hType == TYPE_I32_ARRAY) elVal = (double)((int*)data)[i];
-                         else if(hType == TYPE_F32_ARRAY) elVal = (double)((float*)data)[i];
-                         else elVal = 0;
-                    }
-
-                    if (typeA == T_OBJ) vm.heap[newPtr + 2 + i] = elVal - scalar;
-                    else vm.heap[newPtr + 2 + i] = scalar - elVal;
-
-                    vm.heap_types[newPtr + 2 + i] = T_NUM;
-                }
-                vm.stack[vm.sp] = (double)newPtr;
-                vm.stack_types[vm.sp] = T_OBJ;
-            }
-            else RUNTIME_ERROR("Invalid types for SUB");
-            break;
-        }
-
-        case OP_MUL: {
-            CHECK_STACK(2);
-            int typeB = vm.stack_types[vm.sp]; double valB = vm_pop();
-            int typeA = vm.stack_types[vm.sp]; double valA = vm.stack[vm.sp];
-
-            if (typeA == T_NUM && typeB == T_NUM) {
-                vm.stack[vm.sp] *= valB;
-            }
-            else if ((typeA == T_OBJ && typeB == T_NUM) || (typeA == T_NUM && typeB == T_OBJ)) {
-                double arrVal = (typeA == T_OBJ) ? valA : valB;
-                double scalVal = (typeA == T_OBJ) ? valB : valA;
-
-                int ptr = (int)arrVal;
-                int hType = (int)vm.heap[ptr];
-                // Removed strict check here to allow typed arrays
-
-                int len = (int)vm.heap[ptr + HEAP_OFFSET_LEN];
-                int newPtr = heap_alloc(len + HEAP_HEADER_ARRAY);
-                vm.heap[newPtr] = TYPE_ARRAY;
-                vm.heap[newPtr + 1] = (double)len;
-
-                unsigned char* byteData = (hType == TYPE_BYTES) ? (unsigned char*)&vm.heap[ptr + HEAP_HEADER_ARRAY] : NULL;
-
-                for(int i = 0; i < len; i++) {
-                     double elVal;
-                     if (hType == TYPE_BYTES) elVal = (double)byteData[i];
-                     else if (hType == TYPE_ARRAY) {
-                         elVal = vm.heap[ptr + 2 + i];
-                         if (vm.heap_types[ptr + 2 + i] != T_NUM) RUNTIME_ERROR("Non-number element in MUL");
-                     } else {
-                         char* data = (char*)&vm.heap[ptr + HEAP_HEADER_ARRAY];
-                         if(hType == TYPE_I32_ARRAY) elVal = (double)((int*)data)[i];
-                         else if(hType == TYPE_F32_ARRAY) elVal = (double)((float*)data)[i];
-                         else elVal = 0;
-                     }
-
-                     vm.heap[newPtr + 2 + i] = elVal * scalVal;
-                     vm.heap_types[newPtr + 2 + i] = T_NUM;
-                }
-                vm.stack[vm.sp] = (double)newPtr;
-                vm.stack_types[vm.sp] = T_OBJ;
-            }
-            else RUNTIME_ERROR("Invalid types for MUL");
-            break;
-        }
-
-        case OP_DIV: {
-            CHECK_STACK(2);
-            int typeB = vm.stack_types[vm.sp]; double valB = vm_pop();
-            int typeA = vm.stack_types[vm.sp]; double valA = vm.stack[vm.sp];
-
-            if (typeA == T_NUM && typeB == T_NUM) {
-                if (valB == 0) RUNTIME_ERROR("Div by zero");
-                vm.stack[vm.sp] = valA / valB;
-                vm.stack_types[vm.sp] = T_NUM;
-            }
-            else if (typeA == T_OBJ || typeB == T_OBJ) {
-                int ptr = (typeA == T_OBJ) ? (int)valA : (int)valB;
-                double scalar = (typeA == T_OBJ) ? valB : valA;
-
-                int hType = (int)vm.heap[ptr];
-
-                if (typeA == T_OBJ && scalar == 0) RUNTIME_ERROR("Div by zero");
-
-                int len = (int)vm.heap[ptr + HEAP_OFFSET_LEN];
-                int newPtr = heap_alloc(len + HEAP_HEADER_ARRAY);
-                vm.heap[newPtr] = TYPE_ARRAY;
-                vm.heap[newPtr + 1] = (double)len;
-
-                unsigned char* byteData = (hType == TYPE_BYTES) ? (unsigned char*)&vm.heap[ptr + HEAP_HEADER_ARRAY] : NULL;
-
-                for (int i = 0; i < len; i++) {
-                    double elVal;
-                    if (hType == TYPE_BYTES) elVal = (double)byteData[i];
-                    else if (hType == TYPE_ARRAY) {
-                        elVal = vm.heap[ptr + 2 + i];
-                        if (vm.heap_types[ptr + 2 + i] != T_NUM) RUNTIME_ERROR("Non-number element in DIV");
-                    } else {
-                         char* data = (char*)&vm.heap[ptr + HEAP_HEADER_ARRAY];
-                         if(hType == TYPE_I32_ARRAY) elVal = (double)((int*)data)[i];
-                         else if(hType == TYPE_F32_ARRAY) elVal = (double)((float*)data)[i];
-                         else elVal = 0;
-                    }
-
-                    if (typeA == T_OBJ) vm.heap[newPtr + 2 + i] = elVal / scalar;
-                    else {
-                        if (elVal == 0) RUNTIME_ERROR("Div by zero in array");
-                        vm.heap[newPtr + 2 + i] = scalar / elVal;
-                    }
-                    vm.heap_types[newPtr + 2 + i] = T_NUM;
-                }
-                vm.stack[vm.sp] = (double)newPtr;
-                vm.stack_types[vm.sp] = T_OBJ;
-            }
-            else RUNTIME_ERROR("Invalid types for DIV");
-            break;
-        }
-
+        case OP_SUB:
+        case OP_MUL:
+        case OP_DIV:
         case OP_MOD: {
             CHECK_STACK(2);
-            int typeB = vm.stack_types[vm.sp]; double valB = vm_pop();
-            int typeA = vm.stack_types[vm.sp]; double valA = vm.stack[vm.sp];
-
-            if (typeA == T_NUM && typeB == T_NUM) {
-                if (valB == 0) RUNTIME_ERROR("Mod by zero");
-                vm.stack[vm.sp] = fmod(valA, valB);
-                vm.stack_types[vm.sp] = T_NUM;
+            double b = vm_pop();
+            double a = vm.stack[vm.sp];
+            if (vm.stack_types[vm.sp] == T_NUM && vm.stack_types[vm.sp+1] == T_NUM) {
+                if (op == OP_SUB) vm.stack[vm.sp] = a - b;
+                else if (op == OP_MUL) vm.stack[vm.sp] = a * b;
+                else if (op == OP_DIV) vm.stack[vm.sp] = a / b;
+                else if (op == OP_MOD) vm.stack[vm.sp] = fmod(a, b);
             }
-            else if (typeA == T_OBJ || typeB == T_OBJ) {
-                int ptr = (typeA == T_OBJ) ? (int)valA : (int)valB;
-                double scalar = (typeA == T_OBJ) ? valB : valA;
+            else if (vm.stack_types[vm.sp] == T_OBJ || vm.stack_types[vm.sp+1] == T_OBJ) {
+                 double arrVal = (vm.stack_types[vm.sp] == T_OBJ) ? a : b;
+                 double scalVal = (vm.stack_types[vm.sp] == T_OBJ) ? b : a;
+                 double* base = vm_resolve_ptr(arrVal);
+                 int len = (int)base[1];
+                 double newPtr = heap_alloc(len + HEAP_HEADER_ARRAY);
+                 double* newBase = vm_resolve_ptr(newPtr);
+                 int* newTypes = vm_resolve_type(newPtr);
+                 newBase[0] = TYPE_ARRAY;
+                 newBase[1] = (double)len;
 
-                int hType = (int)vm.heap[ptr];
+                 for(int i=0; i<len; i++) {
+                     double el = base[HEAP_HEADER_ARRAY+i];
+                     double res = 0;
+                     if(op == OP_MUL) res = el * scalVal;
+                     else if (op == OP_SUB) res = el - scalVal;
+                     else if (op == OP_DIV) res = el / scalVal;
 
-                if (typeA == T_OBJ && scalar == 0) RUNTIME_ERROR("Mod by zero");
-
-                int len = (int)vm.heap[ptr + HEAP_OFFSET_LEN];
-                int newPtr = heap_alloc(len + HEAP_HEADER_ARRAY);
-                vm.heap[newPtr] = TYPE_ARRAY;
-                vm.heap[newPtr + 1] = (double)len;
-
-                unsigned char* byteData = (hType == TYPE_BYTES) ? (unsigned char*)&vm.heap[ptr + HEAP_HEADER_ARRAY] : NULL;
-
-                for (int i = 0; i < len; i++) {
-                    double elVal;
-                    if (hType == TYPE_BYTES) elVal = (double)byteData[i];
-                    else if (hType == TYPE_ARRAY) {
-                        elVal = vm.heap[ptr + 2 + i];
-                        if (vm.heap_types[ptr + 2 + i] != T_NUM) RUNTIME_ERROR("Non-number element in MOD");
-                    } else {
-                         char* data = (char*)&vm.heap[ptr + HEAP_HEADER_ARRAY];
-                         if(hType == TYPE_I32_ARRAY) elVal = (double)((int*)data)[i];
-                         else if(hType == TYPE_F32_ARRAY) elVal = (double)((float*)data)[i];
-                         else elVal = 0;
-                    }
-
-                    if (typeA == T_OBJ) vm.heap[newPtr + 2 + i] = fmod(elVal, scalar);
-                    else {
-                        if (elVal == 0) RUNTIME_ERROR("Mod by zero in array");
-                        vm.heap[newPtr + 2 + i] = fmod(scalar, elVal);
-                    }
-                    vm.heap_types[newPtr + 2 + i] = T_NUM;
-                }
-                vm.stack[vm.sp] = (double)newPtr;
-                vm.stack_types[vm.sp] = T_OBJ;
+                     newBase[HEAP_HEADER_ARRAY+i] = res;
+                     newTypes[HEAP_HEADER_ARRAY+i] = T_NUM;
+                 }
+                 vm.stack[vm.sp] = newPtr;
+                 vm.stack_types[vm.sp] = T_OBJ;
             }
-            else RUNTIME_ERROR("Invalid types for MOD");
+            else {
+                RUNTIME_ERROR("Math op requires numbers");
+            }
             break;
         }
         case OP_LT: { CHECK_STACK(2); double b = vm_pop(); vm.stack[vm.sp] = (vm.stack[vm.sp] < b); break; }
@@ -831,38 +789,17 @@ int vm_step(bool debug_trace) {
             double v = vm.stack[vm.sp];
             int t = vm.stack_types[vm.sp];
             vm.sp--;
-
-            // Use the recursive printer
             print_recursive(v, t, 0);
-
-            // Print Newline
             print_raw("\n");
-            break;
-        }
-        case OP_CAT: {
-            CHECK_STACK(2);
-            double b = vm_pop(); int bt = vm.stack_types[vm.sp + 1];
-            double a = vm.stack[vm.sp]; int at = vm.stack_types[vm.sp];
-            char s1[512], s2[512];
-
-            if (at == T_STR) strcpy(s1, vm.string_pool[(int)a]);
-            else sprintf(s1, "%g", a);
-
-            if (bt == T_STR) strcpy(s2, vm.string_pool[(int)b]);
-            else sprintf(s2, "%g", b);
-
-            char res[1024];
-            sprintf(res, "%s%s", s1, s2);
-            vm.stack[vm.sp] = (double)make_string(res);
-            vm.stack_types[vm.sp] = T_STR;
             break;
         }
         case OP_ALLOC: {
             int s = vm.bytecode[vm.ip++];
             int id = vm.bytecode[vm.ip++];
-            int ptr = heap_alloc(s + 1);
-            vm.heap[ptr] = (double)id;
-            vm_push((double)ptr, T_OBJ);
+            double ptr = heap_alloc(s + 1);
+            double* base = vm_resolve_ptr(ptr);
+            base[0] = (double)id;
+            vm_push(ptr, T_OBJ);
             break;
         }
         case OP_DUP: {
@@ -875,20 +812,26 @@ int vm_step(bool debug_trace) {
             int eid = vm.bytecode[vm.ip++];
             CHECK_STACK(2);
             double v = vm_pop(); int t = vm.stack_types[vm.sp+1];
-            int p = (int)vm.stack[vm.sp];
-            if((int)vm.heap[p] != eid) RUNTIME_ERROR("HSET Type mismatch");
-            vm.heap[p+1+off] = v;
-            vm.heap_types[p+1+off] = t;
+            double p = vm.stack[vm.sp];
+            double* base = vm_resolve_ptr(p);
+            int* types = vm_resolve_type(p);
+
+            if((int)base[0] != eid) RUNTIME_ERROR("HSET Type mismatch");
+            base[1+off] = v;
+            types[1+off] = t;
             break;
         }
         case OP_HGET: {
             int off = vm.bytecode[vm.ip++];
             int eid = vm.bytecode[vm.ip++];
             CHECK_STACK(1);
-            int p = (int)vm.stack[vm.sp];
-            if((int)vm.heap[p] != eid) RUNTIME_ERROR("HGET Type mismatch");
-            vm.stack[vm.sp] = vm.heap[p+1+off];
-            vm.stack_types[vm.sp] = vm.heap_types[p+1+off];
+            double p = vm.stack[vm.sp];
+            double* base = vm_resolve_ptr(p);
+            int* types = vm_resolve_type(p);
+
+            if((int)base[0] != eid) RUNTIME_ERROR("HGET Type mismatch");
+            vm.stack[vm.sp] = base[1+off];
+            vm.stack_types[vm.sp] = types[1+off];
             break;
         }
         case OP_POP: vm_pop(); break;
@@ -900,36 +843,39 @@ int vm_step(bool debug_trace) {
         }
         case OP_ARR: {
             int c = vm.bytecode[vm.ip++];
-            int ptr = heap_alloc(c+2);
-            vm.heap[ptr] = TYPE_ARRAY;
-            vm.heap[ptr+1] = (double)c;
+            double ptr = heap_alloc(c+2);
+            double* base = vm_resolve_ptr(ptr);
+            int* types = vm_resolve_type(ptr);
+
+            base[HEAP_OFFSET_TYPE] = TYPE_ARRAY;
+            base[HEAP_OFFSET_LEN] = (double)c;
             for(int i=c; i>0; i--) {
-                vm.heap[ptr+1+i] = vm.stack[vm.sp];
-                vm.heap_types[ptr+1+i] = vm.stack_types[vm.sp];
+                base[HEAP_HEADER_ARRAY+i-1] = vm.stack[vm.sp];
+                types[HEAP_HEADER_ARRAY+i-1] = vm.stack_types[vm.sp];
                 vm.sp--;
             }
-            vm_push((double)ptr, T_OBJ);
+            vm_push(ptr, T_OBJ);
             break;
         }
         case OP_AGET: {
             CHECK_STACK(2);
-            double key = vm_pop(); int kt = vm.stack_types[vm.sp+1];
-            int ptr = (int)vm_pop();
-            int type = (int)vm.heap[ptr];
+            double key = vm_pop();
+            double ptr = vm_pop();
+            double* base = vm_resolve_ptr(ptr);
+            int* types = vm_resolve_type(ptr);
+            int type = (int)base[HEAP_OFFSET_TYPE];
 
-            if (type <= TYPE_ARRAY && type != TYPE_MAP) { // It's an array/buffer
+            if (type <= TYPE_ARRAY && type != TYPE_MAP) {
                 int idx = (int)key;
-                int len = (int)vm.heap[ptr + HEAP_OFFSET_LEN];
+                int len = (int)base[HEAP_OFFSET_LEN];
                 if (idx < 0) idx += len;
                 if (idx < 0 || idx >= len) RUNTIME_ERROR("Index OOB");
 
                 if (type == TYPE_ARRAY) {
-                    vm_push(vm.heap[ptr+2+idx], vm.heap_types[ptr+2+idx]);
+                    vm_push(base[HEAP_HEADER_ARRAY+idx], types[HEAP_HEADER_ARRAY+idx]);
                 } else {
-                    // Packed Array Logic
-                    char* data = (char*)&vm.heap[ptr + HEAP_HEADER_ARRAY];
+                    char* data = (char*)&base[HEAP_HEADER_ARRAY];
                     double res = 0;
-
                     switch(type) {
                         case TYPE_BYTES:      res = (double)((unsigned char*)data)[idx]; break;
                         case TYPE_BOOL_ARRAY: res = (double)((unsigned char*)data)[idx]; break;
@@ -942,15 +888,15 @@ int vm_step(bool debug_trace) {
                 }
             }
             else if (type == TYPE_MAP) {
-                int count = (int)vm.heap[ptr+2];
-                int data = (int)vm.heap[ptr+3];
+                int count = (int)base[HEAP_OFFSET_COUNT];
+                double data_ptr_val = base[HEAP_OFFSET_DATA];
+                double* data = vm_resolve_ptr(data_ptr_val);
+                int* data_types = vm_resolve_type(data_ptr_val);
+
                 bool found = false;
                 for(int i=0; i<count; i++) {
-                    // Simple search
-                    if(vm.heap[data + i*2] == key) { // Note: String equality needs ptr compare or string compare!
-                        // For string keys (pointer equality is used here for simplicity/performance in interpreter loop)
-                        // Ideally strictly compare strings if key is string.
-                        vm_push(vm.heap[data + i*2 + 1], vm.heap_types[data + i*2 + 1]);
+                    if(data[i*2] == key) {
+                        vm_push(data[i*2 + 1], data_types[i*2 + 1]);
                         found = true;
                         break;
                     }
@@ -964,133 +910,125 @@ int vm_step(bool debug_trace) {
         }
         case OP_ALEN: {
             CHECK_STACK(1);
-            int ptr = (int)vm_pop();
-            // Array, Bytes, Map location for Size is offset 1 (Len or Cap) or specific?
-            // Array: [TYPE, LEN, ...]
-            // Bytes: [TYPE, LEN, ...]
-            // Map:   [TYPE, CAP, COUNT, ...] -> Count is offset 2
-            int type = (int)vm.heap[ptr];
-            if (type == TYPE_MAP) vm_push(vm.heap[ptr+2], T_NUM);
-            else vm_push(vm.heap[ptr+1], T_NUM);
+            double ptr = vm_pop();
+            double* base = vm_resolve_ptr(ptr);
+            int type = (int)base[HEAP_OFFSET_TYPE];
+            if (type == TYPE_MAP) vm_push(base[HEAP_OFFSET_COUNT], T_NUM);
+            else vm_push(base[HEAP_OFFSET_LEN], T_NUM);
             break;
         }
         case OP_SLICE: {
             CHECK_STACK(3);
             double e = vm_pop();
             double s = vm_pop();
-            int ptr = (int)vm_pop();
+            double ptr = vm_pop();
+            double* base = vm_resolve_ptr(ptr);
+            int* types = vm_resolve_type(ptr);
 
-            // FIX 1: Retrieve the specific type of the object being sliced
-            int type = (int)vm.heap[ptr];
-
-            // Get length based on type (Array/Bytes stores len at offset 1)
-            int len = (int)vm.heap[ptr + HEAP_OFFSET_LEN];
+            int type = (int)base[HEAP_OFFSET_TYPE];
+            int len = (int)base[HEAP_OFFSET_LEN];
 
             int start = (int)s;
             int end = (int)e;
-
-            // Handle negative indices
             if (start < 0) start += len;
             if (end < 0) end += len;
-
-            // Clamp bounds
             if (start < 0) start = 0;
-            // Note: Mylo slices appear inclusive based on existing logic (end-start+1)
-            // Logic: if end is beyond length, cap it at last index
             if (end >= len) end = len - 1;
 
             int newlen = (end >= start) ? (end - start + 1) : 0;
+            if (start >= len) newlen = 0;
 
             if (type == TYPE_BYTES) {
-                // FIX 2: Handle Byte Array Slicing
-                // 1. Calculate doubles needed for packed bytes
                 int d_needed = (newlen + 7) / 8;
-                int newptr = heap_alloc(2 + d_needed);
-
-                // 2. Set correct type
-                vm.heap[newptr] = TYPE_BYTES;
-                vm.heap[newptr + 1] = (double)newlen;
-
-                // 3. Perform Byte-wise copy
-                char* src = (char*)&vm.heap[ptr + HEAP_HEADER_ARRAY];
-                char* dst = (char*)&vm.heap[newptr + HEAP_HEADER_ARRAY];
-
+                double newptr = heap_alloc(2 + d_needed);
+                double* newbase = vm_resolve_ptr(newptr);
+                newbase[0] = TYPE_BYTES;
+                newbase[1] = (double)newlen;
+                char* src = (char*)&base[HEAP_HEADER_ARRAY];
+                char* dst = (char*)&newbase[HEAP_HEADER_ARRAY];
                 if (newlen > 0) {
-                    for (int i = 0; i < newlen; i++) {
-                        dst[i] = src[start + i];
-                    }
+                    for (int i = 0; i < newlen; i++) dst[i] = src[start + i];
                 }
-                vm_push((double)newptr, T_OBJ);
+                vm_push(newptr, T_OBJ);
             } else {
-                // FIX 3: Existing Logic for Standard Arrays
-                int newptr = heap_alloc(newlen + 2);
-                vm.heap[newptr] = TYPE_ARRAY;
-                vm.heap[newptr + 1] = (double)newlen;
+                double newptr = heap_alloc(newlen + 2);
+                double* newbase = vm_resolve_ptr(newptr);
+                int* newtypes = vm_resolve_type(newptr);
+                newbase[0] = TYPE_ARRAY;
+                newbase[1] = (double)newlen;
                 for (int i = 0; i < newlen; i++) {
-                    vm.heap[newptr + 2 + i] = vm.heap[ptr + 2 + start + i];
-                    vm.heap_types[newptr + 2 + i] = vm.heap_types[ptr + 2 + start + i];
+                    newbase[2 + i] = base[2 + start + i];
+                    newtypes[2 + i] = types[2 + start + i];
                 }
-                vm_push((double)newptr, T_OBJ);
+                vm_push(newptr, T_OBJ);
             }
             break;
         }
         case OP_MAP: {
             int cap = MAP_INITIAL_CAP;
-            int map = heap_alloc(4);
-            int data = heap_alloc(cap*2);
-            vm.heap[map] = TYPE_MAP;
-            vm.heap[map+1] = (double)cap;
-            vm.heap[map+2] = 0;
-            vm.heap[map+3] = (double)data;
-            vm_push((double)map, T_OBJ);
+            double map = heap_alloc(4);
+            double data = heap_alloc(cap*2);
+            double* base = vm_resolve_ptr(map);
+            base[0] = TYPE_MAP;
+            base[1] = (double)cap;
+            base[2] = 0;
+            base[3] = data;
+            vm_push(map, T_OBJ);
             break;
         }
         case OP_ASET: {
             CHECK_STACK(3);
             double val = vm_pop(); int vt = vm.stack_types[vm.sp+1];
             double key = vm_pop();
-            int ptr = (int)vm.stack[vm.sp]; vm_pop(); // Pop array ptr
-            int type = (int)vm.heap[ptr];
+            double ptr = vm.stack[vm.sp]; vm_pop();
+
+            double* base = vm_resolve_ptr(ptr);
+            int* types = vm_resolve_type(ptr);
+            int type = (int)base[0];
 
             if (type == TYPE_ARRAY) {
                 int idx = (int)key;
-                vm.heap[ptr+2+idx] = val;
-                vm.heap_types[ptr+2+idx] = vt;
+                base[2+idx] = val;
+                types[2+idx] = vt;
             } else if (type == TYPE_BYTES) {
-                unsigned char* b = (unsigned char*)&vm.heap[ptr+HEAP_HEADER_ARRAY];
+                unsigned char* b = (unsigned char*)&base[HEAP_HEADER_ARRAY];
                 b[(int)key] = (unsigned char)val;
             } else if (type == TYPE_MAP) {
-                // Simple Map Insert
-                int cap = (int)vm.heap[ptr+1];
-                int count = (int)vm.heap[ptr+2];
-                int data = (int)vm.heap[ptr+3];
-                // Check exist
+                int cap = (int)base[1];
+                int count = (int)base[2];
+                double data_ptr = base[3];
+                double* data = vm_resolve_ptr(data_ptr);
+                int* data_types = vm_resolve_type(data_ptr);
+
                 bool found = false;
                 for(int i=0; i<count; i++) {
-                    if (vm.heap[data+i*2] == key) {
-                        vm.heap[data+i*2+1] = val;
-                        vm.heap_types[data+i*2+1] = vt;
+                    if (data[i*2] == key) {
+                        data[i*2+1] = val;
+                        data_types[i*2+1] = vt;
                         found = true; break;
                     }
                 }
                 if(!found) {
                     if (count >= cap) {
-                        // Grow (naive)
                         int new_cap = cap * 2;
-                        int new_data = heap_alloc(new_cap*2);
+                        double new_data_ptr = heap_alloc(new_cap*2);
+                        double* new_data = vm_resolve_ptr(new_data_ptr);
+                        int* new_types = vm_resolve_type(new_data_ptr);
+
                         for(int i=0; i<count*2; i++) {
-                            vm.heap[new_data+i] = vm.heap[data+i];
-                            vm.heap_types[new_data+i] = vm.heap_types[data+i];
+                            new_data[i] = data[i];
+                            new_types[i] = data_types[i];
                         }
-                        vm.heap[ptr+1] = (double)new_cap;
-                        vm.heap[ptr+3] = (double)new_data;
+                        base[1] = (double)new_cap;
+                        base[3] = new_data_ptr;
                         data = new_data;
+                        data_types = new_types;
                     }
-                    vm.heap[data + count*2] = key;
-                    vm.heap_types[data + count*2] = T_STR; // Key type assumption
-                    vm.heap[data + count*2 + 1] = val;
-                    vm.heap_types[data + count*2 + 1] = vt;
-                    vm.heap[ptr+2] = (double)(count+1);
+                    data[count*2] = key;
+                    data_types[count*2] = T_STR;
+                    data[count*2+1] = val;
+                    data_types[count*2+1] = vt;
+                    base[2] = (double)(count+1);
                 }
             }
             vm_push(val, vt);
@@ -1102,68 +1040,59 @@ int vm_step(bool debug_trace) {
             const char* s = vm.string_pool[(int)v];
             int len = strlen(s);
             int d_needed = (len+7)/8;
-            int ptr = heap_alloc(2+d_needed);
-            vm.heap[ptr] = TYPE_BYTES;
-            vm.heap[ptr+1] = (double)len;
-            char* b = (char*)&vm.heap[ptr+2];
+            double ptr = heap_alloc(2+d_needed);
+            double* base = vm_resolve_ptr(ptr);
+            base[0] = TYPE_BYTES;
+            base[1] = (double)len;
+            char* b = (char*)&base[2];
             memcpy(b, s, len);
-            vm_push((double)ptr, T_OBJ);
+            vm_push(ptr, T_OBJ);
             break;
         }
         case OP_SLICE_SET: {
             CHECK_STACK(4);
-            // Stack: [Ptr, Start, End, Value]
-
-            double val = vm_pop(); int vt = vm.stack_types[vm.sp + 1];
+            double val = vm_pop();
             double e = vm_pop();
             double s = vm_pop();
-            int ptr = (int)vm_pop(); // Destination Array/Bytes pointer
+            double ptr = vm.stack[vm.sp]; vm_pop(); // Pop Ptr
 
-            int type = (int)vm.heap[ptr];
-            int len = (int)vm.heap[ptr + HEAP_OFFSET_LEN];
+            double* base = vm_resolve_ptr(ptr);
+            int* types = vm_resolve_type(ptr);
+            int type = (int)base[0];
+            int len = (int)base[1];
 
             int start = (int)s;
             int end = (int)e;
-
-            // Normalize Bounds
             if (start < 0) start += len;
             if (end < 0) end += len;
             if (start < 0) start = 0;
             if (end >= len) end = len - 1;
-
             int slice_len = (end >= start) ? (end - start + 1) : 0;
 
             if (type == TYPE_BYTES) {
-                // Runtime Checks
-                if (vt != T_OBJ) RUNTIME_ERROR("Slice assignment requires byte string");
-                int vptr = (int)val;
-                if ((int)vm.heap[vptr] != TYPE_BYTES) RUNTIME_ERROR("Slice assignment requires byte string");
-
-                int vlen = (int)vm.heap[vptr + HEAP_OFFSET_LEN];
-                if (vlen != slice_len) RUNTIME_ERROR("Slice assignment length mismatch");
-
-                // Perform Byte Copy
-                char* dst = (char*)&vm.heap[ptr + HEAP_HEADER_ARRAY];
-                char* src = (char*)&vm.heap[vptr + HEAP_HEADER_ARRAY];
-
-                for(int i = 0; i < slice_len; i++) {
-                    dst[start + i] = src[i];
+                // val should be a Byte String (TYPE_BYTES)
+                double* vbase = vm_resolve_ptr(val);
+                if ((int)vbase[0] == TYPE_BYTES) {
+                    unsigned char* dst = (unsigned char*)&base[HEAP_HEADER_ARRAY];
+                    unsigned char* src = (unsigned char*)&vbase[HEAP_HEADER_ARRAY];
+                    int vlen = (int)vbase[1];
+                    int copy_len = (slice_len < vlen) ? slice_len : vlen;
+                    for(int i=0; i<copy_len; i++) dst[start+i] = src[i];
                 }
             } else if (type == TYPE_ARRAY) {
-                // Array support (optional, but good for consistency)
-                 if (vt != T_OBJ) RUNTIME_ERROR("Slice assignment requires array");
-                 int vptr = (int)val;
-                 // (Additional type checks omitted for brevity)
-                 int vlen = (int)vm.heap[vptr + HEAP_OFFSET_LEN];
-                 if (vlen != slice_len) RUNTIME_ERROR("Slice assignment length mismatch");
-
-                 for(int i = 0; i < slice_len; i++) {
-                     vm.heap[ptr + 2 + start + i] = vm.heap[vptr + 2 + i];
-                     vm.heap_types[ptr + 2 + start + i] = vm.heap_types[vptr + 2 + i];
-                 }
+                // val should be an Array
+                double* vbase = vm_resolve_ptr(val);
+                int* vtypes = vm_resolve_type(val);
+                if ((int)vbase[0] == TYPE_ARRAY) {
+                    int vlen = (int)vbase[1];
+                    int copy_len = (slice_len < vlen) ? slice_len : vlen;
+                    for(int i=0; i<copy_len; i++) {
+                        base[2+start+i] = vbase[2+i];
+                        types[2+start+i] = vtypes[2+i];
+                    }
+                }
             }
-
-            vm_push(val, vt); // Assignment evaluates to the value assigned
+            vm_push(val, T_OBJ); // Assignment returns value
             break;
         }
         case OP_IT_KEY:
@@ -1173,124 +1102,85 @@ int vm_step(bool debug_trace) {
             double idx_val = vm_pop();
             double obj_val = vm_pop();
             int idx = (int)idx_val;
-            int ptr = (int)obj_val;
-            int type = (int)vm.heap[ptr];
+
+            double* base = vm_resolve_ptr(obj_val);
+            int* types = vm_resolve_type(obj_val);
+            int type = (int)base[0];
 
             if (type == TYPE_ARRAY || type == TYPE_BYTES) {
-                int len = (int)vm.heap[ptr + HEAP_OFFSET_LEN];
+                int len = (int)base[1];
                 if (idx < 0 || idx >= len) RUNTIME_ERROR("Iterator OOB");
 
                 if (op == OP_IT_KEY) {
-                    // For arrays, Key is the Index
                     vm_push((double)idx, T_NUM);
                 } else {
-                    // OP_IT_VAL or OP_IT_DEF (Array default is Value)
                     if (type == TYPE_BYTES) {
-                         unsigned char* b = (unsigned char*)&vm.heap[ptr + HEAP_HEADER_ARRAY];
+                         unsigned char* b = (unsigned char*)&base[HEAP_HEADER_ARRAY];
                          vm_push((double)b[idx], T_NUM);
                     } else {
-                         vm_push(vm.heap[ptr + 2 + idx], vm.heap_types[ptr + 2 + idx]);
+                         vm_push(base[2+idx], types[2+idx]);
                     }
                 }
             }
             else if (type == TYPE_MAP) {
-                int count = (int)vm.heap[ptr + HEAP_OFFSET_COUNT];
+                int count = (int)base[HEAP_OFFSET_COUNT];
                 if (idx < 0 || idx >= count) RUNTIME_ERROR("Iterator OOB");
-
-                int data = (int)vm.heap[ptr + HEAP_OFFSET_DATA];
-
-                // Map Memory Layout: [Key, Value, Key, Value...]
-                // Key is at 2*idx, Value is at 2*idx + 1
+                double data_ptr = base[HEAP_OFFSET_DATA];
+                double* data = vm_resolve_ptr(data_ptr);
+                int* data_types = vm_resolve_type(data_ptr);
 
                 if (op == OP_IT_VAL) {
-                    // Explicit Value Request
-                    vm_push(vm.heap[data + idx * 2 + 1], vm.heap_types[data + idx * 2 + 1]);
-                } else if (op == OP_IT_KEY) {
-                    // Explicit Key Request
-                    vm_push(vm.heap[data + idx * 2], vm.heap_types[data + idx * 2]);
+                    vm_push(data[idx*2+1], data_types[idx*2+1]);
                 } else {
-                    // OP_IT_DEF: Default for 'for(x in map)' is Key
-                    vm_push(vm.heap[data + idx * 2], vm.heap_types[data + idx * 2]);
+                    vm_push(data[idx*2], data_types[idx*2]);
                 }
-            }
-            else {
-                RUNTIME_ERROR("Type not iterable");
             }
             break;
         }
         case OP_EMBED: {
-            // Structure in bytecode: [OP_EMBED] [LENGTH] [BYTE 1] [BYTE 2] ...
-
-            // 1. Read Length
             int len = vm.bytecode[vm.ip++];
-
-            // 2. Allocate Heap Object (TYPE_BYTES)
-            // Calculate how many doubles we need to store 'len' bytes
             int d_needed = (len + 7) / 8;
-            int ptr = heap_alloc(d_needed + HEAP_HEADER_ARRAY);
+            double ptr = heap_alloc(d_needed + HEAP_HEADER_ARRAY);
+            double* base = vm_resolve_ptr(ptr);
 
-            vm.heap[ptr] = TYPE_BYTES;
-            vm.heap[ptr + HEAP_OFFSET_LEN] = (double)len;
+            base[0] = TYPE_BYTES;
+            base[1] = (double)len;
 
-            // 3. Read Data Stream from Bytecode
-            unsigned char* dst = (unsigned char*)&vm.heap[ptr + HEAP_HEADER_ARRAY];
-
+            unsigned char* dst = (unsigned char*)&base[HEAP_HEADER_ARRAY];
             for(int i=0; i<len; i++) {
-                // We emitted them as individual ints in the bytecode array
                 int b = vm.bytecode[vm.ip++];
                 dst[i] = (unsigned char)b;
             }
-
-            // 4. Push Result
-            vm_push((double)ptr, T_OBJ);
+            vm_push(ptr, T_OBJ);
             break;
         }
         case OP_MAKE_ARR: {
             int count = vm.bytecode[vm.ip++];
             int type_id = vm.bytecode[vm.ip++];
-
-            // 1. Calculate Size
             int elem_size = get_type_size(type_id);
             int total_bytes = count * elem_size;
             int doubles_needed = (total_bytes + 7) / 8;
 
-            // 2. Alloc
-            int ptr = heap_alloc(doubles_needed + HEAP_HEADER_ARRAY);
-            vm.heap[ptr] = (double)type_id;
-            vm.heap[ptr + HEAP_OFFSET_LEN] = (double)count;
+            double ptr = heap_alloc(doubles_needed + HEAP_HEADER_ARRAY);
+            double* base = vm_resolve_ptr(ptr);
+            base[0] = (double)type_id;
+            base[1] = (double)count;
 
-            // 3. Fill (Pop from stack backwards)
-            // Access raw byte memory of the heap payload
-            char* data_ptr = (char*)&vm.heap[ptr + HEAP_HEADER_ARRAY];
+            char* data_ptr = (char*)&base[HEAP_HEADER_ARRAY];
 
             for(int i = count - 1; i >= 0; i--) {
                 double val = vm.stack[vm.sp];
-                vm.sp--; // Pop manually
-
-                // Pack Value based on type
+                vm.sp--;
                 switch(type_id) {
                     case TYPE_BYTES:
-                    case TYPE_BOOL_ARRAY:
-                        data_ptr[i] = (unsigned char)val;
-                        break;
-                    case TYPE_I16_ARRAY:
-                        ((short*)data_ptr)[i] = (short)val;
-                        break;
-                    case TYPE_I32_ARRAY:
-                        ((int*)data_ptr)[i] = (int)val;
-                        break;
-                    case TYPE_F32_ARRAY:
-                        ((float*)data_ptr)[i] = (float)val;
-                        break;
-                    case TYPE_I64_ARRAY:
-                        ((long long*)data_ptr)[i] = (long long)val;
-                        break;
-                    default:
-                        // Should use OP_ARR for generic lists, but safety fallback:
-                        break;
+                    case TYPE_BOOL_ARRAY: data_ptr[i] = (unsigned char)val; break;
+                    case TYPE_I16_ARRAY: ((short*)data_ptr)[i] = (short)val; break;
+                    case TYPE_I32_ARRAY: ((int*)data_ptr)[i] = (int)val; break;
+                    case TYPE_F32_ARRAY: ((float*)data_ptr)[i] = (float)val; break;
+                    case TYPE_I64_ARRAY: ((long long*)data_ptr)[i] = (long long)val; break;
                 }
             }
-            vm_push((double)ptr, T_OBJ);
+            vm_push(ptr, T_OBJ);
             break;
         }
         case OP_HLT: return -1;

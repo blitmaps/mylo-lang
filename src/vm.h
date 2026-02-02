@@ -58,44 +58,50 @@ typedef enum {
     OP_IT_VAL,
     OP_IT_DEF,
     OP_EMBED,
-    OP_MAKE_ARR // [Count] [TypeID] -> Creates a specific typed array
+    OP_MAKE_ARR,
+    OP_NEW_ARENA,  // New: Create a region
+    OP_DEL_ARENA,  // New: Clear a region
+    OP_SET_CTX     // New: Set current allocation context (Arena ID)
 } OpCode;
 
 extern const char *OP_NAMES[];
 
-// New Struct to hold metadata
 typedef struct {
     char name[64];
     int addr;
 } VMFunction;
 
+// --- Arena Struct ---
 typedef struct {
-    // Change arrays to pointers
-    double* stack;       // Was: double stack[STACK_SIZE];
-    double* globals;     // Was: double globals[MAX_GLOBALS];
-    double* constants;   // Was: double constants[MAX_CONSTANTS];
-    double* heap;        // Was: double heap[MAX_HEAP];
+    double* memory;
+    int* types;
+    int head;
+    int capacity;
+    bool active;
+} MemoryArena;
 
-    int* bytecode;       // Was: int bytecode[MAX_CODE];
-    int* lines;          // Was: int lines[MAX_CODE];
+typedef struct {
+    double* stack;
+    double* globals;
+    double* constants;
 
-    int* stack_types;    // Was: int stack_types[STACK_SIZE];
-    int* global_types;   // Was: int global_types[MAX_GLOBALS];
-    int* heap_types;     // Was: int heap_types[MAX_HEAP];
+    // Arena System
+    MemoryArena arenas[MAX_ARENAS];
+    int current_arena;
 
-    // Note: String pool is 2D. We can malloc it as a flat block or keep it if it's small.
-    // Given MAX_STRINGS=1024, this is only ~1MB, so it can stay or be malloc'd.
-    // For consistency with the fix, let's malloc it too.
+    int* bytecode;
+    int* lines;
+    int* stack_types;
+    int* global_types;
+
     char (*string_pool)[MAX_STRING_LENGTH];
 
-    // ... Keep scalars the same ...
     int code_size;
     int sp;
     int fp;
     int ip;
     int str_count;
     int const_count;
-    int heap_ptr;
 
     char output_char_buffer[OUTPUT_BUFFER_SIZE];
     int output_mem_pos;
@@ -110,12 +116,13 @@ typedef void (*NativeFunc)(VM *);
 
 extern NativeFunc natives[MAX_NATIVES];
 
-// --- API STRUCT (Restored) ---
+// --- API STRUCT ---
 typedef struct {
     void (*push)(double, int);
     double (*pop)();
     int (*make_string)(const char*);
-    int (*heap_alloc)(int);
+    // Updated: Returns double (Packed Pointer)
+    double (*heap_alloc)(int);
 
     // Reference Management Bridge
     double (*store_copy)(void*, size_t, const char*);
@@ -125,7 +132,7 @@ typedef struct {
 
     NativeFunc* natives_array;
     char (*string_pool)[MAX_STRING_LENGTH];
-    double* heap;
+    // Removed: double* heap; (Access via API functions only)
 } MyloAPI;
 
 // --- EXPORTED FUNCTIONS ---
@@ -136,13 +143,20 @@ void vm_push(double val, int type);
 double vm_pop();
 int make_string(const char *s);
 int make_const(double val);
-int heap_alloc(int size);
+
+// Updated: Returns double (Packed Pointer)
+double heap_alloc(int size);
+
 void run_vm_from(int start_ip, bool debug_trace);
 
 // Core Execution
 void run_vm(bool debug_trace);
 int vm_step(bool debug_trace); // Single step execution
 void mylo_reset();
+
+// Pointer Resolution
+double* vm_resolve_ptr(double ptr_val); // Get pointer to data
+int* vm_resolve_type(double ptr_val);   // Get pointer to type data
 
 // Ref counting Prototypes
 double vm_store_copy(void* data, size_t size, const char* type_name);

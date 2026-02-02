@@ -7,7 +7,7 @@
 #define MAX_HEAP 4096
 #define MAX_GLOBALS 2048
 #define MAX_CONSTANTS 1024
-
+#define MAX_ARENAS 64
 // String Limits
 #define MAX_STRINGS 1024
 #define MAX_STRING_LENGTH 1024
@@ -56,4 +56,8 @@
 // VM function table
 #define MAX_VM_FUNCTIONS 1024  // Adjust as needed
 
+// ARENAs
+#define PACK_PTR(arena, offset) ((double)((unsigned long long)(arena) << 32 | (unsigned int)(offset)))
+#define UNPACK_ARENA(ptr) ((int)((unsigned long long)(ptr) >> 32))
+#define UNPACK_OFFSET(ptr) ((int)((unsigned long long)(ptr) & 0xFFFFFFFF))
 #endif

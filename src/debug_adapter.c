@@ -298,7 +298,8 @@ void start_debug_adapter(const char* filename, char* source_content) {
                 char full[8250];
                 sprintf(full, "{\"variables\": %s}", json);
                 send_response(seq, command, full);
-            }if (varRef == 1) { // GLOBALS
+            }
+            if (varRef == 1) { // GLOBALS
                 char json[8192] = "[";
                 for(int i=0; i<global_count; i++) {
                     if (i > 0) strcat(json, ",");
@@ -306,31 +307,28 @@ void start_debug_adapter(const char* filename, char* source_content) {
 
                     int addr = globals[i].addr;
                     double val = vm.globals[addr];
-                    int type = vm.global_types[addr]; // <--- CHECK TYPE
+                    int type = vm.global_types[addr];
 
                     if (type == T_NUM) {
                         snprintf(item, 512, "{\"name\": \"%s\", \"value\": \"%g\", \"variablesReference\": 0}",
                                  globals[i].name, val);
                     }
                     else if (type == T_STR) {
-                        // Look up the string in the pool using the index 'val'
-                        // Escape quotes for JSON safety
                         snprintf(item, 512, "{\"name\": \"%s\", \"value\": \"\\\"%s\\\"\", \"variablesReference\": 0}",
                                  globals[i].name, vm.string_pool[(int)val]);
                     }
                     else if (type == T_OBJ) {
-                         // Check specifically for Bytes or Arrays if you want better detail
-                         int ptr = (int)val;
-                         int objType = (int)vm.heap[ptr]; // HEAP_OFFSET_TYPE is 0
+                         // FIX: Use vm_resolve_ptr instead of direct heap access
+                         double* base = vm_resolve_ptr(val);
+                         int objType = base ? (int)base[HEAP_OFFSET_TYPE] : 0;
 
-                         if (objType == -2) { // TYPE_BYTES
+                         if (base && objType == TYPE_BYTES) {
                              snprintf(item, 512, "{\"name\": \"%s\", \"value\": \"[Bytes]\", \"variablesReference\": 0}", globals[i].name);
                          } else {
                              snprintf(item, 512, "{\"name\": \"%s\", \"value\": \"[Object]\", \"variablesReference\": 0}", globals[i].name);
                          }
                     }
                     else {
-                        // Fallback
                         snprintf(item, 512, "{\"name\": \"%s\", \"value\": \"unknown\", \"variablesReference\": 0}", globals[i].name);
                     }
                     strcat(json, item);
@@ -352,54 +350,6 @@ void start_debug_adapter(const char* filename, char* source_content) {
         else if (strcmp(command, "disconnect") == 0) {
             send_response(seq, command, "{}");
             exit(0);
-        }
-        else if (strcmp(command, "variables") == 0) {
-            char* ref_ptr = strstr(body, "\"variablesReference\":");
-            int varRef = ref_ptr ? atoi(ref_ptr + 21) : 0;
-
-            char json[MAX_PACKET_SIZE] = "[";
-            bool first = true;
-
-            if (varRef == 1) {
-                // ... GLOBALS logic (unchanged) ...
-            }
-            else if (varRef == 2) {
-                // --- LOCALS ---
-                for(int i=0; i<debug_symbol_count; i++) {
-                    DebugSym* sym = &debug_symbols[i];
-
-                    // Check if variable is alive at current IP
-                    if (vm.ip >= sym->start_ip && vm.ip <= sym->end_ip) {
-
-                        // Calculate absolute stack address
-                        // Local Offset is relative to FP
-                        int stack_idx = vm.fp + sym->stack_offset;
-
-                        if (stack_idx <= vm.sp) { // Sanity check
-                            if (!first) strcat(json, ",");
-                            first = false;
-
-                            char item[256];
-                            double val = vm.stack[stack_idx];
-                            int type = vm.stack_types[stack_idx];
-
-                            if (type == T_NUM) {
-                                snprintf(item, 256, "{\"name\": \"%s\", \"value\": \"%g\", \"variablesReference\": 0}", sym->name, val);
-                            } else if (type == T_STR) {
-                                snprintf(item, 256, "{\"name\": \"%s\", \"value\": \"\\\"%s\\\"\", \"variablesReference\": 0}", sym->name, vm.string_pool[(int)val]);
-                            } else {
-                                snprintf(item, 256, "{\"name\": \"%s\", \"value\": \"[Object]\", \"variablesReference\": 0}", sym->name);
-                            }
-                            strcat(json, item);
-                        }
-                    }
-                }
-            }
-
-            strcat(json, "]");
-            char full[8250];
-            sprintf(full, "{\"variables\": %s}", json);
-            send_response(seq, command, full);
         }
         else {
             send_response(seq, command, "{}");

@@ -1354,7 +1354,7 @@ void statement() {
 
                 api.natives_array = natives; // The HOST natives array
                 api.string_pool = vm.string_pool; // The HOST string pool (for reads)
-                api.heap = vm.heap; // The HOST heap
+                //api.heap = vm.heap; // The HOST heap
 
                 // Pass &vm (though mostly unused now due to API), index, and API
                 binder(&vm, std_count + start_ffi_index, &api);

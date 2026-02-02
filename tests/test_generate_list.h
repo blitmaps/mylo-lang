@@ -1159,7 +1159,6 @@ inline void test_generate_list() {
     ADD_TEST("Test Math mix", test_mix);
     ADD_TEST("Test Min-Max Array", test_list_min_max);
     ADD_TEST("Test Strongly Types Arrays", test_strong_types_list);
-
 }
 
 #endif //MYLO_TEST_GENERATE_LIST_H
