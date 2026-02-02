@@ -409,8 +409,11 @@ int main(int argc, char** argv) {
     // --- INTERPRETER SAFETY CHECK ---
     // If we have C blocks that were NOT bound via native modules, we must stop.
     if ((ffi_count - bound_ffi_count) > 0) {
+        setTerminalColor(MyloFgMagenta, MyloBgColorDefault);
         printf("Error: This program contains Native C blocks and no shared objects are found, so it cannot be interpreted.\n");
+        setTerminalColor(MyloFgCyan, MyloBgColorDefault);
         printf("Please compile it using: mylo --build %s\n", fn);
+        setTerminalColor(MyloFgDefault, MyloBgColorDefault);
         free(content);
         vm_cleanup();
         return 1;
