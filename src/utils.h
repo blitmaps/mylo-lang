@@ -1,17 +1,14 @@
-//
-// Created by brad on 19/01/2026.
-//
-
 #ifndef MYLO_UTILS_H
 #define MYLO_UTILS_H
+
 // This turns on Terminal Colours
 #define ENABLE_TERMINAL_COLOURS
+#include <stdio.h>
 // Read file to char array
 char *read_file(const char *fn);
 
 // ANSI Color Codes
 enum MyloColor {
-
   MyloFgRed = 31,
   MyloFgGreen = 32,
   MyloFgYellow = 33,
@@ -30,10 +27,12 @@ enum MyloColor {
   MyloBgColorDefault = 49
 };
 
-// Function to set colors
+// Original (Defaults to stdout)
 void setTerminalColor(enum MyloColor fg, enum MyloColor bg);
-
-// Function to reset to default
 void resetTerminal();
+
+// New (Allows stderr)
+void fsetTerminalColor(FILE* f, enum MyloColor fg, enum MyloColor bg);
+void fresetTerminal(FILE* f);
 
 #endif

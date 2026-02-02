@@ -43,11 +43,34 @@ typedef enum {
     TK_CLEAR,
 } MyloTokenType;
 
+// Token Names for pretty printing
+const char* TOKEN_NAMES[] = {
+    "fn", "var", "if", "for", "ret", "print", "in", "struct", "else",
+    "mod", "import", "forever",
+    "Identifier", "Number", "String", "Range (...)",
+    "(", ")", "{", "}", "[", "]",
+    "+", "-", "<", ">", "<=", ">=", "==", "!=",
+    "=", "?",
+    "End of File", "Format String", "Byte String",
+    ":", ",", ".", "::", "->",
+    "break", "continue", "enum", "module_path",
+    "true", "false", "*", "/", "%",
+    "embed", "Type Definition", "region", "clear"
+};
+
+const char* get_token_name(MyloTokenType t) {
+    if (t < 0 || t > TK_CLEAR) return "Unknown";
+    return TOKEN_NAMES[t];
+}
+
 typedef struct {
     MyloTokenType type;
     char text[MAX_IDENTIFIER];
     double val_float;
     int line;
+    // Context tracking
+    char* start;
+    int length;
 } Token;
 
 typedef struct {
@@ -68,6 +91,7 @@ int ffi_count = 0;
 int bound_ffi_count = 0;
 
 static char *src;
+static char *current_file_start = NULL; // Start of the current file buffer
 static Token curr;
 static bool inside_function = false;
 static char current_namespace[MAX_IDENTIFIER] = "";
@@ -122,7 +146,90 @@ void parse_struct_literal(int struct_idx);
 void parse_map_literal();
 
 // --- Error Handling ---
+
+void print_line_slice(char* start, char* end) {
+    while (start < end) {
+        fputc(*start, stderr);
+        start++;
+    }
+    fputc('\n', stderr);
+}
+
+void print_error_context() {
+    if (!current_file_start || !curr.start) return;
+
+    // 1. Find boundaries of the CURRENT line
+    char* line_start = curr.start;
+    while (line_start > current_file_start && *(line_start - 1) != '\n') {
+        line_start--;
+    }
+
+    char* line_end = curr.start;
+    while (*line_end && *line_end != '\n') {
+        line_end++;
+    }
+
+    // 2. Print PREVIOUS Line (if it exists) - White
+    if (line_start > current_file_start) {
+        char* prev_line_end = line_start - 1;
+        // Handle Windows \r\n
+        if (prev_line_end > current_file_start && *prev_line_end == '\r') prev_line_end--;
+
+        char* prev_line_start = prev_line_end;
+        while (prev_line_start > current_file_start && *(prev_line_start - 1) != '\n') {
+            prev_line_start--;
+        }
+
+        if (prev_line_end >= prev_line_start) {
+            fsetTerminalColor(stderr, MyloFgWhite, MyloBgColorDefault); // Use stderr
+            fprintf(stderr, "    ");
+            print_line_slice(prev_line_start, prev_line_end);
+        }
+    }
+
+    // 3. Print CURRENT Line - Blue
+    fsetTerminalColor(stderr, MyloFgBlue, MyloBgColorDefault); // Use stderr
+    fprintf(stderr, "    ");
+    print_line_slice(line_start, line_end);
+
+    // 4. Print UNDERLINE - Red Carets (^)
+    fprintf(stderr, "    ");
+    int offset = (int)(curr.start - line_start);
+
+    // Print spaces up to the error (handling tabs)
+    for(int i = 0; i < offset; i++) {
+        char c = line_start[i];
+        if (c == '\t') fputc('\t', stderr);
+        else fputc(' ', stderr);
+    }
+
+    fsetTerminalColor(stderr, MyloFgRed, MyloBgColorDefault); // Use stderr
+    int len = curr.length;
+    if (len <= 0) len = 1;
+    for(int i = 0; i < len; i++) fputc('^', stderr);
+    fprintf(stderr, "\n");
+
+    // 5. Print NEXT Line (if it exists) - White
+    if (*line_end) {
+        char* next_line_start = line_end + 1; // Skip the \n
+        if (*next_line_start) {
+            char* next_line_end = next_line_start;
+            while (*next_line_end && *next_line_end != '\n') next_line_end++;
+
+            fsetTerminalColor(stderr, MyloFgWhite, MyloBgColorDefault); // Use stderr
+            fprintf(stderr, "    ");
+            print_line_slice(next_line_start, next_line_end);
+        }
+    }
+
+    fresetTerminal(stderr);
+}
+
 void error(const char *fmt, ...) {
+    fprintf(stderr, "\n"); // Spacing (stderr)
+    print_error_context();
+    fprintf(stderr, "\n"); // Spacing (stderr)
+
     char buffer[1024];
     va_list args;
     va_start(args, fmt);
@@ -136,7 +243,10 @@ void error(const char *fmt, ...) {
         exit(1);
     }
 
+    fsetTerminalColor(stderr, MyloFgRed, MyloBgColorDefault); // Use stderr
     fprintf(stderr, "%s\n", buffer);
+    fresetTerminal(stderr);
+
     if (MyloConfig.repl_jmp_buf) {
         longjmp(*(jmp_buf *) MyloConfig.repl_jmp_buf, 1);
     }
@@ -255,6 +365,8 @@ void next_token() {
     }
 
     curr.line = line;
+    curr.start = src;
+
     if (*src == 'b' && *(src + 1) == '"') {
         src += 2;
         int idx = 0;
@@ -275,6 +387,7 @@ void next_token() {
         curr.text[idx] = '\0';
         if (*src == '"') src++;
         curr.type = TK_BSTR;
+        curr.length = (int)(src - curr.start);
         return;
     }
     if (*src == 'f' && *(src + 1) == '"') {
@@ -294,10 +407,15 @@ void next_token() {
         curr.text[len] = '\0';
         if (*src == '"') src++;
         curr.type = TK_FSTR;
+        curr.length = (int)(src - curr.start);
         return;
     }
 
-    if (*src == 0) { curr.type = TK_EOF; return; }
+    if (*src == 0) {
+        curr.type = TK_EOF;
+        curr.length = 0;
+        return;
+    }
 
     if (isdigit((unsigned char)*src) || (*src == '.' && isdigit((unsigned char)*(src+1)))) {
         curr.type = TK_NUM;
@@ -309,6 +427,7 @@ void next_token() {
         strncpy(curr.text, src, len);
         curr.text[len] = '\0';
         src = end;
+        curr.length = (int)(src - curr.start);
         return;
     }
 
@@ -348,6 +467,7 @@ void next_token() {
         else if (strcmp(curr.text, "byte") == 0) curr.type = TK_TYPE_DEF;
         else if (strcmp(curr.text, "bool") == 0) curr.type = TK_TYPE_DEF;
         else curr.type = TK_ID;
+        curr.length = (int)(src - curr.start);
         return;
     }
     if (*src == '"') {
@@ -363,11 +483,12 @@ void next_token() {
         curr.text[len] = '\0';
         if (*src == '"') src++;
         curr.type = TK_STR;
+        curr.length = (int)(src - curr.start);
         return;
     }
-    if (strncmp(src, "...", 3) == 0) { src += 3; curr.type = TK_RANGE; return; }
-    if (strncmp(src, "::", 2) == 0) { src += 2; curr.type = TK_SCOPE; return; }
-    if (strncmp(src, "->", 2) == 0) { src += 2; curr.type = TK_ARROW; return; }
+    if (strncmp(src, "...", 3) == 0) { src += 3; curr.type = TK_RANGE; curr.length = 3; return; }
+    if (strncmp(src, "::", 2) == 0) { src += 2; curr.type = TK_SCOPE; curr.length = 2; return; }
+    if (strncmp(src, "->", 2) == 0) { src += 2; curr.type = TK_ARROW; curr.length = 2; return; }
 
     switch (*src++) {
         case '(': curr.type = TK_LPAREN; break;
@@ -391,6 +512,7 @@ void next_token() {
         case '=': if (*src == '=') { src++; curr.type = TK_EQ; } else curr.type = TK_EQ_ASSIGN; break;
         default: error("Unknown char '%c'", *(src - 1));
     }
+    curr.length = (int)(src - curr.start);
 }
 
 int get_type_id_from_token(const char *txt) {
@@ -405,7 +527,7 @@ int get_type_id_from_token(const char *txt) {
 
 void match(MyloTokenType t) {
     if (curr.type == t) next_token();
-    else error("Expected token type %d, got %d ('%s')", t, curr.type, curr.text);
+    else error("Expected '%s', got '%s'", get_token_name(t), get_token_name(curr.type));
 }
 
 void expression();
@@ -561,6 +683,7 @@ void factor() {
     } else if (curr.type == TK_BSTR) {
         int id = make_string(curr.text); emit(OP_PSH_STR); emit(id); emit(OP_MK_BYTES); match(TK_BSTR);
     } else if (curr.type == TK_ID) {
+        Token start_token = curr; // Save token for error reporting
         char name[MAX_IDENTIFIER]; parse_namespaced_id(name);
         int enum_val = find_enum_val(name);
         if (enum_val != -1) { int idx = make_const((double) enum_val); emit(OP_PSH_NUM); emit(idx); return; }
@@ -574,6 +697,9 @@ void factor() {
             if (std_idx != -1) { if (std_library[std_idx].arg_count != arg_count) error("StdLib function '%s' expects %d args", name, std_library[std_idx].arg_count); emit(OP_NATIVE); emit(std_idx); return; }
             char m[MAX_IDENTIFIER * 2]; get_mangled_name(m, name); faddr = find_func(m);
             if (faddr != -1) { emit(OP_CALL); emit(faddr); emit(arg_count); return; }
+
+            // Error: Restore token to point to function name
+            curr = start_token;
             error("Undefined function '%s'", name);
         } else {
             int loc = find_local(name); int type_id = -1; bool is_array = false;
@@ -971,6 +1097,7 @@ void statement() {
         if (!inside_function) { emit(OP_SET); emit(global_count - 1); }
         if (specific_region) { emit(OP_PSH_NUM); emit(make_const(0.0)); emit(OP_SET_CTX); }
     } else if (curr.type == TK_FOR) { for_statement(); } else if (curr.type == TK_ID) {
+        Token start_token = curr; // <--- SAVE HERE FOR ERROR REPORTING
         char name[MAX_IDENTIFIER]; parse_namespaced_id(name);
         if (curr.type == TK_EQ_ASSIGN) {
             match(TK_EQ_ASSIGN); expression();
@@ -992,6 +1119,9 @@ void statement() {
             if (std_idx != -1) { if (std_library[std_idx].arg_count != arg_count) error("StdLib function '%s' expects %d args", name, std_library[std_idx].arg_count); emit(OP_NATIVE); emit(std_idx); emit(OP_POP); return; }
             char m[MAX_IDENTIFIER * 2]; get_mangled_name(m, name); faddr = find_func(m);
             if (faddr != -1) { emit(OP_CALL); emit(faddr); emit(arg_count); emit(OP_POP); return; }
+
+            // Error: Restore token to point to function name
+            curr = start_token;
             error("Undefined function '%s'", name);
         } else if (curr.type == TK_DOT || curr.type == TK_LBRACKET) {
             int loc = find_local(name); int type_id = -1; bool is_array = false;
@@ -1075,14 +1205,28 @@ void function() {
 }
 
 void parse_internal(char *source, bool is_import) {
-    char *os = src; Token oc = curr; int saved_line = line;
-    if (is_import) line = 1; int start_debug_idx = debug_symbol_count;
-    src = source; next_token();
+    char *os = src;
+    Token oc = curr;
+    int saved_line = line;
+    char *ofs = current_file_start; // Save previous file context
+
+    if (is_import) line = 1;
+    int start_debug_idx = debug_symbol_count;
+
+    current_file_start = source; // Set new file context
+    src = source;
+    next_token();
+
     while (curr.type != TK_EOF) { if (curr.type == TK_FN) function(); else statement(); }
     if (!is_import) emit(OP_HLT);
+
     int end_ip = vm.code_size;
     for (int i = start_debug_idx; i < debug_symbol_count; i++) { if (debug_symbols[i].end_ip == -1) debug_symbols[i].end_ip = end_ip; }
-    src = os; curr = oc; line = saved_line;
+
+    src = os;
+    curr = oc;
+    line = saved_line;
+    current_file_start = ofs; // Restore
 }
 
 void parse(char *source) { parse_internal(source, false); }
@@ -1194,8 +1338,6 @@ void generate_binding_c_source(const char *output_filename) {
         else if (strlen(ret_type) > 0) {
             int st_idx = -1;
             for (int s = 0; s < struct_count; s++) if (strcmp(struct_defs[s].name, ret_type) == 0) st_idx = s;
-
-            // --- FIX START: Fallback included here too ---
             if (st_idx != -1) {
                 fprintf(fp, "    double ptr = heap_alloc(%d + HEAP_HEADER_STRUCT);\n", struct_defs[st_idx].field_count);
                 fprintf(fp, "    double* base = vm_resolve_ptr(ptr);\n");
@@ -1206,7 +1348,6 @@ void generate_binding_c_source(const char *output_filename) {
                 fprintf(fp, "    // Warning: Struct '%s' not found during binding gen. Pushing 0.\n", ret_type);
                 fprintf(fp, "    vm_push(0.0, T_OBJ);\n");
             }
-            // --- FIX END ---
         } else fprintf(fp, "    vm_push(res.value, res.type);\n");
         fprintf(fp, "}\n");
     }
@@ -1216,8 +1357,8 @@ void generate_binding_c_source(const char *output_filename) {
     fprintf(fp, "    host_vm_store_copy = api->store_copy;\n    host_vm_store_ptr = api->store_ptr;\n    host_vm_get_ref = api->get_ref;\n    host_vm_free_ref = api->free_ref;\n");
     fprintf(fp, "    host_natives_array = api->natives_array;\n");
     for (int i = 0; i < ffi_count; i++) fprintf(fp, "    host_natives_array[start_index + %d] = __wrapper_%d;\n", i, i);
-    fprintf(fp, "}\n");
-    fclose(fp);
+
+    // Binding message
     printf("\n");
     setTerminalColor(MyloFgBlue, MyloBgColorDefault);
     printf("----------------------------------------------------------------------------------------\n");
@@ -1227,7 +1368,25 @@ void generate_binding_c_source(const char *output_filename) {
     printf(" %s\n", output_filename);
     setTerminalColor(MyloFgBlue, MyloBgColorDefault);
     printf("----------------------------------------------------------------------------------------\n\n");
-    // ... rest of print messages ...
+    setTerminalColor(MyloFgDefault, MyloBgColorDefault);
+    setTerminalColor(MyloFgWhite, MyloBgColorDefault);
+    printf("  To build %s into an shared object you need:\n\n", output_filename);
+    setTerminalColor(MyloFgYellow, MyloBgColorDefault); printf("    + "); setTerminalColor(MyloFgDefault, MyloBgColorDefault);
+    printf("The Mylo VM header (vm.h), located in 'mylo-lang/src'\n");
+    setTerminalColor(MyloFgYellow, MyloBgColorDefault); printf("    + "); setTerminalColor(MyloFgDefault, MyloBgColorDefault);
+    printf("The Mylo Standard Library header (mylolib.h), located in 'mylo-lang/src'\n");
+    setTerminalColor(MyloFgYellow, MyloBgColorDefault); printf("    + "); setTerminalColor(MyloFgDefault, MyloBgColorDefault);
+    printf("A 'C' Compiler (GCC, MSVC, Clang, Zig etc.), referred to as ('cc' below.)\n");
+    setTerminalColor(MyloFgYellow, MyloBgColorDefault); printf("    + "); setTerminalColor(MyloFgDefault, MyloBgColorDefault);
+    printf("The Shared Object (.so) file to have the same name as your .mylo wrapper `libname.so`\n");
+    setTerminalColor(MyloFgYellow, MyloBgColorDefault); printf("    + "); setTerminalColor(MyloFgDefault, MyloBgColorDefault);
+    printf("Position independent code, so the .so can be loaded at runtime by the interpreter \n\n");
+    setTerminalColor(MyloFgCyan, MyloBgColorDefault); printf("  ! "); setTerminalColor(MyloFgDefault, MyloBgColorDefault);
+    printf("To build into a single executable instead, use --build on your main mylo file \n");
+    setTerminalColor(MyloFgBlue, MyloBgColorDefault);
+    printf("----------------------------------------------------------------------------------------\n");
+    setTerminalColor(MyloFgYellow, MyloBgColorDefault); printf("  Example Command:\n\n"); setTerminalColor(MyloFgWhite, MyloBgColorDefault);
+    printf("     cc -shared -fPIC %s -Isrc/ -o libname.so\n", output_filename);
     setTerminalColor(MyloFgDefault, MyloBgColorDefault);
 
 }
@@ -1238,25 +1397,17 @@ void compile_to_c_source(const char *output_filename) {
 
     fprintf(fp, "// Generated by Mylo Compiler\n");
     fprintf(fp, "#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n#include <math.h>\n");
-
     fprintf(fp, "\n// --- USER C IMPORTS ---\n");
-    for (int i = 0; i < c_header_count; i++) {
-        if (c_headers[i][0] == '<') fprintf(fp, "#include %s\n", c_headers[i]);
-        else fprintf(fp, "#include \"%s\"\n", c_headers[i]);
-    }
+    for (int i = 0; i < c_header_count; i++) { if (c_headers[i][0] == '<') fprintf(fp, "#include %s\n", c_headers[i]); else fprintf(fp, "#include \"%s\"\n", c_headers[i]); }
     fprintf(fp, "// ----------------------\n\n");
-
     fprintf(fp, "#include \"vm.h\"\n#include \"mylolib.h\"\n\n");
 
     fprintf(fp, "// --- GENERATED C STRUCTS ---\n");
     for (int i = 0; i < struct_count; i++) {
-        fprintf(fp, "typedef struct { ");
-        for (int j = 0; j < struct_defs[i].field_count; j++) fprintf(fp, "double %s; ", struct_defs[i].fields[j]);
-        fprintf(fp, "} c_%s;\n", struct_defs[i].name);
+        fprintf(fp, "typedef struct { "); for (int j = 0; j < struct_defs[i].field_count; j++) fprintf(fp, "double %s; ", struct_defs[i].fields[j]); fprintf(fp, "} c_%s;\n", struct_defs[i].name);
     }
     fprintf(fp, "\n");
 
-    // --- USER C BLOCKS ---
     for (int i = 0; i < ffi_count; i++) {
         char *ret_type = ffi_blocks[i].return_type;
         if (strcmp(ret_type, "num") == 0) fprintf(fp, "double");
@@ -1267,8 +1418,7 @@ void compile_to_c_source(const char *output_filename) {
         else if (strcmp(ret_type, "f32") == 0) fprintf(fp, "float");
         else if (strcmp(ret_type, "i16") == 0) fprintf(fp, "short");
         else if (strcmp(ret_type, "bool") == 0 || strcmp(ret_type, "byte") == 0) fprintf(fp, "unsigned char");
-        else if (strlen(ret_type) > 0) fprintf(fp, "c_%s", ret_type);
-        else fprintf(fp, "MyloReturn");
+        else if (strlen(ret_type) > 0) fprintf(fp, "c_%s", ret_type); else fprintf(fp, "MyloReturn");
 
         fprintf(fp, " __mylo_user_%d(", i);
         for (int a = 0; a < ffi_blocks[i].arg_count; a++) {
@@ -1290,11 +1440,9 @@ void compile_to_c_source(const char *output_filename) {
 
     fprintf(fp, "\n// --- NATIVE WRAPPERS ---\n");
     int std_count = 0; while (std_library[std_count].name != NULL) std_count++;
-
     for (int i = 0; i < ffi_count; i++) {
         fprintf(fp, "void __wrapper_%d(VM* vm) {\n", i);
         for (int a = ffi_blocks[i].arg_count - 1; a >= 0; a--) fprintf(fp, "    double _raw_%s = vm_pop();\n", ffi_blocks[i].args[a].name);
-
         char *ret_type = ffi_blocks[i].return_type;
         if (strcmp(ret_type, "num") == 0) fprintf(fp, "    double res = __mylo_user_%d(", i);
         else if (strcmp(ret_type, "void") == 0) fprintf(fp, "    __mylo_user_%d(", i);
@@ -1307,7 +1455,6 @@ void compile_to_c_source(const char *output_filename) {
         else if (strlen(ret_type) > 0) fprintf(fp, "    c_%s val = __mylo_user_%d(", ret_type, i);
         else fprintf(fp, "    MyloReturn res = __mylo_user_%d(", i);
 
-        // Arguments
         for (int a = 0; a < ffi_blocks[i].arg_count; a++) {
             char *type = ffi_blocks[i].args[a].type;
             if (strcmp(type, "str") == 0 || strcmp(type, "string") == 0) fprintf(fp, "vm->string_pool[(int)_raw_%s]", ffi_blocks[i].args[a].name);
@@ -1316,7 +1463,7 @@ void compile_to_c_source(const char *output_filename) {
             else if (strcmp(type, "i64") == 0) fprintf(fp, "(long long)_raw_%s", ffi_blocks[i].args[a].name);
             else if (strcmp(type, "f32") == 0) fprintf(fp, "(float)_raw_%s", ffi_blocks[i].args[a].name);
             else if (strcmp(type, "i16") == 0) fprintf(fp, "(short)_raw_%s", ffi_blocks[i].args[a].name);
-            else if (strcmp(type, "byte") == 0 || strcmp(type, "bool") == 0) fprintf(fp, "(unsigned char)_raw_%s", ffi_blocks[i].args[a].name);
+            else if (strcmp(type, "bool") == 0 || strcmp(type, "byte") == 0) fprintf(fp, "(unsigned char)_raw_%s", ffi_blocks[i].args[a].name);
             else if (strcmp(type, "bytes") == 0) fprintf(fp, "(unsigned char*)(vm_resolve_ptr(_raw_%s) + HEAP_HEADER_ARRAY)", ffi_blocks[i].args[a].name);
             else if (strstr(type, "[]")) fprintf(fp, "(void*)(vm_resolve_ptr(_raw_%s) + HEAP_HEADER_ARRAY)", ffi_blocks[i].args[a].name);
             else fprintf(fp, "(c_%s*)(vm_resolve_ptr(_raw_%s) + HEAP_HEADER_STRUCT)", type, ffi_blocks[i].args[a].name);
@@ -1324,7 +1471,6 @@ void compile_to_c_source(const char *output_filename) {
         }
         fprintf(fp, ");\n");
 
-        // Return Values
         if (strcmp(ret_type, "num") == 0) fprintf(fp, "    vm_push(res, T_NUM);\n");
         else if (strcmp(ret_type, "void") == 0) fprintf(fp, "    vm_push(0.0, T_NUM);\n");
         else if (strcmp(ret_type, "string") == 0 || strcmp(ret_type, "str") == 0) fprintf(fp, "    int id = make_string(s);\n    vm_push((double)id, T_STR);\n");
@@ -1336,23 +1482,17 @@ void compile_to_c_source(const char *output_filename) {
         else if (strlen(ret_type) > 0) {
             int st_idx = -1;
             for (int s = 0; s < struct_count; s++) if (strcmp(struct_defs[s].name, ret_type) == 0) st_idx = s;
-
-            // --- FIX START: Add fallback else block ---
             if (st_idx != -1) {
                 fprintf(fp, "    double ptr = heap_alloc(%d + HEAP_HEADER_STRUCT);\n", struct_defs[st_idx].field_count);
                 fprintf(fp, "    double* base = vm_resolve_ptr(ptr);\n");
                 fprintf(fp, "    base[HEAP_OFFSET_TYPE] = %d.0;\n", st_idx);
-                for (int f = 0; f < struct_defs[st_idx].field_count; f++)
-                    fprintf(fp, "    base[HEAP_HEADER_STRUCT + %d] = val.%s;\n", f, struct_defs[st_idx].fields[f]);
+                for (int f = 0; f < struct_defs[st_idx].field_count; f++) fprintf(fp, "    base[HEAP_HEADER_STRUCT + %d] = val.%s;\n", f, struct_defs[st_idx].fields[f]);
                 fprintf(fp, "    vm_push(ptr, T_OBJ);\n");
             } else {
-                // If struct not found (e.g. name mismatch), push NULL to keep stack balanced
                 fprintf(fp, "    // Warning: Struct '%s' not found during C-gen. Pushing 0.\n", ret_type);
                 fprintf(fp, "    vm_push(0.0, T_OBJ);\n");
             }
-            // --- FIX END ---
-        }
-        else fprintf(fp, "    vm_push(res.value, res.type);\n");
+        } else fprintf(fp, "    vm_push(res.value, res.type);\n");
         fprintf(fp, "}\n");
     }
 
@@ -1390,6 +1530,7 @@ void compile_to_c_source(const char *output_filename) {
     fprintf(fp, "    run_vm(false);\n    vm_cleanup();\n    return 0;\n}\n");
     fclose(fp);
 
+    printf("\n");
     setTerminalColor(MyloFgBlue, MyloBgColorDefault);
     printf("----------------------------------------------------------------------------------------\n");
     setTerminalColor(MyloFgCyan, MyloBgColorDefault);
@@ -1429,7 +1570,6 @@ void compile_to_c_source(const char *output_filename) {
 
 }
 
-
 void compile_repl(char *source, int *out_start_ip) {
     src = source; next_token(); *out_start_ip = vm.code_size;
     if (curr.type == TK_EOF) return;
@@ -1448,5 +1588,7 @@ void mylo_reset() {
     vm_init();
     global_count = 0; local_count = 0; func_count = 0; struct_count = 0; ffi_count = 0; bound_ffi_count = 0;
     inside_function = false; current_namespace[0] = '\0'; enum_entry_count = 0; search_path_count = 0; c_header_count = 0;
+    // Fix: Reset Line Count
+    line = 1;
     int i = 0; while (std_library[i].name != NULL) { natives[i] = std_library[i].func; i++; }
 }
