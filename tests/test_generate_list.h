@@ -1086,6 +1086,26 @@ inline TestOutput test_strong_types_list() {
 }
 
 
+inline TestOutput test_region() {
+    std::string src = """"
+    "region foo\n"
+    "var foo::x = 2\n"
+    "print(foo::x)\n";
+    std::string expected = """"
+        "2\n";
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_region_same_name() {
+    std::string src = """"
+    "region foo\n"
+    "var foo::x = 2\n"
+    "var x = 88"
+    "print(x)\n";
+    std::string expected = """"
+        "88\n";
+    return run_source_test(src, expected);
+}
 
 
 inline void test_generate_list() {
@@ -1159,6 +1179,10 @@ inline void test_generate_list() {
     ADD_TEST("Test Math mix", test_mix);
     ADD_TEST("Test Min-Max Array", test_list_min_max);
     ADD_TEST("Test Strongly Types Arrays", test_strong_types_list);
+    ADD_TEST("Test Region", test_region);
+    ADD_TEST("Test Region Same Name", test_region_same_name);
+
+
 }
 
 #endif //MYLO_TEST_GENERATE_LIST_H

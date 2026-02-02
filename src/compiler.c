@@ -1058,7 +1058,15 @@ void statement() {
         bool specific_region = false; char region_var_name[MAX_IDENTIFIER];
         if (curr.type == TK_SCOPE) {
             match(TK_SCOPE); strcpy(region_var_name, name); specific_region = true;
-            strcpy(name, curr.text); match(TK_ID);
+
+            // FIX: Capture the member name separately and mangle it
+            char member_name[MAX_IDENTIFIER];
+            strcpy(member_name, curr.text);
+            match(TK_ID);
+
+            // Construct 'Region_Member' to match what parse_namespaced_id() expects
+            sprintf(name, "%s_%s", region_var_name, member_name);
+
             int reg_loc = find_local(region_var_name);
             if (reg_loc != -1) { emit(OP_LVAR); emit(locals[reg_loc].offset); }
             else { int reg_glob = find_global(region_var_name); if (reg_glob != -1) { emit(OP_GET); emit(globals[reg_glob].addr); } else error("Undefined region"); }
@@ -1097,7 +1105,7 @@ void statement() {
         if (!inside_function) { emit(OP_SET); emit(global_count - 1); }
         if (specific_region) { emit(OP_PSH_NUM); emit(make_const(0.0)); emit(OP_SET_CTX); }
     } else if (curr.type == TK_FOR) { for_statement(); } else if (curr.type == TK_ID) {
-        Token start_token = curr; // <--- SAVE HERE FOR ERROR REPORTING
+        Token start_token = curr;
         char name[MAX_IDENTIFIER]; parse_namespaced_id(name);
         if (curr.type == TK_EQ_ASSIGN) {
             match(TK_EQ_ASSIGN); expression();
@@ -1119,10 +1127,7 @@ void statement() {
             if (std_idx != -1) { if (std_library[std_idx].arg_count != arg_count) error("StdLib function '%s' expects %d args", name, std_library[std_idx].arg_count); emit(OP_NATIVE); emit(std_idx); emit(OP_POP); return; }
             char m[MAX_IDENTIFIER * 2]; get_mangled_name(m, name); faddr = find_func(m);
             if (faddr != -1) { emit(OP_CALL); emit(faddr); emit(arg_count); emit(OP_POP); return; }
-
-            // Error: Restore token to point to function name
-            curr = start_token;
-            error("Undefined function '%s'", name);
+            curr = start_token; error("Undefined function '%s'", name);
         } else if (curr.type == TK_DOT || curr.type == TK_LBRACKET) {
             int loc = find_local(name); int type_id = -1; bool is_array = false;
             if (loc != -1) { emit(OP_LVAR); emit(locals[loc].offset); type_id = locals[loc].type_id; is_array = locals[loc].is_array; }
@@ -1181,7 +1186,6 @@ void statement() {
         match(TK_RET); if (curr.type == TK_RBRACE) { emit(OP_PSH_NUM); emit(make_const(0.0)); } else expression(); emit(OP_RET);
     } else if (curr.type != TK_EOF) next_token();
 }
-
 void function() {
     match(TK_FN);
     if (curr.type == TK_ID && strcmp(curr.text, "C") == 0) error("'C' is reserved");
