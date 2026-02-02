@@ -141,11 +141,21 @@ void vm_free_ref(int id) {
 
 void init_arena(int id) {
     if (id < 0 || id >= MAX_ARENAS) return;
-    if (vm.arenas[id].memory != NULL) return; // Already init
 
-    vm.arenas[id].capacity = MAX_HEAP; // Default size
-    vm.arenas[id].memory = (double*)malloc(MAX_HEAP * sizeof(double));
-    vm.arenas[id].types = (int*)malloc(MAX_HEAP * sizeof(int));
+    // If it was already active, we shouldn't be here, but just in case
+    // Note: 'generation' persists even when active=false.
+    // We increment it on allocation to invalidate old pointers.
+
+    // Handle wrap-around for 15-bit generation (0-32767)
+    vm.arenas[id].generation = (vm.arenas[id].generation + 1) & 0x7FFF;
+    if (vm.arenas[id].generation == 0) vm.arenas[id].generation = 1; // Skip 0 if desired
+
+    if (vm.arenas[id].memory == NULL) {
+        vm.arenas[id].capacity = MAX_HEAP;
+        vm.arenas[id].memory = (double*)malloc(MAX_HEAP * sizeof(double));
+        vm.arenas[id].types = (int*)malloc(MAX_HEAP * sizeof(int));
+    }
+
     vm.arenas[id].head = 0;
     vm.arenas[id].active = true;
 
@@ -199,6 +209,8 @@ void vm_cleanup() {
     vm.sp = -1;
     vm.ip = 0;
     vm.str_count = 0;
+    if (vm.global_symbols) { free(vm.global_symbols); vm.global_symbols = NULL; }
+    if (vm.local_symbols) { free(vm.local_symbols); vm.local_symbols = NULL; }
 }
 
 void vm_init() {
@@ -233,6 +245,10 @@ void vm_init() {
     vm.function_count = 0;
     vm.output_mem_pos = 0;
     vm.output_char_buffer[0] = '\0';
+    vm.global_symbols = NULL;
+    vm.global_symbol_count = 0;
+    vm.local_symbols = NULL;
+    vm.local_symbol_count = 0;
     memset(natives, 0, sizeof(natives));
 }
 
@@ -241,11 +257,27 @@ void vm_init() {
 double* vm_resolve_ptr(double ptr_val) {
     int id = UNPACK_ARENA(ptr_val);
     int offset = UNPACK_OFFSET(ptr_val);
+    int gen = UNPACK_GEN(ptr_val); // Get generation from pointer
 
-    if (id < 0 || id >= MAX_ARENAS || !vm.arenas[id].active) {
-        RUNTIME_ERROR("Access violation: Region %d is not active or freed", id);
+    // 1. Check ID bounds
+    if (id < 0 || id >= MAX_ARENAS) {
+        RUNTIME_ERROR("Access violation: Invalid Region ID %d", id);
         return NULL;
     }
+
+    // 2. Check if active
+    if (!vm.arenas[id].active) {
+        RUNTIME_ERROR("Access violation: Region %d is freed", id);
+        return NULL;
+    }
+
+    // 3. Check Generation (The Fix for your bug)
+    if (vm.arenas[id].generation != gen) {
+        // Pointer is old (Gen 1), Region is new (Gen 2)
+        RUNTIME_ERROR("Access violation: Stale pointer to recycled Region %d (Ptr Gen:%d != Cur Gen:%d)", id, gen, vm.arenas[id].generation);
+        return NULL;
+    }
+
     if (offset < 0 || offset >= vm.arenas[id].capacity) {
         RUNTIME_ERROR("Heap overflow access");
         return NULL;
@@ -256,7 +288,12 @@ double* vm_resolve_ptr(double ptr_val) {
 int* vm_resolve_type(double ptr_val) {
     int id = UNPACK_ARENA(ptr_val);
     int offset = UNPACK_OFFSET(ptr_val);
+    int gen = UNPACK_GEN(ptr_val); // Unpack
+
+    // Perform same checks (silent return for types usually)
     if (id < 0 || id >= MAX_ARENAS || !vm.arenas[id].active) return NULL;
+    if (vm.arenas[id].generation != gen) return NULL; // Generation check
+
     return &vm.arenas[id].types[offset];
 }
 
@@ -271,7 +308,9 @@ double heap_alloc(int size) {
     }
     int offset = vm.arenas[id].head;
     vm.arenas[id].head += size;
-    return PACK_PTR(id, offset);
+
+    // PACK GENERATION INTO POINTER
+    return PACK_PTR(vm.arenas[id].generation, id, offset);
 }
 
 void vm_register_function(VM* vm, const char* name, int addr) {
@@ -346,7 +385,7 @@ void print_raw(const char* str) {
     }
 }
 
-void print_recursive(double val, int type, int depth) {
+void print_recursive(double val, int type, int depth, int max_elem) {
     if (depth > 10) { print_raw("..."); return; }
     char buf[64];
 
@@ -361,6 +400,22 @@ void print_recursive(double val, int type, int depth) {
         if (depth > 0) print_raw("\"");
     }
     else if (type == T_OBJ) {
+        // --- CRASH FIX: Check if region is alive before resolving ---
+        int arena_id = UNPACK_ARENA(val);
+        int gen = UNPACK_GEN(val);
+
+        if (arena_id < 0 || arena_id >= MAX_ARENAS || !vm.arenas[arena_id].active) {
+            print_raw("[Freed Object]");
+            return;
+        }
+
+        // Check Generation
+        if (vm.arenas[arena_id].generation != gen) {
+            print_raw("[Stale Object Ref]");
+            return;
+        }
+        // ------------------------------------------------------------
+
         double ptr_val = val;
         double* base = vm_resolve_ptr(ptr_val);
         int* types = vm_resolve_type(ptr_val);
@@ -371,47 +426,75 @@ void print_recursive(double val, int type, int depth) {
         if (obj_type == TYPE_ARRAY) {
             print_raw("[");
             int len = (int)base[HEAP_OFFSET_LEN];
-            for (int i = 0; i < len; i++) {
+
+            // Limit logic
+            int limit = len;
+            if (max_elem != -1 && len > max_elem) limit = max_elem;
+
+            for (int i = 0; i < limit; i++) {
                 if (i > 0) print_raw(", ");
-                print_recursive(base[HEAP_HEADER_ARRAY + i], types[HEAP_HEADER_ARRAY + i], depth + 1);
+                print_recursive(base[HEAP_HEADER_ARRAY + i], types[HEAP_HEADER_ARRAY + i], depth + 1, max_elem);
             }
+            if (len > limit) print_raw(", ...");
             print_raw("]");
         }
         else if (obj_type == TYPE_MAP) {
-            print_raw("["); // Reverted to brackets to match tests
+            print_raw("{");
             int count = (int)base[HEAP_OFFSET_COUNT];
+
+            // Limit logic
+            int limit = count;
+            if (max_elem != -1 && count > max_elem) limit = max_elem;
+
             double data_ptr_val = base[HEAP_OFFSET_DATA];
+
+            // Check Map Data pointer validity
+            int data_arena = UNPACK_ARENA(data_ptr_val);
+            if (!vm.arenas[data_arena].active) {
+                print_raw("... [Freed Map Data] }");
+                return;
+            }
 
             double* data = vm_resolve_ptr(data_ptr_val);
             int* data_types = vm_resolve_type(data_ptr_val);
 
             if(data) {
-                for (int i = 0; i < count; i++) {
+                for (int i = 0; i < limit; i++) {
                     if (i > 0) print_raw(", ");
                     double k = data[i * 2];
                     print_raw(vm.string_pool[(int)k]);
-                    print_raw("="); // Matches tests
-                    print_recursive(data[i * 2 + 1], data_types[i * 2 + 1], depth + 1);
+                    print_raw(": ");
+                    print_recursive(data[i * 2 + 1], data_types[i * 2 + 1], depth + 1, max_elem);
                 }
+                if (count > limit) print_raw(", ...");
             }
-            print_raw("]");
+            print_raw("}");
         }
         else if (obj_type == TYPE_BYTES) {
             int len = (int)base[HEAP_OFFSET_LEN];
             unsigned char* b = (unsigned char*)&base[HEAP_HEADER_ARRAY];
             print_raw("b\"");
-            for (int i = 0; i < len; i++) {
+
+            int limit = len;
+            if (max_elem != -1 && len > max_elem) limit = max_elem;
+
+            for (int i = 0; i < limit; i++) {
                 if (b[i] >= 32 && b[i] <= 126) sprintf(buf, "%c", b[i]);
                 else sprintf(buf, "\\x%02X", b[i]);
                 print_raw(buf);
             }
+            if (len > limit) print_raw("...");
             print_raw("\"");
         }
         else if (obj_type <= TYPE_I16_ARRAY && obj_type >= TYPE_BOOL_ARRAY) {
             print_raw("[");
             int len = (int)base[HEAP_OFFSET_LEN];
             char* data = (char*)&base[HEAP_HEADER_ARRAY];
-            for (int i = 0; i < len; i++) {
+
+            int limit = len;
+            if (max_elem != -1 && len > max_elem) limit = max_elem;
+
+            for (int i = 0; i < limit; i++) {
                 if (i > 0) print_raw(", ");
                 if (obj_type == TYPE_I32_ARRAY) sprintf(buf, "%d", ((int*)data)[i]);
                 else if (obj_type == TYPE_F32_ARRAY) sprintf(buf, "%g", ((float*)data)[i]);
@@ -421,6 +504,7 @@ void print_recursive(double val, int type, int depth) {
                 else sprintf(buf, "?");
                 print_raw(buf);
             }
+            if (len > limit) print_raw(", ...");
             print_raw("]");
         }
         else {
@@ -430,7 +514,6 @@ void print_recursive(double val, int type, int depth) {
         }
     }
 }
-
 // --- VM EXECUTION ---
 
 int vm_step(bool debug_trace) {
@@ -789,7 +872,7 @@ int vm_step(bool debug_trace) {
             double v = vm.stack[vm.sp];
             int t = vm.stack_types[vm.sp];
             vm.sp--;
-            print_recursive(v, t, 0);
+            print_recursive(v, t, 0, -1);
             print_raw("\n");
             break;
         }
@@ -1181,6 +1264,66 @@ int vm_step(bool debug_trace) {
                 }
             }
             vm_push(ptr, T_OBJ);
+            break;
+        }
+            case OP_MONITOR: {
+            printf("\n================ [ VM MONITOR ] ================\n");
+
+            // 1. Print Regions (Arenas)
+            printf("--- Regions (Arenas) ---\n");
+            printf("  ID | Usage (Doubles)     | Status\n");
+            printf("  ---|---------------------|-------\n");
+            for (int i = 0; i < MAX_ARENAS; i++) {
+                if (vm.arenas[i].active) {
+                    bool is_current = (i == vm.current_arena);
+                    printf("  %2d | %6d / %-8d | %s%s\n",
+                        i,
+                        vm.arenas[i].head,
+                        vm.arenas[i].capacity,
+                        i == 0 ? "Main" : "Region",
+                        is_current ? " (Active Ctx)" : ""
+                    );
+                }
+            }
+
+            // 2. Print Globals
+            printf("\n--- Globals ---\n");
+            if (vm.global_symbols) {
+                for (int i = 0; i < vm.global_symbol_count; i++) {
+                    int addr = vm.global_symbols[i].addr;
+                    printf("  %s: ", vm.global_symbols[i].name);
+                    print_recursive(vm.globals[addr], vm.global_types[addr], 0, MYLO_MONITOR_DEPTH);
+                    printf("\n");
+                }
+            }
+
+            // 3. Print Locals (Active Scope)
+            printf("\n--- Locals (Frame FP: %d) ---\n", vm.fp);
+            bool found_any = false;
+            if (vm.local_symbols) {
+                for (int i = 0; i < vm.local_symbol_count; i++) {
+                    VMLocalInfo* sym = &vm.local_symbols[i];
+
+                    // Check if variable is alive at the current Instruction Pointer (vm.ip)
+                    // Note: vm.ip was incremented at start of step, so we use vm.ip-1 roughly,
+                    // or just vm.ip since scopes usually align.
+                    if ((vm.ip - 1) >= sym->start_ip && (sym->end_ip == -1 || (vm.ip - 1) <= sym->end_ip)) {
+                        // Calculate absolute stack index
+                        int stack_idx = vm.fp + sym->stack_offset;
+
+                        // Safety check
+                        if (stack_idx <= vm.sp) {
+                            printf("  %s: ", sym->name);
+                            print_recursive(vm.stack[stack_idx], vm.stack_types[stack_idx], 0, MYLO_MONITOR_DEPTH);
+                            printf("\n");
+                            found_any = true;
+                        }
+                    }
+                }
+            }
+            if (!found_any) printf("  (None)\n");
+
+            printf("================================================\n");
             break;
         }
         case OP_HLT: return -1;
