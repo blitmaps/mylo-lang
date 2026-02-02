@@ -61,7 +61,8 @@ typedef enum {
     OP_MAKE_ARR,
     OP_NEW_ARENA,
     OP_DEL_ARENA,
-    OP_SET_CTX
+    OP_SET_CTX,
+    OP_MONITOR // NEW: Intrinsic monitor
 } OpCode;
 
 extern const char *OP_NAMES[];
@@ -78,7 +79,21 @@ typedef struct {
     int head;
     int capacity;
     bool active;
+    int generation;
 } MemoryArena;
+
+// --- Debug Structures ---
+typedef struct {
+    char name[MAX_IDENTIFIER];
+    int addr;
+} VMSymbol;
+
+typedef struct {
+    char name[MAX_IDENTIFIER];
+    int stack_offset;
+    int start_ip;
+    int end_ip;
+} VMLocalInfo;
 
 typedef struct {
     double* stack;
@@ -108,6 +123,14 @@ typedef struct {
 
     VMFunction functions[MAX_VM_FUNCTIONS];
     int function_count;
+
+    // Debug Symbols (Populated by Compiler)
+    VMSymbol* global_symbols;
+    int global_symbol_count;
+
+    VMLocalInfo* local_symbols;
+    int local_symbol_count;
+
 } VM;
 
 extern VM vm;
@@ -135,6 +158,8 @@ typedef struct {
     NativeFunc* natives_array;
     char (*string_pool)[MAX_STRING_LENGTH];
 } MyloAPI;
+
+
 
 // --- EXPORTED FUNCTIONS ---
 
@@ -164,6 +189,9 @@ void vm_free_ref(int id);
 
 int vm_find_function(VM* vm, const char* name);
 void vm_register_function(VM* vm, const char* name, int addr);
+
+// Helper to print values (exposed for monitor)
+void print_recursive(double val, int type, int depth, int max_elem);
 
 // Macros
 #define MYLO_STORE(val, type_name) vm_store_copy(&(val), sizeof(val), type_name)

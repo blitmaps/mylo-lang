@@ -41,6 +41,7 @@ typedef enum {
     TK_TYPE_DEF,
     TK_REGION,
     TK_CLEAR,
+    TK_MONITOR,
 } MyloTokenType;
 
 // Token Names for pretty printing
@@ -55,7 +56,7 @@ const char* TOKEN_NAMES[] = {
     ":", ",", ".", "::", "->",
     "break", "continue", "enum", "module_path",
     "true", "false", "*", "/", "%",
-    "embed", "Type Definition", "region", "clear"
+    "embed", "Type Definition", "region", "clear", "monitor"
 };
 
 const char* get_token_name(MyloTokenType t) {
@@ -459,6 +460,7 @@ void next_token() {
         else if (strcmp(curr.text, "embed") == 0) curr.type = TK_EMBED;
         else if (strcmp(curr.text, "region") == 0) curr.type = TK_REGION;
         else if (strcmp(curr.text, "clear") == 0) curr.type = TK_CLEAR;
+        else if (strcmp(curr.text, "monitor") == 0) curr.type = TK_MONITOR;
         else if (strcmp(curr.text, "f64") == 0) curr.type = TK_TYPE_DEF;
         else if (strcmp(curr.text, "f32") == 0) curr.type = TK_TYPE_DEF;
         else if (strcmp(curr.text, "i32") == 0) curr.type = TK_TYPE_DEF;
@@ -1184,7 +1186,10 @@ void statement() {
         if (inside_function) { emit(OP_SVAR); emit(locals[var_idx].offset); } else { emit(OP_SET); emit(globals[var_idx].addr); }
     } else if (curr.type == TK_RET) {
         match(TK_RET); if (curr.type == TK_RBRACE) { emit(OP_PSH_NUM); emit(make_const(0.0)); } else expression(); emit(OP_RET);
-    } else if (curr.type != TK_EOF) next_token();
+    } else if (curr.type == TK_MONITOR) {
+        match(TK_MONITOR); match(TK_LPAREN); match(TK_RPAREN); emit(OP_MONITOR);
+    }
+    else if (curr.type != TK_EOF) next_token();
 }
 void function() {
     match(TK_FN);
@@ -1226,7 +1231,26 @@ void parse_internal(char *source, bool is_import) {
 
     int end_ip = vm.code_size;
     for (int i = start_debug_idx; i < debug_symbol_count; i++) { if (debug_symbols[i].end_ip == -1) debug_symbols[i].end_ip = end_ip; }
+    // This allows the VM to print names during OP_MONITOR without needing the compiler's arrays
+    if (!is_import) { // Only do this for the main module or once
+        if (vm.global_symbols) free(vm.global_symbols);
+        vm.global_symbols = malloc(sizeof(VMSymbol) * global_count);
+        vm.global_symbol_count = global_count;
+        for(int i=0; i<global_count; i++) {
+            strcpy(vm.global_symbols[i].name, globals[i].name);
+            vm.global_symbols[i].addr = globals[i].addr;
+        }
 
+        if (vm.local_symbols) free(vm.local_symbols);
+        vm.local_symbols = malloc(sizeof(VMLocalInfo) * debug_symbol_count);
+        vm.local_symbol_count = debug_symbol_count;
+        for(int i=0; i<debug_symbol_count; i++) {
+            strcpy(vm.local_symbols[i].name, debug_symbols[i].name);
+            vm.local_symbols[i].stack_offset = debug_symbols[i].stack_offset;
+            vm.local_symbols[i].start_ip = debug_symbols[i].start_ip;
+            vm.local_symbols[i].end_ip = debug_symbols[i].end_ip;
+        }
+    }
     src = os;
     curr = oc;
     line = saved_line;
@@ -1575,17 +1599,51 @@ void compile_to_c_source(const char *output_filename) {
 }
 
 void compile_repl(char *source, int *out_start_ip) {
-    src = source; next_token(); *out_start_ip = vm.code_size;
+    current_file_start = source;
+    line = 1;
+
+    src = source;
+    next_token();
+    *out_start_ip = vm.code_size;
+
     if (curr.type == TK_EOF) return;
+
     if (curr.type == TK_FN) function();
     else if (curr.type == TK_STRUCT) struct_decl();
-    else if (curr.type == TK_VAR || curr.type == TK_IF || curr.type == TK_FOR || curr.type == TK_FOREVER || curr.type == TK_PRINT || curr.type == TK_IMPORT || curr.type == TK_RET || curr.type == TK_BREAK || curr.type == TK_CONTINUE || curr.type == TK_ENUM) statement();
-    else if (curr.type == TK_ID) {
-        int saved_code_size = vm.code_size; int saved_line = line; char *saved_src = src; Token saved_curr = curr;
+    else if (curr.type == TK_VAR || curr.type == TK_IF || curr.type == TK_FOR ||
+             curr.type == TK_FOREVER || curr.type == TK_PRINT || curr.type == TK_IMPORT ||
+             curr.type == TK_RET || curr.type == TK_BREAK || curr.type == TK_CONTINUE ||
+             curr.type == TK_ENUM || curr.type == TK_REGION || curr.type == TK_CLEAR ||
+             curr.type == TK_MONITOR) {
         statement();
-        if (curr.type != TK_EOF) { vm.code_size = saved_code_size; src = source; next_token(); expression(); }
-    } else expression();
+             }
+    else if (curr.type == TK_ID) {
+        int saved_code_size = vm.code_size;
+        int saved_line = line;
+
+        statement();
+
+        if (curr.type != TK_EOF) {
+            vm.code_size = saved_code_size;
+            src = source;
+            line = saved_line;
+            next_token();
+            expression();
+        }
+    } else {
+        expression();
+    }
     emit(OP_HLT);
+
+    // --- FIX: Sync Debug Symbols for REPL ---
+    // This ensures monitor() knows about variables defined in previous REPL lines
+    if (vm.global_symbols) free(vm.global_symbols);
+    vm.global_symbols = malloc(sizeof(VMSymbol) * global_count);
+    vm.global_symbol_count = global_count;
+    for(int i=0; i<global_count; i++) {
+        strcpy(vm.global_symbols[i].name, globals[i].name);
+        vm.global_symbols[i].addr = globals[i].addr;
+    }
 }
 
 void mylo_reset() {
