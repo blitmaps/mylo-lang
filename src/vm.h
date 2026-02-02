@@ -59,9 +59,9 @@ typedef enum {
     OP_IT_DEF,
     OP_EMBED,
     OP_MAKE_ARR,
-    OP_NEW_ARENA,  // New: Create a region
-    OP_DEL_ARENA,  // New: Clear a region
-    OP_SET_CTX     // New: Set current allocation context (Arena ID)
+    OP_NEW_ARENA,
+    OP_DEL_ARENA,
+    OP_SET_CTX
 } OpCode;
 
 extern const char *OP_NAMES[];
@@ -121,8 +121,10 @@ typedef struct {
     void (*push)(double, int);
     double (*pop)();
     int (*make_string)(const char*);
-    // Updated: Returns double (Packed Pointer)
     double (*heap_alloc)(int);
+
+    // NEW: Resolve pointers across arenas
+    double* (*resolve_ptr)(double);
 
     // Reference Management Bridge
     double (*store_copy)(void*, size_t, const char*);
@@ -132,7 +134,6 @@ typedef struct {
 
     NativeFunc* natives_array;
     char (*string_pool)[MAX_STRING_LENGTH];
-    // Removed: double* heap; (Access via API functions only)
 } MyloAPI;
 
 // --- EXPORTED FUNCTIONS ---
@@ -143,10 +144,7 @@ void vm_push(double val, int type);
 double vm_pop();
 int make_string(const char *s);
 int make_const(double val);
-
-// Updated: Returns double (Packed Pointer)
 double heap_alloc(int size);
-
 void run_vm_from(int start_ip, bool debug_trace);
 
 // Core Execution
@@ -164,7 +162,6 @@ double vm_store_ptr(void* ptr, const char* type_name);
 void* vm_get_ref(int id, const char* expected_type_name);
 void vm_free_ref(int id);
 
-// Prototype for function finder helper
 int vm_find_function(VM* vm, const char* name);
 void vm_register_function(VM* vm, const char* name, int addr);
 
