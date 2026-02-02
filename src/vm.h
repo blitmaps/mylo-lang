@@ -131,6 +131,7 @@ typedef struct {
 // --- EXPORTED FUNCTIONS ---
 
 void vm_init();
+void vm_cleanup();
 void vm_push(double val, int type);
 double vm_pop();
 int make_string(const char *s);

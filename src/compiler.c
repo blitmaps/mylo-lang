@@ -2533,7 +2533,10 @@ void compile_to_c_source(const char *output_filename) {
     fprintf(fp, "    }\n");
 
     for (int i = 0; i < ffi_count; i++) fprintf(fp, "    natives[std_idx + %d] = __wrapper_%d;\n", i, i);
-    fprintf(fp, "    run_vm(false);\n    return 0;\n}\n");
+    fprintf(fp, "    run_vm(false);\n");
+    fprintf(fp, "    vm_cleanup();\n");
+    fprintf(fp, "    return 0;\n}\n");
+
     fclose(fp);
 
     // Print instructions

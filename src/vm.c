@@ -136,8 +136,47 @@ void vm_free_ref(int id) {
 
 // --- VM CORE ---
 
-void vm_init() {
+void vm_cleanup() {
+    // 1. Free Core Arrays
+    if (vm.bytecode) { free(vm.bytecode); vm.bytecode = NULL; }
+    if (vm.lines) { free(vm.lines); vm.lines = NULL; }
+    if (vm.stack) { free(vm.stack); vm.stack = NULL; }
+    if (vm.stack_types) { free(vm.stack_types); vm.stack_types = NULL; }
+    if (vm.globals) { free(vm.globals); vm.globals = NULL; }
+    if (vm.global_types) { free(vm.global_types); vm.global_types = NULL; }
+    if (vm.constants) { free(vm.constants); vm.constants = NULL; }
 
+    // 2. Free Heap
+    if (vm.heap) { free(vm.heap); vm.heap = NULL; }
+    if (vm.heap_types) { free(vm.heap_types); vm.heap_types = NULL; }
+
+    // 3. Free String Pool
+    if (vm.string_pool) { free(vm.string_pool); vm.string_pool = NULL; }
+
+    // 4. Clean up Reference Store (C-Block Pointers)
+    // We iterate the store and free any 'copies' the VM owns
+    // Note: defined as static in vm.c, so we access it directly
+    for (int i = 0; i < ref_next_id; i++) {
+        if (ref_store[i].is_copy && ref_store[i].ptr) {
+            free(ref_store[i].ptr);
+        }
+        ref_store[i].ptr = NULL;
+    }
+    ref_next_id = 0;
+
+    // 5. Reset Scalar State
+    vm.sp = -1;
+    vm.ip = 0;
+    vm.heap_ptr = 0;
+    vm.str_count = 0;
+    // ... other scalars are reset in vm_init, but safe to zero here
+}
+
+void vm_init() {
+    // Check to see if we need to free first
+    if (vm.bytecode) {
+        vm_cleanup();
+    }
     // 1. Allocate arrays if they haven't been allocated yet
     // This prevents re-allocating (and leaking) when mylo_reset() calls vm_init()
     if (!vm.bytecode) vm.bytecode = (int*)malloc(MAX_CODE * sizeof(int));
