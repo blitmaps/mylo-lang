@@ -286,7 +286,7 @@ inline TestOutput test_maps() {
     "}\n";
 
     std::string expected = """"
-    "[name=\"foo\", age=32]\n"
+    "{name: \"foo\", age: 32}\n"
     "foo\n"
     "32\n"
     "bar\n"
@@ -975,7 +975,7 @@ inline TestOutput test_print_map() {
         "var header = {\"foo\"=99, \"bar\"=88}\n"
         "print(header)\n";
     std::string expected = """"
-        "[foo=99, bar=88]\n";
+        "{foo: 99, bar: 88}\n";
     return run_source_test(src, expected);
 }
 
