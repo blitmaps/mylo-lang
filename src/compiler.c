@@ -1218,7 +1218,18 @@ void generate_binding_c_source(const char *output_filename) {
     for (int i = 0; i < ffi_count; i++) fprintf(fp, "    host_natives_array[start_index + %d] = __wrapper_%d;\n", i, i);
     fprintf(fp, "}\n");
     fclose(fp);
-    printf("\nBinding generation complete. File: %s\n", output_filename);
+    printf("\n");
+    setTerminalColor(MyloFgBlue, MyloBgColorDefault);
+    printf("----------------------------------------------------------------------------------------\n");
+    setTerminalColor(MyloFgCyan, MyloBgColorDefault);
+    printf("Binding generation complete. Wrapper C source code generated to: ");
+    setTerminalColor(MyloFgMagenta, MyloBgColorDefault);
+    printf(" %s\n", output_filename);
+    setTerminalColor(MyloFgBlue, MyloBgColorDefault);
+    printf("----------------------------------------------------------------------------------------\n\n");
+    // ... rest of print messages ...
+    setTerminalColor(MyloFgDefault, MyloBgColorDefault);
+
 }
 
 void compile_to_c_source(const char *output_filename) {
@@ -1379,8 +1390,43 @@ void compile_to_c_source(const char *output_filename) {
     fprintf(fp, "    run_vm(false);\n    vm_cleanup();\n    return 0;\n}\n");
     fclose(fp);
 
-    printf("\nBuild complete. File: %s\n", output_filename);
+    setTerminalColor(MyloFgBlue, MyloBgColorDefault);
+    printf("----------------------------------------------------------------------------------------\n");
+    setTerminalColor(MyloFgCyan, MyloBgColorDefault);
+    printf("Bytecode generation complete. Standalone C source code generated to: ");
+    setTerminalColor(MyloFgMagenta, MyloBgColorDefault);
+    printf(" %s\n", output_filename);
+    setTerminalColor(MyloFgBlue, MyloBgColorDefault);
+    printf("----------------------------------------------------------------------------------------\n\n");
     setTerminalColor(MyloFgDefault, MyloBgColorDefault);
+    setTerminalColor(MyloFgWhite, MyloBgColorDefault);
+    printf("  To build %s into an executable you need:\n\n", output_filename);
+    setTerminalColor(MyloFgYellow, MyloBgColorDefault);
+    printf("    + ");
+    setTerminalColor(MyloFgDefault, MyloBgColorDefault);
+    printf("The Mylo VM implementation code (vm.c and vm.h), located in 'mylo-lang/src'\n");
+    setTerminalColor(MyloFgYellow, MyloBgColorDefault);
+    printf("    + ");
+    setTerminalColor(MyloFgDefault, MyloBgColorDefault);
+    printf("The Mylo Standard Library (mylolib.c and mylolib.h), located in 'mylo-lang/src'\n");
+    setTerminalColor(MyloFgYellow, MyloBgColorDefault);
+    printf("    + ");
+    setTerminalColor(MyloFgDefault, MyloBgColorDefault);
+    printf("A 'C' Compiler (GCC, MSVC, Clang, Zig etc.), referred to as ('cc' below.)\n");
+    setTerminalColor(MyloFgYellow, MyloBgColorDefault);
+    printf("    + ");
+    setTerminalColor(MyloFgDefault, MyloBgColorDefault);
+    printf("Link the C Standard Math Library and any other libraries you are using (-lm below)\n\n");
+
+
+    setTerminalColor(MyloFgBlue, MyloBgColorDefault);
+    printf("----------------------------------------------------------------------------------------\n");
+    setTerminalColor(MyloFgYellow, MyloBgColorDefault);
+    printf("  Example Command:\n\n");
+    setTerminalColor(MyloFgWhite, MyloBgColorDefault);
+    printf("     cc %s src/vm.c src/mylolib.c -Isrc/ -o mylo_executable -lm\n\n", output_filename);
+    setTerminalColor(MyloFgDefault, MyloBgColorDefault);
+
 }
 
 
