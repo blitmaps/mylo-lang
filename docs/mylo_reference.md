@@ -37,6 +37,7 @@ It is fast to write, fast to run, and can run anywhere.
     * [Functions](#functions)
         - [Passing own types](#passing-own-types)
     * [Scope & Modules](#scope-modules)
+    * [Memory Management - Regions](#memory-management)
     * [Import & Module Path](#import)
     * [C Interoperability Foreign Function Interface (FFI)](#c-interoperability-foreign-function-interface-ffi)
         + [Source example.mylo](#source-examplemylo)
@@ -559,6 +560,151 @@ print(MyFirstMod::a_big_number())
 
 // Prints 65556
 print(a_big_number())
+```
+<a name="memory-management"></a>
+## Memory Management
+
+#### Region-Based Memory Management in Mylo
+
+Mylo uses a manual, deterministic memory management system based on **Regions** (also known as Arena Allocators). This allows for extremely high-performance memory allocation without the unpredictable pauses associated with Garbage Collection (GC).
+
+#### What is an Arena Allocator?
+
+In standard languages (like Java, Python, or Go), memory is managed object-by-object. When you create an object, the runtime finds a spot for it. When you stop using it, a Garbage Collector must scan memory to find it and delete it.
+
+In **Mylo**, memory is managed in **Regions**.
+
+1.  **Allocation is Fast:** When you create an object in a region, Mylo simply moves a pointer forward. There is no searching for free slots. It is as fast as stack allocation.
+2.  **Deallocation is Instant:** You do not free individual objects. Instead, you `clear()` the entire region at once. This resets the pointer to the beginning.
+3.  **Cache Friendly:** Objects allocated together stay together in RAM, improving CPU cache performance.
+
+---
+
+### Syntax
+
+#### 1. Defining a Region
+Use the `region` keyword to declare a new memory arena.
+
+```javascript
+region my_arena
+```
+
+#### 2. Allocating into a Region
+Use the double-colon syntax `::` to allocate a variable's *data* into a specific region.
+
+```javascript
+// 'numbers' lives in 'my_arena'
+var my_arena::numbers = [1, 2, 3, 4, 5]
+
+// 'name' lives in 'my_arena'
+var my_arena::name = "Mylo"
+```
+
+> **Note:** Primitive types (Numbers, Booleans) are stored directly in the variable slot (stack or global). Only Heap objects (Arrays, Strings, Maps, Structs) consume space in the Region.
+
+#### 3. Clearing a Region
+Use the `clear()` function to wipe all memory associated with that region.
+
+```javascript
+clear(my_arena)
+```
+
+Any variables that pointed to data in this region are now **Stale**. Accessing them will result in a runtime safety error, preventing memory corruption.
+
+---
+
+### Examples
+
+#### Example 1: Basic Lifecycle
+
+```javascript
+// 1. Create the region
+region level_data
+
+// 2. Allocate heavy data into it
+var level_data::map_grid = list(1000)
+var level_data::enemy_list = ["Orc", "Goblin", "Dragon"]
+
+print(enemy_list) 
+// Output: ["Orc", "Goblin", "Dragon"]
+
+// 3. Destroy all data instantly
+clear(level_data)
+
+// 4. Safety Check
+// Accessing the old variable is safe (it crashes cleanly rather than reading garbage)
+// print(enemy_list) 
+// Error: [Stale Object Ref]
+```
+
+#### Example 2: Temporary Workspace (The "Loop" Pattern)
+
+This is the most common use case. In a game loop or server request handler, you generate temporary data that is only needed for that specific iteration.
+
+```javascript
+var i = 0
+
+// Infinite loop simulating a game engine
+forever {
+    if i > 2 { break }
+
+    print("--- Frame " + to_string(i) + " ---")
+
+    // Create a scoped region for this frame
+    region frame_mem
+
+    // Create temporary strings and arrays
+    // Without regions, this would create garbage for the GC to clean up later
+    var frame_mem::temp_calc = [i, i * 2, i * 3]
+    var frame_mem::log_msg = "Processing entity " + to_string(i)
+
+    print(temp_calc)
+    print(log_msg)
+
+    // INSTANTLY free all memory used in this frame
+    clear(frame_mem)
+    
+    i = i + 1
+}
+```
+
+**Output:**
+```text
+--- Frame 0 ---
+[0, 0, 0]
+Processing entity 0
+--- Frame 1 ---
+[1, 2, 3]
+Processing entity 1
+--- Frame 2 ---
+[2, 4, 6]
+Processing entity 2
+```
+
+---
+
+### Safety: The Generational System
+
+Mylo solves the "ABA Problem" (accessing memory that has been freed and then re-allocated for something else) using **Generational Pointers**.
+
+1.  Every Region has a **Generation ID** (Version Number).
+2.  Every Pointer stores the **Generation ID** it was created with.
+3.  When you `clear(region)`, the Region's Generation ID increments.
+4.  If you try to access an old variable, Mylo sees that the Pointer's Generation does not match the Region's current Generation and blocks access.
+
+```javascript
+region foo
+var foo::x = [1, 2, 3]
+
+clear(foo) // Region version increments
+
+// Reusing the region for new data
+var foo::y = ["New", "Data"] 
+
+// 'x' still points to the old version of 'foo' (Gen 1)
+// 'foo' is now (Gen 2)
+print(foo::x) 
+// Output: [Stale Object Ref]
 ```
 
 <a name="import"></a>
