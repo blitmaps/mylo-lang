@@ -697,6 +697,13 @@ void factor() {
                         strcpy(ffi_blocks[ffi_idx].args[ffi_blocks[ffi_idx].arg_count].type, curr.text);
                         match(TK_ID);
                     }
+                    // --- FIX: Handle array syntax [] in C-Block args ---
+                    if (curr.type == TK_LBRACKET) {
+                        match(TK_LBRACKET);
+                        match(TK_RBRACKET);
+                        strcat(ffi_blocks[ffi_idx].args[ffi_blocks[ffi_idx].arg_count].type, "[]");
+                    }
+                    // ---------------------------------------------------
                 } else strcpy(ffi_blocks[ffi_idx].args[ffi_blocks[ffi_idx].arg_count].type, "num");
                 match(TK_EQ_ASSIGN);
                 expression();
@@ -906,6 +913,7 @@ void factor() {
         match(TK_RPAREN);
     } else error("Unexpected token '%s' in expression", curr.text);
 }
+
 
 void term() {
     factor();
@@ -1417,6 +1425,13 @@ void statement() {
                             strcpy(ffi_blocks[ffi_idx].args[ffi_blocks[ffi_idx].arg_count].type, curr.text);
                             match(TK_ID);
                         }
+                        // --- FIX: Handle array syntax [] in C-Block args ---
+                        if (curr.type == TK_LBRACKET) {
+                            match(TK_LBRACKET);
+                            match(TK_RBRACKET);
+                            strcat(ffi_blocks[ffi_idx].args[ffi_blocks[ffi_idx].arg_count].type, "[]");
+                        }
+                        // ---------------------------------------------------
                     } else strcpy(ffi_blocks[ffi_idx].args[ffi_blocks[ffi_idx].arg_count].type, "num");
                     match(TK_EQ_ASSIGN);
                     expression();
@@ -1921,7 +1936,6 @@ void statement() {
         emit(OP_RET);
     } else if (curr.type != TK_EOF) next_token();
 }
-
 void function() {
     match(TK_FN);
     if (curr.type == TK_ID && strcmp(curr.text, "C") == 0) error("'C' is reserved");
@@ -2078,6 +2092,7 @@ void generate_binding_c_source(const char *output_filename) {
     }
     fprintf(fp, "\n");
 
+    // --- USER FUNCTION DEFINITIONS ---
     for (int i = 0; i < ffi_count; i++) {
         char *ret_type = ffi_blocks[i].return_type;
         if (strcmp(ret_type, "num") == 0) fprintf(fp, "double");
@@ -2104,6 +2119,15 @@ void generate_binding_c_source(const char *output_filename) {
             else if (strcmp(type, "bool") == 0 || strcmp(type, "byte") == 0) fprintf(
                 fp, "unsigned char %s", ffi_blocks[i].args[a].name);
             else if (strcmp(type, "bytes") == 0) fprintf(fp, "unsigned char* %s", ffi_blocks[i].args[a].name);
+
+            // --- FIX: Specific Array Types ---
+            else if (strcmp(type, "byte[]") == 0 || strcmp(type, "bool[]") == 0) fprintf(fp, "unsigned char* %s", ffi_blocks[i].args[a].name);
+            else if (strcmp(type, "i32[]") == 0) fprintf(fp, "int* %s", ffi_blocks[i].args[a].name);
+            else if (strcmp(type, "i64[]") == 0) fprintf(fp, "long long* %s", ffi_blocks[i].args[a].name);
+            else if (strcmp(type, "f32[]") == 0) fprintf(fp, "float* %s", ffi_blocks[i].args[a].name);
+            else if (strcmp(type, "i16[]") == 0) fprintf(fp, "short* %s", ffi_blocks[i].args[a].name);
+            // ---------------------------------
+
             else if (strstr(type, "[]")) fprintf(fp, "void* %s", ffi_blocks[i].args[a].name);
             else fprintf(fp, "c_%s* %s", type, ffi_blocks[i].args[a].name);
             if (a < ffi_blocks[i].arg_count - 1) fprintf(fp, ", ");
@@ -2145,6 +2169,15 @@ void generate_binding_c_source(const char *output_filename) {
                 fp, "(unsigned char)_raw_%s", ffi_blocks[i].args[a].name);
             else if (strcmp(type, "bytes") == 0) fprintf(
                 fp, "(unsigned char*)(vm_resolve_ptr(_raw_%s) + HEAP_HEADER_ARRAY)", ffi_blocks[i].args[a].name);
+
+            // --- FIX: Specific Array Casts ---
+            else if (strcmp(type, "byte[]") == 0 || strcmp(type, "bool[]") == 0) fprintf(fp, "(unsigned char*)(vm_resolve_ptr(_raw_%s) + HEAP_HEADER_ARRAY)", ffi_blocks[i].args[a].name);
+            else if (strcmp(type, "i32[]") == 0) fprintf(fp, "(int*)(vm_resolve_ptr(_raw_%s) + HEAP_HEADER_ARRAY)", ffi_blocks[i].args[a].name);
+            else if (strcmp(type, "i64[]") == 0) fprintf(fp, "(long long*)(vm_resolve_ptr(_raw_%s) + HEAP_HEADER_ARRAY)", ffi_blocks[i].args[a].name);
+            else if (strcmp(type, "f32[]") == 0) fprintf(fp, "(float*)(vm_resolve_ptr(_raw_%s) + HEAP_HEADER_ARRAY)", ffi_blocks[i].args[a].name);
+            else if (strcmp(type, "i16[]") == 0) fprintf(fp, "(short*)(vm_resolve_ptr(_raw_%s) + HEAP_HEADER_ARRAY)", ffi_blocks[i].args[a].name);
+            // ---------------------------------
+
             else if (strstr(type, "[]")) fprintf(fp, "(void*)(vm_resolve_ptr(_raw_%s) + HEAP_HEADER_ARRAY)",
                                                  ffi_blocks[i].args[a].name);
             else fprintf(fp, "(c_%s*)(vm_resolve_ptr(_raw_%s) + HEAP_HEADER_STRUCT)", type, ffi_blocks[i].args[a].name);
@@ -2177,10 +2210,8 @@ void generate_binding_c_source(const char *output_filename) {
         fprintf(fp, "}\n");
     }
 
-    // --- FIX: UNDEFINE MACROS TO PREVENT STRUCT MEMBER COLLISIONS ---
     fprintf(fp, "\n#undef make_string\n");
     fprintf(fp, "#undef heap_alloc\n");
-    // ----------------------------------------------------------------
 
     fprintf(
         fp,
@@ -2193,10 +2224,7 @@ void generate_binding_c_source(const char *output_filename) {
         "    host_vm_store_copy = api->store_copy;\n    host_vm_store_ptr = api->store_ptr;\n    host_vm_get_ref = api->get_ref;\n    host_vm_free_ref = api->free_ref;\n");
     fprintf(fp, "    host_natives_array = api->natives_array;\n");
     for (int i = 0; i < ffi_count; i++) fprintf(fp, "    host_natives_array[start_index + %d] = __wrapper_%d;\n", i, i);
-
-    // --- FIX: ADD MISSING CLOSING BRACE ---
     fprintf(fp, "}\n");
-    // --------------------------------------
 
     fclose(fp);
 
@@ -2294,9 +2322,18 @@ void compile_to_c_source(const char *output_filename) {
             else if (strcmp(type, "i64") == 0) fprintf(fp, "long long %s", ffi_blocks[i].args[a].name);
             else if (strcmp(type, "f32") == 0) fprintf(fp, "float %s", ffi_blocks[i].args[a].name);
             else if (strcmp(type, "i16") == 0) fprintf(fp, "short %s", ffi_blocks[i].args[a].name);
-            else if (strcmp(type, "byte") == 0 || strcmp(type, "bool") == 0) fprintf(
+            else if (strcmp(type, "bool") == 0 || strcmp(type, "byte") == 0) fprintf(
                 fp, "unsigned char %s", ffi_blocks[i].args[a].name);
             else if (strcmp(type, "bytes") == 0) fprintf(fp, "unsigned char* %s", ffi_blocks[i].args[a].name);
+
+            // --- FIX: Specific Array Types ---
+            else if (strcmp(type, "byte[]") == 0 || strcmp(type, "bool[]") == 0) fprintf(fp, "unsigned char* %s", ffi_blocks[i].args[a].name);
+            else if (strcmp(type, "i32[]") == 0) fprintf(fp, "int* %s", ffi_blocks[i].args[a].name);
+            else if (strcmp(type, "i64[]") == 0) fprintf(fp, "long long* %s", ffi_blocks[i].args[a].name);
+            else if (strcmp(type, "f32[]") == 0) fprintf(fp, "float* %s", ffi_blocks[i].args[a].name);
+            else if (strcmp(type, "i16[]") == 0) fprintf(fp, "short* %s", ffi_blocks[i].args[a].name);
+            // ---------------------------------
+
             else if (strstr(type, "[]")) fprintf(fp, "void* %s", ffi_blocks[i].args[a].name);
             else fprintf(fp, "c_%s* %s", type, ffi_blocks[i].args[a].name);
             if (a < ffi_blocks[i].arg_count - 1) fprintf(fp, ", ");
@@ -2338,6 +2375,15 @@ void compile_to_c_source(const char *output_filename) {
                 fp, "(unsigned char)_raw_%s", ffi_blocks[i].args[a].name);
             else if (strcmp(type, "bytes") == 0) fprintf(
                 fp, "(unsigned char*)(vm_resolve_ptr(_raw_%s) + HEAP_HEADER_ARRAY)", ffi_blocks[i].args[a].name);
+
+            // --- FIX: Specific Array Casts ---
+            else if (strcmp(type, "byte[]") == 0 || strcmp(type, "bool[]") == 0) fprintf(fp, "(unsigned char*)(vm_resolve_ptr(_raw_%s) + HEAP_HEADER_ARRAY)", ffi_blocks[i].args[a].name);
+            else if (strcmp(type, "i32[]") == 0) fprintf(fp, "(int*)(vm_resolve_ptr(_raw_%s) + HEAP_HEADER_ARRAY)", ffi_blocks[i].args[a].name);
+            else if (strcmp(type, "i64[]") == 0) fprintf(fp, "(long long*)(vm_resolve_ptr(_raw_%s) + HEAP_HEADER_ARRAY)", ffi_blocks[i].args[a].name);
+            else if (strcmp(type, "f32[]") == 0) fprintf(fp, "(float*)(vm_resolve_ptr(_raw_%s) + HEAP_HEADER_ARRAY)", ffi_blocks[i].args[a].name);
+            else if (strcmp(type, "i16[]") == 0) fprintf(fp, "(short*)(vm_resolve_ptr(_raw_%s) + HEAP_HEADER_ARRAY)", ffi_blocks[i].args[a].name);
+            // ---------------------------------
+
             else if (strstr(type, "[]")) fprintf(fp, "(void*)(vm_resolve_ptr(_raw_%s) + HEAP_HEADER_ARRAY)",
                                                  ffi_blocks[i].args[a].name);
             else fprintf(fp, "(c_%s*)(vm_resolve_ptr(_raw_%s) + HEAP_HEADER_STRUCT)", type, ffi_blocks[i].args[a].name);
@@ -2349,11 +2395,10 @@ void compile_to_c_source(const char *output_filename) {
         else if (strcmp(ret_type, "void") == 0) fprintf(fp, "    vm_push(0.0, T_NUM);\n");
         else if (strcmp(ret_type, "string") == 0 || strcmp(ret_type, "str") == 0) fprintf(
             fp, "    int id = make_string(s);\n    vm_push((double)id, T_STR);\n");
-        else if (strcmp(ret_type, "i32") == 0 || strcmp(ret_type, "i64") == 0 ||
-                 strcmp(ret_type, "f32") == 0 || strcmp(ret_type, "i16") == 0 ||
-                 strcmp(ret_type, "byte") == 0 || strcmp(ret_type, "bool") == 0) {
+        else if (strcmp(ret_type, "i32") == 0 || strcmp(ret_type, "i64") == 0 || strcmp(ret_type, "f32") == 0 ||
+                 strcmp(ret_type, "i16") == 0 || strcmp(ret_type, "byte") == 0 || strcmp(ret_type, "bool") == 0)
             fprintf(fp, "    vm_push((double)res, T_NUM);\n");
-        } else if (strlen(ret_type) > 0) {
+        else if (strlen(ret_type) > 0) {
             int st_idx = -1;
             for (int s = 0; s < struct_count; s++) if (strcmp(struct_defs[s].name, ret_type) == 0) st_idx = s;
             if (st_idx != -1) {
@@ -2419,12 +2464,13 @@ void compile_to_c_source(const char *output_filename) {
     setTerminalColor(MyloFgBlue, MyloBgColorDefault);
     printf("----------------------------------------------------------------------------------------\n");
     setTerminalColor(MyloFgCyan, MyloBgColorDefault);
-    printf("Bytecode generation complete. Standalone C source code generated to: ");
+    printf("Build complete. File: ");
     setTerminalColor(MyloFgMagenta, MyloBgColorDefault);
     printf(" %s\n", output_filename);
     setTerminalColor(MyloFgBlue, MyloBgColorDefault);
     printf("----------------------------------------------------------------------------------------\n\n");
     setTerminalColor(MyloFgDefault, MyloBgColorDefault);
+
     setTerminalColor(MyloFgWhite, MyloBgColorDefault);
     printf("  To build %s into an executable you need:\n\n", output_filename);
     setTerminalColor(MyloFgYellow, MyloBgColorDefault);
@@ -2452,8 +2498,8 @@ void compile_to_c_source(const char *output_filename) {
     setTerminalColor(MyloFgWhite, MyloBgColorDefault);
     printf("     cc %s src/vm.c src/mylolib.c -Isrc/ -o mylo_executable -lm\n\n", output_filename);
     setTerminalColor(MyloFgDefault, MyloBgColorDefault);
-}
 
+}
 void compile_repl(char *source, int *out_start_ip) {
     current_file_start = source;
     line = 1;
