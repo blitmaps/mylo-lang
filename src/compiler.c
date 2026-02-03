@@ -587,6 +587,12 @@ void statement();
 
 bool parse_namespaced_id(char *out_name) {
     strcpy(out_name, curr.text);
+
+    if (curr.type == TK_TYPE_DEF) {
+        match(TK_TYPE_DEF);
+        return false; // Primitives don't have namespaces (e.g. i32::foo)
+    }
+
     match(TK_ID);
     if (curr.type == TK_SCOPE) {
         match(TK_SCOPE);
@@ -712,16 +718,18 @@ void factor() {
             }
             match(TK_RPAREN);
         }
-        if (curr.type == TK_ARROW) {
-            match(TK_ARROW);
-            if (curr.type == TK_TYPE_DEF) {
-                strcpy(ffi_blocks[ffi_idx].return_type, curr.text);
-                match(TK_TYPE_DEF);
-            } else {
-                strcpy(ffi_blocks[ffi_idx].return_type, curr.text);
-                match(TK_ID);
-            }
+
+        // --- ENFORCEMENT: Expression C-Blocks MUST have a return type ---
+        match(TK_ARROW); // This will error if '->' is missing
+        if (curr.type == TK_TYPE_DEF) {
+            strcpy(ffi_blocks[ffi_idx].return_type, curr.text);
+            match(TK_TYPE_DEF);
+        } else {
+            strcpy(ffi_blocks[ffi_idx].return_type, curr.text);
+            match(TK_ID);
         }
+        // ---------------------------------------------------------------
+
         if (curr.type != TK_LBRACE) exit(1);
         char *start = src + 1;
         int braces = 1;
@@ -913,7 +921,6 @@ void factor() {
         match(TK_RPAREN);
     } else error("Unexpected token '%s' in expression", curr.text);
 }
-
 
 void term() {
     factor();
@@ -1311,6 +1318,7 @@ void parse_map_literal() {
     }
     match(TK_RBRACE);
 }
+
 
 void statement() {
     if (curr.type == TK_REGION) {
@@ -1936,6 +1944,8 @@ void statement() {
         emit(OP_RET);
     } else if (curr.type != TK_EOF) next_token();
 }
+
+
 void function() {
     match(TK_FN);
     if (curr.type == TK_ID && strcmp(curr.text, "C") == 0) error("'C' is reserved");
