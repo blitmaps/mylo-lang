@@ -38,10 +38,18 @@ void std_len(VM *vm) {
         double* base = vm_resolve_ptr(val);
         if(!base) { vm_push(0, T_NUM); return; }
 
-        if((int)base[HEAP_OFFSET_TYPE] == TYPE_ARRAY) {
+        int type = (int)base[HEAP_OFFSET_TYPE];
+
+        // Support Generic Arrays, Byte Arrays, and Typed Arrays (i32[], f32[], etc)
+        if(type == TYPE_ARRAY || type == TYPE_BYTES || (type <= TYPE_I16_ARRAY && type >= TYPE_BOOL_ARRAY)) {
             vm_push(base[HEAP_OFFSET_LEN], T_NUM);
-        } else {
-            printf("Runtime Error: len() expects array or string.\n");
+        }
+        // Support Maps (Count is at offset 2)
+        else if (type == TYPE_MAP) {
+            vm_push(base[HEAP_OFFSET_COUNT], T_NUM);
+        }
+        else {
+            printf("Runtime Error: len() expects array, string, map, or bytes.\n");
             exit(1);
         }
     } else if (vm->stack_types[vm->sp + 1] == T_STR) {
@@ -52,7 +60,6 @@ void std_len(VM *vm) {
         exit(1);
     }
 }
-
 void std_contains(VM *vm) {
     double needle_val = vm_pop();
     int needle_type = vm->stack_types[vm->sp + 1];
