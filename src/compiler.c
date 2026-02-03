@@ -1391,6 +1391,13 @@ void statement() {
             return;
         } else if (curr.type == TK_ID && strcmp(curr.text, "C") == 0) {
             match(TK_ID);
+            if (curr.type == TK_STR) {
+                if (c_header_count < MAX_C_HEADERS) {
+                    strcpy(c_headers[c_header_count++], curr.text);
+                }
+                match(TK_STR);
+                return;
+            }
             int ffi_idx = ffi_count++;
             ffi_blocks[ffi_idx].id = ffi_idx;
             ffi_blocks[ffi_idx].arg_count = 0;
@@ -1573,7 +1580,7 @@ void statement() {
             char member_name[MAX_IDENTIFIER];
             strcpy(member_name, curr.text);
             match(TK_ID);
-            sprintf(name, "%s_%s", region_var_name, member_name); // Mangle name
+            sprintf(name, "%s_%s", region_var_name, member_name);
 
             int reg_loc = find_local(region_var_name);
             if (reg_loc != -1) {
@@ -1618,6 +1625,11 @@ void statement() {
             }
         }
         match(TK_EQ_ASSIGN);
+
+        // --- HANDLER SELECTION ---
+        bool handled = false;
+
+        // 1. Typed Primitive Array: var x: i32[] = [...]
         if (is_arr && explicit_primitive != TYPE_ARRAY && curr.type == TK_LBRACKET) {
             match(TK_LBRACKET);
             int count = 0;
@@ -1632,7 +1644,10 @@ void statement() {
             emit(OP_MAKE_ARR);
             emit(count);
             emit(explicit_primitive);
-        } else if (is_arr && explicit_struct != -1 && curr.type == TK_LBRACKET) {
+            handled = true;
+        }
+        // 2. Typed Struct Array: var x: Struct[] = [{...}, ...]
+        else if (is_arr && explicit_struct != -1 && curr.type == TK_LBRACKET) {
             match(TK_LBRACKET);
             int count = 0;
             if (curr.type != TK_RBRACKET) {
@@ -1646,7 +1661,14 @@ void statement() {
             match(TK_RBRACKET);
             emit(OP_ARR);
             emit(count);
-        } else if (explicit_struct != -1 && curr.type == TK_LBRACE) parse_struct_literal(explicit_struct);
+            handled = true;
+        }
+        // 3. Typed Struct: var x: Struct = {...}
+        else if (explicit_struct != -1 && curr.type == TK_LBRACE) {
+            parse_struct_literal(explicit_struct);
+            handled = true;
+        }
+        // 4. Untyped Map/Struct Inference: var x = {...}
         else if (explicit_struct == -1 && curr.type == TK_LBRACE) {
             char *safe_src = src;
             Token safe_curr = curr;
@@ -1658,15 +1680,19 @@ void statement() {
             line = safe_line;
             if (is_map) parse_map_literal();
             else error("Struct literal requires type");
-        } else expression();
+            handled = true;
+        }
 
-        // --- FIX: Use returned index to ensure we update existing globals instead of overwriting others ---
+        // 5. Default Expression (Arrays [...], Numbers, Strings, etc)
+        if (!handled) {
+            expression();
+        }
+
         int var_idx = alloc_var(inside_function, name, explicit_struct, is_arr);
         if (!inside_function) {
             emit(OP_SET);
             emit(globals[var_idx].addr);
         }
-        // --------------------------------------------------------------------------------------------------
 
         if (specific_region) {
             emit(OP_PSH_NUM);
@@ -2085,6 +2111,9 @@ void generate_binding_c_source(const char *output_filename) {
         fprintf(fp, ") {\n%s\n}\n\n", ffi_blocks[i].code_body);
     }
 
+    fprintf(fp, "\n// --- NATIVE WRAPPERS ---\n");
+    int std_count = 0;
+    while (std_library[std_count].name != NULL) std_count++;
     for (int i = 0; i < ffi_count; i++) {
         fprintf(fp, "void __wrapper_%d(VM* vm) {\n", i);
         for (int a = ffi_blocks[i].arg_count - 1; a >= 0; a--) fprintf(fp, "    double _raw_%s = vm_pop();\n",
@@ -2148,6 +2177,11 @@ void generate_binding_c_source(const char *output_filename) {
         fprintf(fp, "}\n");
     }
 
+    // --- FIX: UNDEFINE MACROS TO PREVENT STRUCT MEMBER COLLISIONS ---
+    fprintf(fp, "\n#undef make_string\n");
+    fprintf(fp, "#undef heap_alloc\n");
+    // ----------------------------------------------------------------
+
     fprintf(
         fp,
         "\n#ifdef _WIN32\n__declspec(dllexport) void mylo_bind_lib(VM* vm, int start_index, MyloAPI* api) {\n#else\nvoid mylo_bind_lib(VM* vm, int start_index, MyloAPI* api) {\n#endif\n");
@@ -2159,6 +2193,12 @@ void generate_binding_c_source(const char *output_filename) {
         "    host_vm_store_copy = api->store_copy;\n    host_vm_store_ptr = api->store_ptr;\n    host_vm_get_ref = api->get_ref;\n    host_vm_free_ref = api->free_ref;\n");
     fprintf(fp, "    host_natives_array = api->natives_array;\n");
     for (int i = 0; i < ffi_count; i++) fprintf(fp, "    host_natives_array[start_index + %d] = __wrapper_%d;\n", i, i);
+
+    // --- FIX: ADD MISSING CLOSING BRACE ---
+    fprintf(fp, "}\n");
+    // --------------------------------------
+
+    fclose(fp);
 
     // Binding message
     printf("\n");
