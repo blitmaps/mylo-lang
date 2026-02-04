@@ -661,7 +661,7 @@ static void c_gen_structs(FILE *fp) {
     fprintf(fp, "\n");
 }
 
-static void c_gen_type_name(FILE* fp, const char* type) {
+static void c_gen_type_name(FILE* fp, const char* type, bool is_return) {
     if (strcmp(type, "num") == 0) fprintf(fp, "double");
     else if (strcmp(type, "void") == 0) fprintf(fp, "void");
     else if (strcmp(type, "string") == 0 || strcmp(type, "str") == 0) fprintf(fp, "char*");
@@ -675,8 +675,17 @@ static void c_gen_type_name(FILE* fp, const char* type) {
     // If the type is an array (contains "[]"), force return type to MyloReturn.
     // This prevents generating "unsigned char" or "int*" as return types,
     // which would lose the memory handle/length info when returned to the VM.
-    else if (strstr(type, "[]")) fprintf(fp, "MyloReturn");
-
+    else if (strstr(type, "[]")) {
+        if (is_return) {
+            fprintf(fp, "MyloReturn"); // Returns need the full struct
+        } else {
+            // Parameters should be the underlying C pointer type
+            if (strstr(type, "byte") || strstr(type, "bool")) fprintf(fp, "unsigned char*");
+            else if (strstr(type, "i32")) fprintf(fp, "int*");
+            else if (strstr(type, "f32")) fprintf(fp, "float*");
+            else fprintf(fp, "void*");
+        }
+    }
     else if (strlen(type) > 0) fprintf(fp, "c_%s", type);
     else fprintf(fp, "MyloReturn");
 }
@@ -684,11 +693,11 @@ static void c_gen_type_name(FILE* fp, const char* type) {
 static void c_gen_ffi_wrappers(FILE *fp) {
     // 1. User Functions
     for (int i = 0; i < ffi_count; i++) {
-        c_gen_type_name(fp, ffi_blocks[i].return_type);
+        c_gen_type_name(fp, ffi_blocks[i].return_type, true);
         fprintf(fp, " __mylo_user_%d(", i);
         for (int a = 0; a < ffi_blocks[i].arg_count; a++) {
             char *type = ffi_blocks[i].args[a].type;
-            c_gen_type_name(fp, type);
+            c_gen_type_name(fp, type, false);
             // Add * for C-struct pointers (except specific arrays or primitives)
              if (strlen(type) > 0 && strcmp(type, "num") != 0 && !strstr(type, "[]") &&
                  strcmp(type, "i32")!=0 && strcmp(type, "i64")!=0 && strcmp(type, "f32")!=0 &&
@@ -714,7 +723,7 @@ static void c_gen_ffi_wrappers(FILE *fp) {
         // Call user function
         char *ret_type = ffi_blocks[i].return_type;
         if (strcmp(ret_type, "void") != 0) {
-            c_gen_type_name(fp, ret_type);
+            c_gen_type_name(fp, ret_type, false);
             fprintf(fp, " res = ");
         }
         fprintf(fp, "__mylo_user_%d(", i);
