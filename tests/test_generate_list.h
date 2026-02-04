@@ -341,8 +341,8 @@ inline TestOutput test_string_interp() {
     std::string src = """"
     "var name = \"Ben\"\n"
     "var age = 37.5\n"
-    "var str = f\"I am {name}, and I am {age + 2.5}\"\n"
-    "print(str)";
+    "var string = f\"I am {name}, and I am {age + 2.5}\"\n"
+    "print(string)";
 
     std::string expected = """"
     "I am Ben, and I am 40\n";
@@ -456,7 +456,7 @@ inline TestOutput test_list_array() {
     "struct Color {\n"
         "var rgba\n"
     "}\n"
-    "var my_list: Color = [{rgba= 255}, {rgba= 444}]\n"
+    "var my_list: Color[] = [{rgba= 255}, {rgba= 444}]\n"
 
     "for (x: Color in my_list) {\n"
         "print(x.rgba)\n"
@@ -490,7 +490,7 @@ inline TestOutput test_list_slices() {
     "struct Color {\n"
     "var rgba\n"
     "}\n"
-    "var my_list: Color = []\n"
+    "var my_list: Color[] = []\n"
     "my_list = my_list + [{rgba=500}, {rgba=400}, {rgba=300}, {rgba=700}, {rgba=900}]\n"
     "my_list = my_list[1:3]\n"
     // prints 'm'
@@ -518,7 +518,7 @@ inline TestOutput test_func_iterator_passing() {
         "}\n"
         "ret\n"
     "}\n"
-    "var myvar0: foo = [{name=\"Harry\"}, {name=\"Barry\"}, {name=\"John\"}]\n"
+    "var myvar0: foo[] = [{name=\"Harry\"}, {name=\"Barry\"}, {name=\"John\"}]\n"
 
     // This prints 'Harry', 'Barry', 'John'
     "list_names(myvar0)\n";

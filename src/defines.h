@@ -13,6 +13,7 @@
 #define MAX_STRINGS 1024
 #define MAX_STRING_LENGTH 1024
 #define MAX_C_HEADERS 32
+
 // Compilation Limits
 #define MAX_IDENTIFIER 64
 #define MAX_STRUCTS 64
@@ -29,6 +30,11 @@
 #define OUTPUT_BUFFER_SIZE 128000
 
 // Types
+#define TYPE_ANY -99
+#define TYPE_NUM -98
+#define TYPE_STR -97
+#define TYPE_VOID -96
+
 #define TYPE_ARRAY -1
 #define TYPE_BYTES -2
 #define TYPE_MAP -3
@@ -56,15 +62,17 @@
 #define MAP_INITIAL_CAP 16
 #define MAX_VM_FUNCTIONS 1024
 
-// --- POINTER PACKING (Generational) ---
-// We fit everything into the 53-bit significand of a double.
-// Offset: 32 bits (4GB)
+// --- POINTER PACKING (Safe Generational) ---
+// We restrict the total used bits to 48 to ensure absolute safety
+// within the 53-bit mantissa of a double, avoiding any implicit bit edge cases.
+// Offset: 28 bits (256MB per region - plenty for tests)
 // Arena:   6 bits (64 regions)
-// Gen:    15 bits (32k versions)
+// Gen:    14 bits (16k versions)
+// Total:  48 bits.
 
-#define PTR_OFFSET_BITS 32
+#define PTR_OFFSET_BITS 28
 #define PTR_ARENA_BITS 6
-#define PTR_GEN_BITS 15
+#define PTR_GEN_BITS 14
 
 #define PACK_PTR(gen, arena, offset) \
     ((double)( \
@@ -74,12 +82,12 @@
     ))
 
 #define UNPACK_OFFSET(ptr) \
-    ((int)((unsigned long long)(ptr) & 0xFFFFFFFF))
+    ((int)((unsigned long long)(ptr) & 0xFFFFFFF))
 
 #define UNPACK_ARENA(ptr) \
     ((int)(((unsigned long long)(ptr) >> PTR_OFFSET_BITS) & 0x3F))
 
 #define UNPACK_GEN(ptr) \
-    ((int)(((unsigned long long)(ptr) >> (PTR_OFFSET_BITS + PTR_ARENA_BITS)) & 0x7FFF))
+    ((int)(((unsigned long long)(ptr) >> (PTR_OFFSET_BITS + PTR_ARENA_BITS)) & 0x3FFF))
 
 #endif
