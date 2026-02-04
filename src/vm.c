@@ -33,7 +33,9 @@ const char *OP_NAMES[] = {
     "EMBED",
     "MAKE_ARR",
     "NEW_REG", "DEL_REG", "SET_CTX",
-    "MONITOR"
+    "MONITOR",
+    "CAST",
+    "CHECK_TYPE"
 };
 
 // --- Error Handling ---
@@ -41,11 +43,11 @@ const char *OP_NAMES[] = {
 void mylo_runtime_error(const char* fmt, ...) {
     va_list args;
     va_start(args, fmt);
-    
+
     printf("[Line %d] Runtime Error: ", vm.lines[vm.ip - 1]);
     vprintf(fmt, args);
     printf("\n");
-    
+
     va_end(args);
 
     if (MyloConfig.repl_jmp_buf) {
@@ -66,11 +68,11 @@ int get_type_size(int heap_type) {
         case TYPE_BYTES:
         case TYPE_BOOL_ARRAY: return 1;
         case TYPE_I16_ARRAY:
-        case TYPE_F16_ARRAY:  return 2; 
+        case TYPE_F16_ARRAY:  return 2;
         case TYPE_I32_ARRAY:
         case TYPE_F32_ARRAY:  return 4;
         case TYPE_I64_ARRAY:
-        default: return 8; 
+        default: return 8;
     }
 }
 
@@ -139,8 +141,8 @@ void vm_free_ref(int id) {
 void init_arena(int id) {
     if (id < 0 || id >= MAX_ARENAS) return;
 
-    // Handle wrap-around for 15-bit generation
-    vm.arenas[id].generation = (vm.arenas[id].generation + 1) & 0x7FFF;
+    // Handle wrap-around for 14-bit generation (0x3FFF)
+    vm.arenas[id].generation = (vm.arenas[id].generation + 1) & 0x3FFF;
     if (vm.arenas[id].generation == 0) vm.arenas[id].generation = 1;
 
     if (vm.arenas[id].memory == NULL) {
@@ -197,7 +199,7 @@ void vm_cleanup() {
 
 void vm_init() {
     if (vm.bytecode) vm_cleanup();
-    
+
     vm.bytecode = (int*)malloc(MAX_CODE * sizeof(int));
     vm.lines    = (int*)malloc(MAX_CODE * sizeof(int));
     vm.stack       = (double*)malloc(STACK_SIZE * sizeof(double));
@@ -206,6 +208,9 @@ void vm_init() {
     vm.global_types = (int*)malloc(MAX_GLOBALS * sizeof(int));
     vm.constants = (double*)malloc(MAX_CONSTANTS * sizeof(double));
     vm.string_pool = malloc(MAX_STRINGS * MAX_STRING_LENGTH);
+
+    // CRITICAL: Ensure arena states (generations) are zeroed for deterministic tests
+    memset(vm.arenas, 0, sizeof(vm.arenas));
 
     init_arena(0);
     vm.current_arena = 0;
@@ -461,7 +466,7 @@ static void broadcast_math(int op, double obj_val, double scalar_val, int scalar
             elType = types[HEAP_HEADER_ARRAY+i];
         } else if (hType == TYPE_I32_ARRAY) el = (double)((int*)&base[HEAP_HEADER_ARRAY])[i];
         else if (hType == TYPE_F32_ARRAY) el = (double)((float*)&base[HEAP_HEADER_ARRAY])[i];
-        
+
         // Operation
         if (scalar_type == T_NUM && elType == T_NUM) {
              double lhs = obj_is_lhs ? el : scalar_val;
@@ -472,7 +477,7 @@ static void broadcast_math(int op, double obj_val, double scalar_val, int scalar
              else if (op == OP_MUL) res = lhs * rhs;
              else if (op == OP_DIV) res = lhs / rhs;
              else if (op == OP_MOD) res = fmod(lhs, rhs);
-             
+
              newBase[HEAP_HEADER_ARRAY+i] = res;
              newTypes[HEAP_HEADER_ARRAY+i] = T_NUM;
         } else if (op == OP_ADD && scalar_type == T_STR) {
@@ -480,12 +485,12 @@ static void broadcast_math(int op, double obj_val, double scalar_val, int scalar
             char valStr[128];
             if (elType == T_STR) { strncpy(valStr, vm.string_pool[(int)el], 127); }
             else { snprintf(valStr, 128, "%g", el); }
-            
+
             const char* sScal = vm.string_pool[(int)scalar_val];
             char buf[256];
             if (obj_is_lhs) snprintf(buf, 256, "%s%s", valStr, sScal);
             else snprintf(buf, 256, "%s%s", sScal, valStr);
-            
+
             newBase[HEAP_HEADER_ARRAY+i] = (double)make_string(buf);
             newTypes[HEAP_HEADER_ARRAY+i] = T_STR;
         } else {
@@ -513,7 +518,7 @@ static void exec_math_op(int op) {
         vm.stack_types[vm.sp] = T_NUM;
         return;
     }
-    
+
     // 2. String Concatenation (ADD only)
     if (op == OP_ADD && ta == T_STR && tb == T_STR) {
         char buf[MAX_STRING_LENGTH * 2];
@@ -539,7 +544,7 @@ static void exec_math_op(int op) {
             double* baseNew = vm_resolve_ptr(newPtr);
             baseNew[HEAP_OFFSET_TYPE] = TYPE_BYTES;
             baseNew[HEAP_OFFSET_LEN] = (double)(lenA + lenB);
-            
+
             char* dst = (char*)&baseNew[HEAP_HEADER_ARRAY];
             memcpy(dst, (char*)&baseA[HEAP_HEADER_ARRAY], lenA);
             memcpy(dst + lenA, (char*)&baseB[HEAP_HEADER_ARRAY], lenB);
@@ -579,7 +584,7 @@ static void exec_math_op(int op) {
         double scalVal = (ta == T_OBJ) ? b : a;
         int scalType = (ta == T_OBJ) ? tb : ta;
         bool objIsLhs = (ta == T_OBJ);
-        
+
         vm_pop(); // Remove 'a' (stack now empty for this op space)
         broadcast_math(op, arrVal, scalVal, scalType, objIsLhs);
         return;
@@ -656,7 +661,7 @@ static void exec_flow_op(int op) {
         CHECK_STACK(1);
         double rv = vm.stack[vm.sp];
         int rt = vm.stack_types[vm.sp];
-        vm.sp = vm.fp - 3; 
+        vm.sp = vm.fp - 3;
         int fp = (int)vm.fp;
         vm.fp = (int)vm.stack[fp-1];
         vm.ip = (int)vm.stack[fp-2];
@@ -694,6 +699,43 @@ static void exec_alloc_op(int op) {
         vm.stack[vm.sp] = base[1+off];
         vm.stack_types[vm.sp] = types[1+off];
     }
+}
+
+// Helper to convert a packed array (e.g. i32[]) to a generic array (Array<Any>)
+static void convert_packed_to_generic(double ptr) {
+    double* base = vm_resolve_ptr(ptr);
+    int type = (int)base[HEAP_OFFSET_TYPE];
+    int len = (int)base[HEAP_OFFSET_LEN];
+
+    if (type == TYPE_ARRAY || type == TYPE_MAP || type > 0) return;
+}
+
+static double promote_array_to_generic(double ptr) {
+    double* base = vm_resolve_ptr(ptr);
+    int type = (int)base[HEAP_OFFSET_TYPE];
+    int len = (int)base[HEAP_OFFSET_LEN];
+    char* src_data = (char*)&base[HEAP_HEADER_ARRAY];
+
+    double new_ptr = heap_alloc(len + HEAP_HEADER_ARRAY);
+    double* new_base = vm_resolve_ptr(new_ptr);
+    int* new_types = vm_resolve_type(new_ptr);
+
+    new_base[HEAP_OFFSET_TYPE] = TYPE_ARRAY;
+    new_base[HEAP_OFFSET_LEN] = (double)len;
+
+    for (int i = 0; i < len; i++) {
+        double val = 0;
+        if (type == TYPE_I32_ARRAY) val = (double)((int*)src_data)[i];
+        else if (type == TYPE_F32_ARRAY) val = (double)((float*)src_data)[i];
+        else if (type == TYPE_I16_ARRAY) val = (double)((short*)src_data)[i];
+        else if (type == TYPE_I64_ARRAY) val = (double)((long long*)src_data)[i];
+        else if (type == TYPE_BOOL_ARRAY) val = (double)((unsigned char*)src_data)[i];
+        else if (type == TYPE_BYTES) val = (double)((unsigned char*)src_data)[i];
+
+        new_base[HEAP_HEADER_ARRAY + i] = val;
+        new_types[HEAP_HEADER_ARRAY + i] = T_NUM;
+    }
+    return new_ptr;
 }
 
 static void exec_array_op(int op) {
@@ -766,10 +808,31 @@ static void exec_array_op(int op) {
         CHECK_STACK(3);
         double val = vm_pop(); int vt = vm.stack_types[vm.sp+1];
         double key = vm_pop();
-        double ptr = vm.stack[vm.sp]; vm_pop();
+        double ptr = vm.stack[vm.sp];
         double* base = vm_resolve_ptr(ptr);
         int* types = vm_resolve_type(ptr);
         int type = (int)base[0];
+
+        // List Promotion Logic
+        bool needs_promotion = false;
+        if (type != TYPE_ARRAY && type != TYPE_MAP && type != TYPE_BYTES) {
+            // It's a packed numeric/bool array
+            if (vt != T_NUM) needs_promotion = true;
+        }
+
+        if (needs_promotion) {
+            double new_ptr = promote_array_to_generic(ptr);
+            // Replace the pointer on the stack
+            vm.stack[vm.sp] = new_ptr;
+            // Update local pointers
+            ptr = new_ptr;
+            base = vm_resolve_ptr(ptr);
+            types = vm_resolve_type(ptr);
+            type = TYPE_ARRAY;
+        }
+
+        // Remove ptr from stack now that we might have updated it
+        vm_pop();
 
         if (type == TYPE_ARRAY) {
             int idx = (int)key;
@@ -809,6 +872,18 @@ static void exec_array_op(int op) {
                 data_types[count*2+1] = vt;
                 base[2] = (double)(count+1);
             }
+        }
+        else {
+             // Packed types
+             int idx = (int)key;
+             char* data = (char*)&base[HEAP_HEADER_ARRAY];
+             switch(type) {
+                case TYPE_I32_ARRAY: ((int*)data)[idx] = (int)val; break;
+                case TYPE_F32_ARRAY: ((float*)data)[idx] = (float)val; break;
+                case TYPE_I16_ARRAY: ((short*)data)[idx] = (short)val; break;
+                case TYPE_I64_ARRAY: ((long long*)data)[idx] = (long long)val; break;
+                case TYPE_BOOL_ARRAY: ((unsigned char*)data)[idx] = (unsigned char)val; break;
+             }
         }
         vm_push(val, vt);
     } else if (op == OP_MAP) {
@@ -969,6 +1044,38 @@ static void exec_monitor() {
     printf("================================================\n");
 }
 
+static void exec_cast_op(int target_type, bool is_check_only) {
+    // If target is ANY, everything is valid, no cast needed.
+    if (target_type == TYPE_ANY) return;
+
+    double val = vm.stack[vm.sp];
+    int current_type = vm.stack_types[vm.sp];
+
+    if (target_type == TYPE_NUM || target_type == TYPE_I32_ARRAY || target_type == TYPE_I64_ARRAY ||
+        target_type == TYPE_I16_ARRAY || target_type == TYPE_F32_ARRAY || target_type == TYPE_BOOL_ARRAY) {
+        // Broadly handling "numeric" expectations
+        if (current_type != T_NUM) RUNTIME_ERROR("Type Mismatch: Expected Number");
+
+        // If it's a specific primitive cast (promoted to stack double)
+        if (!is_check_only) {
+            if (target_type == TYPE_I32_ARRAY) { // reusing ID as 'i32'
+                vm.stack[vm.sp] = floor(val);
+            }
+            // Logic for other primitives is implicit in VM's double stack,
+            // the truncation happens when writing to packed arrays or FFI.
+            // But if we want exact math behavior (floor), we do it here.
+        }
+    }
+    else if (target_type == TYPE_STR) {
+        if (current_type != T_STR) RUNTIME_ERROR("Type Mismatch: Expected String");
+    }
+    else if (target_type >= 0) { // Struct ID
+        if (current_type != T_OBJ) RUNTIME_ERROR("Type Mismatch: Expected Object");
+        double* base = vm_resolve_ptr(val);
+        if (!base || (int)base[0] != target_type) RUNTIME_ERROR("Type Mismatch: Expected Struct ID %d", target_type);
+    }
+}
+
 // --- VM Execution Loop ---
 
 int vm_step(bool debug_trace) {
@@ -976,7 +1083,7 @@ int vm_step(bool debug_trace) {
 
     if (debug_trace) {
         int op = vm.bytecode[vm.ip];
-        if (op >= 0 && op <= OP_MONITOR) {
+        if (op >= 0 && op <= OP_CHECK_TYPE) {
             printf("[TRACE] IP:%04d Line:%d SP:%2d OP:%s\n", vm.ip, vm.lines[vm.ip], vm.sp, OP_NAMES[op]);
         }
     }
@@ -1021,13 +1128,13 @@ int vm_step(bool debug_trace) {
         case OP_ALLOC:
         case OP_HSET:
         case OP_HGET: exec_alloc_op(op); break;
-        
+
         // Arrays & Maps
         case OP_ARR:
         case OP_AGET:
         case OP_ALEN:
         case OP_ASET:
-        case OP_MAP: 
+        case OP_MAP:
         case OP_MAKE_ARR: exec_array_op(op); break;
 
         // Slices
@@ -1092,7 +1199,7 @@ int vm_step(bool debug_trace) {
             vm_push(ptr, T_OBJ);
             break;
         }
-        
+
         // Iterators
         case OP_IT_KEY:
         case OP_IT_VAL:
@@ -1148,6 +1255,17 @@ int vm_step(bool debug_trace) {
             break;
         }
         case OP_MONITOR: exec_monitor(); break;
+
+        case OP_CAST: {
+            int target = vm.bytecode[vm.ip++];
+            exec_cast_op(target, false);
+            break;
+        }
+        case OP_CHECK_TYPE: {
+            int target = vm.bytecode[vm.ip++];
+            exec_cast_op(target, true);
+            break;
+        }
     }
     return op;
 }

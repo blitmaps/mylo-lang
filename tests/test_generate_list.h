@@ -341,8 +341,8 @@ inline TestOutput test_string_interp() {
     std::string src = """"
     "var name = \"Ben\"\n"
     "var age = 37.5\n"
-    "var str = f\"I am {name}, and I am {age + 2.5}\"\n"
-    "print(str)";
+    "var string = f\"I am {name}, and I am {age + 2.5}\"\n"
+    "print(string)";
 
     std::string expected = """"
     "I am Ben, and I am 40\n";
@@ -456,7 +456,7 @@ inline TestOutput test_list_array() {
     "struct Color {\n"
         "var rgba\n"
     "}\n"
-    "var my_list: Color = [{rgba= 255}, {rgba= 444}]\n"
+    "var my_list: Color[] = [{rgba= 255}, {rgba= 444}]\n"
 
     "for (x: Color in my_list) {\n"
         "print(x.rgba)\n"
@@ -490,7 +490,7 @@ inline TestOutput test_list_slices() {
     "struct Color {\n"
     "var rgba\n"
     "}\n"
-    "var my_list: Color = []\n"
+    "var my_list: Color[] = []\n"
     "my_list = my_list + [{rgba=500}, {rgba=400}, {rgba=300}, {rgba=700}, {rgba=900}]\n"
     "my_list = my_list[1:3]\n"
     // prints 'm'
@@ -518,7 +518,7 @@ inline TestOutput test_func_iterator_passing() {
         "}\n"
         "ret\n"
     "}\n"
-    "var myvar0: foo = [{name=\"Harry\"}, {name=\"Barry\"}, {name=\"John\"}]\n"
+    "var myvar0: foo[] = [{name=\"Harry\"}, {name=\"Barry\"}, {name=\"John\"}]\n"
 
     // This prints 'Harry', 'Barry', 'John'
     "list_names(myvar0)\n";
@@ -1107,6 +1107,25 @@ inline TestOutput test_region_same_name() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_strong_types_i32() {
+    std::string src = """"
+            "var x : i32 = 67.2 + 33.7\n"
+            "print(x)\n";
+    std::string expected = """"
+            "100\n";
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_type_promototion_bool() {
+    std::string src = """"
+    "var x = b\"\\xFE\"\n"
+    "print(x + 2)\n";
+    std::string expected = """"
+        "[256]\n"; // As it is an array, it is promoted to num array :')
+    return run_source_test(src, expected);
+}
+
+
 
 inline void test_generate_list() {
     ADD_TEST("Test Test", test_test);
@@ -1181,7 +1200,8 @@ inline void test_generate_list() {
     ADD_TEST("Test Strongly Types Arrays", test_strong_types_list);
     ADD_TEST("Test Region", test_region);
     ADD_TEST("Test Region Same Name", test_region_same_name);
-
+    ADD_TEST("Test Strong Types i32", test_strong_types_i32);
+    ADD_TEST("Test String Types Promotion byte -> num", test_type_promototion_bool);
 
 }
 

@@ -24,16 +24,11 @@ typedef struct {
 #define MYLO_RET_OBJ(v) (MyloReturn){ .value = (double)(v), .type = T_OBJ }
 
 typedef struct {
-    // Sprintf to internal memory
     bool print_to_memory;
-    // DAP mode
     bool debug_mode;
-    // Disables DLOpen to allow for c-generation
     bool build_mode;
-    // Function pointer for printer overloading
     void (*print_callback)(const char *);
     void (*error_callback)(const char*);
-    // Error Recovery Buffer for REPL
     void* repl_jmp_buf;
 } MyloConfigType;
 
@@ -62,7 +57,9 @@ typedef enum {
     OP_NEW_ARENA,
     OP_DEL_ARENA,
     OP_SET_CTX,
-    OP_MONITOR // NEW: Intrinsic monitor
+    OP_MONITOR,
+    OP_CAST,       // Cast/Promote top of stack to specific type
+    OP_CHECK_TYPE  // Verify top of stack against type (Argument checks)
 } OpCode;
 
 extern const char *OP_NAMES[];
@@ -99,69 +96,46 @@ typedef struct {
     double* stack;
     double* globals;
     double* constants;
-
-    // Arena System
     MemoryArena arenas[MAX_ARENAS];
     int current_arena;
-
     int* bytecode;
     int* lines;
     int* stack_types;
     int* global_types;
-
     char (*string_pool)[MAX_STRING_LENGTH];
-
     int code_size;
     int sp;
     int fp;
     int ip;
     int str_count;
     int const_count;
-
     char output_char_buffer[OUTPUT_BUFFER_SIZE];
     int output_mem_pos;
-
     VMFunction functions[MAX_VM_FUNCTIONS];
     int function_count;
-
-    // Debug Symbols (Populated by Compiler)
     VMSymbol* global_symbols;
     int global_symbol_count;
-
     VMLocalInfo* local_symbols;
     int local_symbol_count;
-
 } VM;
 
 extern VM vm;
-
 typedef void (*NativeFunc)(VM *);
-
 extern NativeFunc natives[MAX_NATIVES];
 
-// --- API STRUCT ---
 typedef struct {
     void (*push)(double, int);
     double (*pop)();
     int (*make_string)(const char*);
     double (*heap_alloc)(int);
-
-    // NEW: Resolve pointers across arenas
     double* (*resolve_ptr)(double);
-
-    // Reference Management Bridge
     double (*store_copy)(void*, size_t, const char*);
     double (*store_ptr)(void*, const char*);
     void* (*get_ref)(int, const char*);
     void (*free_ref)(int);
-
     NativeFunc* natives_array;
     char (*string_pool)[MAX_STRING_LENGTH];
 } MyloAPI;
-
-
-
-// --- EXPORTED FUNCTIONS ---
 
 void vm_init();
 void vm_cleanup();
@@ -171,29 +145,19 @@ int make_string(const char *s);
 int make_const(double val);
 double heap_alloc(int size);
 void run_vm_from(int start_ip, bool debug_trace);
-
-// Core Execution
 void run_vm(bool debug_trace);
-int vm_step(bool debug_trace); // Single step execution
+int vm_step(bool debug_trace);
 void mylo_reset();
-
-// Pointer Resolution
-double* vm_resolve_ptr(double ptr_val); // Get pointer to data
-int* vm_resolve_type(double ptr_val);   // Get pointer to type data
-
-// Ref counting Prototypes
+double* vm_resolve_ptr(double ptr_val);
+int* vm_resolve_type(double ptr_val);
 double vm_store_copy(void* data, size_t size, const char* type_name);
 double vm_store_ptr(void* ptr, const char* type_name);
 void* vm_get_ref(int id, const char* expected_type_name);
 void vm_free_ref(int id);
-
 int vm_find_function(VM* vm, const char* name);
 void vm_register_function(VM* vm, const char* name, int addr);
-
-// Helper to print values (exposed for monitor)
 void print_recursive(double val, int type, int depth, int max_elem);
 
-// Macros
 #define MYLO_STORE(val, type_name) vm_store_copy(&(val), sizeof(val), type_name)
 #define MYLO_RETRIEVE(id, c_type, type_name) (c_type*)vm_get_ref((int)(id), type_name)
 #define MYLO_REGISTER(ptr, type_name) vm_store_ptr((void*)(ptr), type_name)
