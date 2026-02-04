@@ -22,7 +22,7 @@ IF (WIN32)
   # Math not needed on Windows
 ELSE()
   # Math needed on other plats
-  target_link_libraries(mylo m)
+  target_link_libraries(mylo m -static)
   target_link_libraries(tests m)
 ENDIF()
 
