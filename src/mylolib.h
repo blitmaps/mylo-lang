@@ -48,7 +48,7 @@ void std_seed(VM *vm);
 void std_rand(VM *vm);
 void std_rand_normal(VM *vm);
 void std_noise(VM *vm);
-
+void std_list_dir(VM *vm);
 // Registry Declaration (Extern)
 // We do NOT define it here, only say it exists.
 extern const StdLibDef std_library[];
