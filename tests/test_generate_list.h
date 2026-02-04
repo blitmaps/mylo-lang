@@ -1107,6 +1107,25 @@ inline TestOutput test_region_same_name() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_strong_types_i32() {
+    std::string src = """"
+            "var x : i32 = 67.2 + 33.7\n"
+            "print(x)\n";
+    std::string expected = """"
+            "100\n";
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_type_promototion_bool() {
+    std::string src = """"
+    "var x = b\"\\xFE\"\n"
+    "print(x + 2)\n";
+    std::string expected = """"
+        "[256]\n"; // As it is an array, it is promoted to num array :')
+    return run_source_test(src, expected);
+}
+
+
 
 inline void test_generate_list() {
     ADD_TEST("Test Test", test_test);
@@ -1181,7 +1200,8 @@ inline void test_generate_list() {
     ADD_TEST("Test Strongly Types Arrays", test_strong_types_list);
     ADD_TEST("Test Region", test_region);
     ADD_TEST("Test Region Same Name", test_region_same_name);
-
+    ADD_TEST("Test Strong Types i32", test_strong_types_i32);
+    ADD_TEST("Test String Types Promotion byte -> num", test_type_promototion_bool);
 
 }
 
