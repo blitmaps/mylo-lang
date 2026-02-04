@@ -52,7 +52,7 @@ It is fast to write, fast to run, and can run anywhere.
 
 <a name="technical-intro-for-nerds"></a>
 ## Technical Intro (for nerds)
-Mylo uses a high-level syntax like Python or Javascript, but is *strongly typed*. Code
+Mylo uses a high-level syntax like Python or Javascript, but is *Gradually Typed*. Code
 is compiled to a virtual machine (VM), and it is executed on any platform with Mylo installed. Mylo also
 supports compiling to a binary, with embedded VM code, as well as interfacing with native libraries.
 
@@ -60,7 +60,7 @@ supports compiling to a binary, with embedded VM code, as well as interfacing wi
 ## Variables
 <a name="numbers-and-strings"></a>
 ### Numbers and Strings
-Mylo is strongly typed, but types are inferred for numbers, strings, bools, enums, maps and lists. Here is how to define variables.
+Mylo is gradually typed, but types are inferred for numbers, strings, bools, enums, maps and lists. Here is how to define variables.
 ```javascript
 var a_number = 42
 var a_string = "Hi"
@@ -72,10 +72,17 @@ var my_var = 40
 my_var = "Oh no!"
 ```
 
+You can define specific types like this:
+```javascript
+var my_int: i32 = 50
+```
+
 <a name="types"></a>
 ## Types
 
-Mylo is dynamically typed at runtime (math operations always use 64-bit floats), but supports **Typed Storage** and **Type Annotations**. This allows for efficient memory usage, precise binary layouts, and seamless interoperability with C functions.
+Mylo infers types at compile time, and can promote at runtime (math operations always use 64-bit floats).
+It uses **Type Annotations** to check safety of functions. This allows for efficient memory usage, 
+precise binary layouts, and seamless interoperability with C functions.
 <a name="primitives"></a>
 ### Primitive Types
 
@@ -186,12 +193,15 @@ var my_list = [1, 2, 3]
 
 <a name="arrays-of-structs"></a>
 ### Arrays of Structs
-Arrays of a given struct are defined as usual with type information, and specified with `[]` operators.
+Arrays of a given struct are defined as usual with type information, and specified with `[]` operators. If not
+type is given for the list initialization, the type will either be promoted to Any[] or an error will be given if this
+is not possible.
 
 ```javascript
 struct Color {
     var rgba
 }
+// Notice that arrays of structs need type annotation otherwise they will be Any[].
 var my_list: Color[] = [{rgba=1000}, {rgba=2000}]
 ```
 
@@ -488,6 +498,21 @@ print(my_num)
 // Now what happens?
 my_num = add_one_to_my_number(my_num)
 print(my_num)
+```
+
+Functions without type information are considered to have the annotation 'Any'. Here is an example of how to control 
+function prototypes.
+
+```javascript
+// Accepts and prints 'any'
+fn foo(x) {
+    print(x)
+}
+
+// Will only accept i32
+fn foo_i32(x: i32) {
+    print(x)
+}
 ```
 
 <a name="passing-own-types"></a>
@@ -823,7 +848,7 @@ print(pixel.b) // Now prints 128
 ```javascript
 // Unknown return type falls back to 'MyloReturn'
 fn get_bytes() {
-    var x = C() {
+    var x = C() -> byte[] {
         const char* my_data = "\x01\x02\x03\x00\x04";
         int len = 5;
 
@@ -869,7 +894,7 @@ struct MyStruct {
 
 var X : MyStruct = {x=9}
 
-var result: num = C(val: i32 = a, val2 : str = b, val3 : MyStruct = X) {
+C(val: i32 = a, val2 : str = b, val3 : MyStruct = X) {
     printf("Inside C: %d, %s, %d\n", (int)val, val2, (int)val3->x);
 }
 ````
