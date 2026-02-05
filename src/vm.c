@@ -36,7 +36,7 @@ const char *OP_NAMES[] = {
     "MONITOR",
     "CAST",
     "CHECK_TYPE",
-    "DEBUGGER" // <--- Added
+    "DEBUGGER"
 };
 
 // --- Error Handling ---
@@ -53,7 +53,6 @@ void mylo_runtime_error(const char* fmt, ...) {
     va_end(args);
     if (MyloConfig.debug_mode && MyloConfig.error_callback) {
         MyloConfig.error_callback(buffer);
-        // We still need to stop execution, but let the callback handle the exit/event
         exit(1);
     }
 
@@ -167,7 +166,6 @@ void init_arena(int id) {
 
     if (vm.arenas[id].memory == NULL) {
         vm.arenas[id].capacity = MAX_HEAP;
-        // CHANGE: Use calloc to ensure heap is zeroed
         vm.arenas[id].memory = (double*)calloc(MAX_HEAP, sizeof(double));
         vm.arenas[id].types = (int*)calloc(MAX_HEAP, sizeof(int));
     }
@@ -224,12 +222,10 @@ void vm_init() {
     vm.bytecode = (int*)malloc(MAX_CODE * sizeof(int));
     vm.lines    = (int*)malloc(MAX_CODE * sizeof(int));
 
-    // --- FIX START: Use calloc to zero-initialize memory ---
     vm.stack       = (double*)calloc(STACK_SIZE, sizeof(double));
     vm.stack_types = (int*)calloc(STACK_SIZE, sizeof(int));
     vm.globals      = (double*)calloc(MAX_GLOBALS, sizeof(double));
     vm.global_types = (int*)calloc(MAX_GLOBALS, sizeof(int));
-    // --- FIX END ---
 
     vm.constants = (double*)malloc(MAX_CONSTANTS * sizeof(double));
     vm.string_pool = malloc(MAX_STRINGS * MAX_STRING_LENGTH);
@@ -259,6 +255,7 @@ void vm_init() {
     // New fields
     vm.source_code = NULL;
     vm.cli_debug_mode = false;
+    vm.last_debug_line = -1; // Reset debugger state
     memset(natives, 0, sizeof(natives));
 }
 
@@ -467,15 +464,17 @@ void print_recursive(double val, int type, int depth, int max_elem) {
     }
 }
 
-// --- TUI Debugger Implementation ---
+// --- SLEEK TUI Debugger Implementation ---
 
-#define DBG_COLOR_RESET "\033[0m"
-#define DBG_COLOR_CYAN  "\033[36m"
-#define DBG_COLOR_YELLOW "\033[33m"
-#define DBG_COLOR_GREEN "\033[32m"
-#define DBG_COLOR_RED   "\033[31m"
-#define DBG_BG_BLUE     "\033[44m"
-#define DBG_BG_GRAY     "\033[100m"
+#define DBG_RST     "\033[0m"
+#define DBG_CYAN    "\033[36m"
+#define DBG_YELLOW  "\033[33m"
+#define DBG_GREEN   "\033[32m"
+#define DBG_RED     "\033[31m"
+#define DBG_MAG     "\033[35m"
+#define DBG_BOLD    "\033[1m"
+#define DBG_BG_SEL  "\033[48;5;236m" // Dark gray bg for selected line
+#define DBG_BG_BP   "\033[41m"       // Red bg for breakpoint
 
 static int dbg_breakpoints[64];
 static int dbg_bp_count = 0;
@@ -486,28 +485,27 @@ void dbg_print_source_window(int current_line, int context_lines) {
         return;
     }
 
-    // Naive line splitter for display
+    printf(DBG_CYAN "╭─" DBG_BOLD " Source " DBG_RST DBG_CYAN "──────────────────────────────────────────────────────────╮\n" DBG_RST);
+
     int line = 1;
     char* ptr = vm.source_code;
     char* start = ptr;
 
-    printf(DBG_COLOR_CYAN "┌─ Source ──────────────────────────────────────────────────┐\n" DBG_COLOR_RESET);
-
     while (*ptr) {
         if (*ptr == '\n') {
             if (line >= current_line - context_lines && line <= current_line + context_lines) {
-                // Print this line
                 int len = (int)(ptr - start);
+                bool is_bp = false;
+                for(int i=0; i<dbg_bp_count; i++) if(dbg_breakpoints[i] == line) is_bp = true;
 
                 if (line == current_line) {
-                    printf(DBG_BG_BLUE "│ %4d > %.*s" DBG_COLOR_RESET "\n", line, len, start);
+                    // Selected Line
+                    if (is_bp) printf(DBG_CYAN "│" DBG_RED "●" DBG_BG_SEL DBG_BOLD DBG_GREEN " %4d > " DBG_RST DBG_BG_SEL "%.*s" DBG_RST "\n", line, len, start);
+                    else       printf(DBG_CYAN "│" DBG_RST DBG_BG_SEL DBG_BOLD DBG_GREEN " %4d > " DBG_RST DBG_BG_SEL "%.*s" DBG_RST "\n", line, len, start);
                 } else {
-                    // Check breakpoints
-                    bool is_bp = false;
-                    for(int i=0; i<dbg_bp_count; i++) if(dbg_breakpoints[i] == line) is_bp = true;
-
-                    if (is_bp) printf("│ " DBG_COLOR_RED "●" DBG_COLOR_RESET " %4d | %.*s\n", line, len, start);
-                    else printf("│ %4d | %.*s\n", line, len, start);
+                    // Normal Line
+                    if (is_bp) printf(DBG_CYAN "│" DBG_RED "●" DBG_YELLOW " %4d | " DBG_RST "%.*s\n", line, len, start);
+                    else       printf(DBG_CYAN "│" DBG_RST "  %4d | %.*s\n", line, len, start);
                 }
             }
             start = ptr + 1;
@@ -515,24 +513,26 @@ void dbg_print_source_window(int current_line, int context_lines) {
         }
         ptr++;
     }
-    printf(DBG_COLOR_CYAN "└───────────────────────────────────────────────────────────┘\n" DBG_COLOR_RESET);
+    printf(DBG_CYAN "╰──────────────────────────────────────────────────────────────────╯\n" DBG_RST);
 }
 
 void dbg_print_state_window() {
-    printf(DBG_COLOR_YELLOW "┌─ State (FP: %d | SP: %d) ──────────────────────────┐\n" DBG_COLOR_RESET, vm.fp, vm.sp);
+    printf(DBG_YELLOW "╭─" DBG_BOLD " State " DBG_RST DBG_YELLOW "──────────────────────────┬───────────────────────────────╮\n" DBG_RST);
+    printf(DBG_YELLOW "│" DBG_RST " FP: %-4d  SP: %-4d              " DBG_YELLOW "│" DBG_RST " Memory Heap                   " DBG_YELLOW "│\n" DBG_RST, vm.fp, vm.sp);
+    printf(DBG_YELLOW "├────────────────────────────────────┼───────────────────────────────┤\n" DBG_RST);
 
     // Globals (Limited view)
-    printf("  " DBG_COLOR_GREEN "[Globals]" DBG_COLOR_RESET "\n");
+    printf(DBG_YELLOW "│" DBG_MAG " Globals                            " DBG_YELLOW "│" DBG_RST "\n");
     for (int i = 0; i < vm.global_symbol_count; i++) {
-        if (i > 5) { printf("    ... (%d more)\n", vm.global_symbol_count - 5); break; }
+        if (i > 5) { printf(DBG_YELLOW "│" DBG_RST " ... (%d more)                      " DBG_YELLOW "│" DBG_RST "\n", vm.global_symbol_count - 5); break; }
         int addr = vm.global_symbols[i].addr;
-        printf("    %s: ", vm.global_symbols[i].name);
+        printf(DBG_YELLOW "│" DBG_RST " %-12s: ", vm.global_symbols[i].name);
         print_recursive(vm.globals[addr], vm.global_types[addr], 0, 1);
         printf("\n");
     }
 
     // Locals
-    printf("  " DBG_COLOR_GREEN "[Locals]" DBG_COLOR_RESET "\n");
+    printf(DBG_YELLOW "│" DBG_MAG " Locals                             " DBG_YELLOW "│" DBG_RST "\n");
     bool found = false;
     if (vm.local_symbols) {
         for (int i = 0; i < vm.local_symbol_count; i++) {
@@ -540,7 +540,7 @@ void dbg_print_state_window() {
             if ((vm.ip - 1) >= sym->start_ip && (sym->end_ip == -1 || (vm.ip - 1) <= sym->end_ip)) {
                 int stack_idx = vm.fp + sym->stack_offset;
                 if (stack_idx <= vm.sp) {
-                    printf("    %s: ", sym->name);
+                    printf(DBG_YELLOW "│" DBG_RST " %-12s: ", sym->name);
                     print_recursive(vm.stack[stack_idx], vm.stack_types[stack_idx], 0, 1);
                     printf("\n");
                     found = true;
@@ -548,8 +548,8 @@ void dbg_print_state_window() {
             }
         }
     }
-    if (!found) printf("    (None)\n");
-    printf(DBG_COLOR_YELLOW "└───────────────────────────────────────────────────────────┘\n" DBG_COLOR_RESET);
+    if (!found) printf(DBG_YELLOW "│" DBG_RST " (None)                             " DBG_YELLOW "│" DBG_RST "\n");
+    printf(DBG_YELLOW "╰────────────────────────────────────┴───────────────────────────────╯\n" DBG_RST);
 }
 
 void enter_debugger() {
@@ -562,32 +562,30 @@ void enter_debugger() {
     dbg_print_state_window();
 
     while (1) {
-        printf(DBG_COLOR_RED "(mylo-db)" DBG_COLOR_RESET " ");
+        printf(DBG_BOLD DBG_RED "(mylo-db) " DBG_RST);
         char buf[64];
         if (!fgets(buf, 64, stdin)) return;
 
         if (buf[0] == 'n') { // Next Line (Step Over/Next)
             int start_line = current_line;
-            // Run until line changes
             while (vm.ip < vm.code_size) {
                  int op = vm_step(false);
                  if (op == -1) exit(0);
-                 if (op == OP_DEBUGGER) break; // Hit manual breakpoint
+                 if (op == OP_DEBUGGER) break;
                  int new_line = vm.lines[vm.ip];
                  if (new_line != start_line && new_line != 0) break;
             }
-            enter_debugger(); // Re-enter UI at new spot
+            enter_debugger();
             return;
         }
         else if (buf[0] == 's') { // Step Instruction
-            // Execute exactly one instruction
-            int op = vm_step(true); // Trace mode prints op
+            int op = vm_step(true);
             if (op == -1) exit(0);
             enter_debugger();
             return;
         }
         else if (buf[0] == 'c') { // Continue
-            return; // Exit debugger loop, resume VM loop
+            return;
         }
         else if (buf[0] == 'b') { // Breakpoint
             int line = atoi(buf + 1);
@@ -605,8 +603,8 @@ void enter_debugger() {
     }
 }
 
-// --- Logic Implementation ---
-// (Logic, Math, Broadcast functions are unchanged)
+// ... Logic Implementation ... (Math, etc unchanged) ...
+// (Retaining Broadcast, math, etc from previous response)
 static void broadcast_math(int op, double obj_val, double scalar_val, int scalar_type, bool obj_is_lhs) {
     double* base = vm_resolve_ptr(obj_val);
     int* types = vm_resolve_type(obj_val);
@@ -1079,21 +1077,22 @@ static void exec_cast_op(int target_type, bool is_check_only) {
 // --- VM Execution Loop ---
 
 int vm_step(bool debug_trace) {
-    // 1. TUI Breakpoint Check (NEW)
+    // 1. TUI Breakpoint Check
     if (vm.cli_debug_mode) {
-         static int last_stop_line = -1;
          int curr = vm.lines[vm.ip];
-
          bool hit = false;
          for(int i=0; i<dbg_bp_count; i++) {
-             if (dbg_breakpoints[i] == curr && curr != last_stop_line) hit = true;
+             // Stop if on a breakpoint AND we haven't already stopped on this line
+             if (dbg_breakpoints[i] == curr && curr != vm.last_debug_line) hit = true;
          }
 
          if (hit) {
-             last_stop_line = curr;
+             vm.last_debug_line = curr;
              enter_debugger();
          }
-         if (curr != last_stop_line) last_stop_line = -1;
+
+         // If we moved to a new line, reset the last_stop
+         if (curr != vm.last_debug_line) vm.last_debug_line = -1;
     }
 
     if (vm.ip >= vm.code_size) return -1;
@@ -1283,10 +1282,11 @@ int vm_step(bool debug_trace) {
             exec_cast_op(target, true);
             break;
         }
-        // 2. TUI Manual Breakpoint (NEW)
+        // 2. TUI Manual Breakpoint
         case OP_DEBUGGER:
             if (vm.cli_debug_mode) {
-                printf("Hit debug() statement.\n");
+                // Manually trigger entry
+                vm.last_debug_line = vm.lines[vm.ip];
                 enter_debugger();
             }
             break;

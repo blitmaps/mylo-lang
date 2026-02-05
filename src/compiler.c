@@ -13,6 +13,8 @@
 #include "compiler.h"
 #include <setjmp.h>
 
+// --- Tokenizer & Structures ---
+
 typedef enum {
     TK_FN, TK_VAR, TK_IF, TK_FOR, TK_RET, TK_PRINT, TK_IN, TK_STRUCT, TK_ELSE,
     TK_MOD, TK_IMPORT, TK_FOREVER,
@@ -24,8 +26,8 @@ typedef enum {
     TK_EQ_ASSIGN, TK_QUESTION,
     TK_EOF, TK_FSTR, TK_BSTR,
     TK_COLON, TK_COMMA, TK_DOT,
-    TK_SCOPE,
-    TK_ARROW,
+    TK_SCOPE, // ::
+    TK_ARROW, // ->
     TK_BREAK, TK_CONTINUE,
     TK_ENUM,
     TK_MODULE_PATH,
@@ -36,9 +38,10 @@ typedef enum {
     TK_REGION,
     TK_CLEAR,
     TK_MONITOR,
-    TK_DEBUGGER
+    TK_DEBUGGER, // <--- Added!
 } MyloTokenType;
 
+// Token Names for pretty printing
 const char *TOKEN_NAMES[] = {
     "fn", "var", "if", "for", "ret", "print", "in", "struct", "else",
     "mod", "import", "forever",
@@ -50,7 +53,8 @@ const char *TOKEN_NAMES[] = {
     ":", ",", ".", "::", "->",
     "break", "continue", "enum", "module_path",
     "true", "false", "*", "/", "%",
-    "embed", "Type Definition", "region", "clear", "monitor", "debugger"
+    "embed", "Type Definition", "region", "clear", "monitor",
+    "debugger" // <--- Added!
 };
 
 const char *get_token_name(MyloTokenType t) {
@@ -141,10 +145,7 @@ void expression();
 void statement();
 
 void print_line_slice(char *start, char *end) {
-    while (start < end) {
-        fputc(*start, stderr);
-        start++;
-    }
+    while (start < end) { fputc(*start, stderr); start++; }
     fputc('\n', stderr);
 }
 
@@ -498,56 +499,25 @@ void next_token() {
     }
 
     switch (*src++) {
-        case '(': curr.type = TK_LPAREN;
-            break;
-        case ')': curr.type = TK_RPAREN;
-            break;
-        case '{': curr.type = TK_LBRACE;
-            break;
-        case '}': curr.type = TK_RBRACE;
-            break;
-        case '[': curr.type = TK_LBRACKET;
-            break;
-        case ']': curr.type = TK_RBRACKET;
-            break;
-        case '+': curr.type = TK_PLUS;
-            break;
-        case '-': curr.type = TK_MINUS;
-            break;
-        case '*': curr.type = TK_MUL;
-            break;
-        case '/': curr.type = TK_DIV;
-            break;
-        case '%': curr.type = TK_MOD_OP;
-            break;
-        case ':': curr.type = TK_COLON;
-            break;
-        case ',': curr.type = TK_COMMA;
-            break;
-        case '.': curr.type = TK_DOT;
-            break;
-        case '?': curr.type = TK_QUESTION;
-            break;
-        case '<': if (*src == '=') {
-                src++;
-                curr.type = TK_LE;
-            } else curr.type = TK_LT;
-            break;
-        case '>': if (*src == '=') {
-                src++;
-                curr.type = TK_GE;
-            } else curr.type = TK_GT;
-            break;
-        case '!': if (*src == '=') {
-                src++;
-                curr.type = TK_NEQ;
-            } else error("Unexpected char '!'");
-            break;
-        case '=': if (*src == '=') {
-                src++;
-                curr.type = TK_EQ;
-            } else curr.type = TK_EQ_ASSIGN;
-            break;
+        case '(': curr.type = TK_LPAREN; break;
+        case ')': curr.type = TK_RPAREN; break;
+        case '{': curr.type = TK_LBRACE; break;
+        case '}': curr.type = TK_RBRACE; break;
+        case '[': curr.type = TK_LBRACKET; break;
+        case ']': curr.type = TK_RBRACKET; break;
+        case '+': curr.type = TK_PLUS; break;
+        case '-': curr.type = TK_MINUS; break;
+        case '*': curr.type = TK_MUL; break;
+        case '/': curr.type = TK_DIV; break;
+        case '%': curr.type = TK_MOD_OP; break;
+        case ':': curr.type = TK_COLON; break;
+        case ',': curr.type = TK_COMMA; break;
+        case '.': curr.type = TK_DOT; break;
+        case '?': curr.type = TK_QUESTION; break;
+        case '<': if (*src == '=') { src++; curr.type = TK_LE; } else curr.type = TK_LT; break;
+        case '>': if (*src == '=') { src++; curr.type = TK_GE; } else curr.type = TK_GT; break;
+        case '!': if (*src == '=') { src++; curr.type = TK_NEQ; } else error("Unexpected char '!'"); break;
+        case '=': if (*src == '=') { src++; curr.type = TK_EQ; } else curr.type = TK_EQ_ASSIGN; break;
         default: error("Unknown char '%c'", *(src - 1));
     }
     curr.length = (int) (src - curr.start);
@@ -1768,7 +1738,11 @@ void for_statement() {
             match(TK_RPAREN);
             match(TK_LBRACE);
             while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
+
+            // FIX: Ensure jump back is associated with the brace line
+            int brace_line = curr.line;
             match(TK_RBRACE);
+
             int continue_dest = vm.code_size;
             EMIT_GET(is_local, var1_addr);
             EMIT_GET(is_local, s);
@@ -1779,7 +1753,11 @@ void for_statement() {
             EMIT_GET(is_local, var1_addr);
             emit(OP_SUB);
             emit(OP_JNZ);
+
+            // PATCH: Set the line number of the JMP to the brace line
             emit(loop);
+            vm.lines[vm.code_size - 1] = brace_line;
+
             pop_loop(continue_dest, vm.code_size);
             return;
         } else {
@@ -1821,7 +1799,11 @@ void for_statement() {
             match(TK_RPAREN);
             match(TK_LBRACE);
             while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
+
+            // FIX: Ensure jump back is associated with the brace line
+            int brace_line = curr.line;
             match(TK_RBRACE);
+
             int continue_dest = vm.code_size;
             EMIT_GET(is_local, i);
             emit(OP_PSH_NUM);
@@ -1829,7 +1811,11 @@ void for_statement() {
             emit(OP_ADD);
             EMIT_SET(is_local, i);
             emit(OP_JMP);
+
+            // PATCH: Set the line number of the JMP to the brace line
             emit(loop);
+            vm.lines[vm.code_size - 1] = brace_line;
+
             vm.bytecode[exit] = vm.code_size;
             pop_loop(continue_dest, vm.code_size);
         }
@@ -1843,9 +1829,18 @@ void for_statement() {
         emit(0);
         match(TK_LBRACE);
         while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
+
+        // FIX: Ensure jump back is associated with the brace line
+        int brace_line = curr.line;
         match(TK_RBRACE);
+
         emit(OP_JMP);
         emit(loop);
+
+        // PATCH: Set the line number of the JMP to the brace line
+        vm.lines[vm.code_size - 1] = brace_line;
+        vm.lines[vm.code_size - 2] = brace_line; // Patch both operand and opcode
+
         vm.bytecode[exit] = vm.code_size;
         pop_loop(loop, vm.code_size);
     }
@@ -2007,9 +2002,18 @@ void statement() {
         push_loop();
         int loop_start = vm.code_size;
         while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
+
+        // FIX: Ensure jump back is associated with the brace line
+        int brace_line = curr.line;
         match(TK_RBRACE);
+
         emit(OP_JMP);
         emit(loop_start);
+
+        // PATCH: Set the line number of the JMP to the brace line
+        vm.lines[vm.code_size - 1] = brace_line;
+        vm.lines[vm.code_size - 2] = brace_line;
+
         pop_loop(loop_start, vm.code_size);
     } else if (curr.type == TK_EMBED) {
         parse_embed();

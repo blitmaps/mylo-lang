@@ -60,7 +60,7 @@ typedef enum {
     OP_MONITOR,
     OP_CAST,
     OP_CHECK_TYPE,
-    OP_DEBUGGER     // <--- Added for Debugger
+    OP_DEBUGGER
 } OpCode;
 
 extern const char *OP_NAMES[];
@@ -119,8 +119,9 @@ typedef struct {
     VMLocalInfo* local_symbols;
     int local_symbol_count;
     // --- Debugger Fields ---
-    char* source_code;      // <--- Added
-    bool cli_debug_mode;    // <--- Added
+    char* source_code;
+    bool cli_debug_mode;
+    int last_debug_line; // <--- ADDED: Persist step state
 } VM;
 
 extern VM vm;
@@ -162,7 +163,7 @@ void vm_free_ref(int id);
 int vm_find_function(VM* vm, const char* name);
 void vm_register_function(VM* vm, const char* name, int addr);
 void print_recursive(double val, int type, int depth, int max_elem);
-void enter_debugger(); // <--- Added for main.c to call
+void enter_debugger();
 
 #define MYLO_STORE(val, type_name) vm_store_copy(&(val), sizeof(val), type_name)
 #define MYLO_RETRIEVE(id, c_type, type_name) (c_type*)vm_get_ref((int)(id), type_name)
