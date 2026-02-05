@@ -17,6 +17,7 @@ void compile_to_c_source(const char* output_filename);
 void generate_binding_c_source(const char* output_filename);
 void mylo_reset();
 void disassemble();
+extern void enter_debugger();
 
 // NEW: extern the counters
 extern int ffi_count;
@@ -332,6 +333,7 @@ int main(int argc, char** argv) {
     bool debug_mode = false;
     bool version = false;
     bool repl_mode = false;
+    bool cli_debug_mode = false; // Capture flag locally
 
     char* fn = NULL;
 
@@ -342,6 +344,7 @@ int main(int argc, char** argv) {
         else if (strcmp(argv[i], "--dump") == 0) dump = true;
         else if (strcmp(argv[i], "--trace") == 0) trace = true;
         else if (strcmp(argv[i], "--debug") == 0) debug_mode = true;
+        else if (strcmp(argv[i], "--db") == 0) cli_debug_mode = true; // Set local flag
         else if (strcmp(argv[i], "--version") == 0) version = true;
         else if (strcmp(argv[i], "--repl") == 0) repl_mode = true;
         else if (strcmp(argv[i], "--help") == 0) {
@@ -357,13 +360,13 @@ int main(int argc, char** argv) {
         vm_cleanup();
         return 0;
     }
-    
+
     if (repl_mode) {
         start_repl();
         vm_cleanup();
         return 0;
     }
-    // Disable dlopen
+
     MyloConfig.build_mode = build_mode;
     if(!fn) {
         printf("No input file provided.\n");
@@ -379,18 +382,23 @@ int main(int argc, char** argv) {
     }
 
     // 1. If Debugging, Hand off control immediately (Do NOT parse yet)
-    if (debug_mode) { // assuming you kept the debug_mode flag from previous steps
+    if (debug_mode) {
         start_debug_adapter(fn, content);
         free(content);
         vm_cleanup();
         return 0;
     }
 
+    // Reset the VM before parsing (this clears VM struct, so we must set flags AFTER this)
     mylo_reset();
+
+    // Apply TUI Debugger settings
+    vm.source_code = content;
+    vm.cli_debug_mode = cli_debug_mode;
+
     parse(content);
 
     if (bind_mode) {
-        // Generate binding C file (e.g. test_lib.mylo -> test_lib.mylo_bind.c)
         char out_name[1024];
         snprintf(out_name, 1024, "%s_bind.c", fn);
         generate_binding_c_source(out_name);
@@ -407,7 +415,6 @@ int main(int argc, char** argv) {
     }
 
     // --- INTERPRETER SAFETY CHECK ---
-    // If we have C blocks that were NOT bound via native modules, we must stop.
     if ((ffi_count - bound_ffi_count) > 0) {
         setTerminalColor(MyloFgMagenta, MyloBgColorDefault);
         printf("Error: This program contains Native C blocks and no shared objects are found, so it cannot be interpreted.\n");
@@ -420,6 +427,11 @@ int main(int argc, char** argv) {
     }
 
     if (dump) disassemble();
+
+    // Start debugger immediately if flag is set
+    if (vm.cli_debug_mode) {
+        enter_debugger();
+    }
 
     run_vm(trace);
 

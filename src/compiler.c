@@ -38,6 +38,7 @@ typedef enum {
     TK_REGION,
     TK_CLEAR,
     TK_MONITOR,
+    TK_DEBUGGER, // <--- Added!
 } MyloTokenType;
 
 // Token Names for pretty printing
@@ -52,11 +53,12 @@ const char *TOKEN_NAMES[] = {
     ":", ",", ".", "::", "->",
     "break", "continue", "enum", "module_path",
     "true", "false", "*", "/", "%",
-    "embed", "Type Definition", "region", "clear", "monitor"
+    "embed", "Type Definition", "region", "clear", "monitor",
+    "debugger" // <--- Added!
 };
 
 const char *get_token_name(MyloTokenType t) {
-    if (t < 0 || t > TK_CLEAR) return "Unknown";
+    if (t < 0 || t > TK_DEBUGGER) return "Unknown";
     return TOKEN_NAMES[t];
 }
 
@@ -65,7 +67,6 @@ typedef struct {
     char text[MAX_IDENTIFIER];
     double val_float;
     int line;
-    // Context tracking
     char *start;
     int length;
 } Token;
@@ -88,7 +89,7 @@ int ffi_count = 0;
 int bound_ffi_count = 0;
 
 static char *src;
-static char *current_file_start = NULL; // Start of the current file buffer
+static char *current_file_start = NULL;
 static Token curr;
 static bool inside_function = false;
 static char current_namespace[MAX_IDENTIFIER] = "";
@@ -137,27 +138,20 @@ struct {
 
 int enum_entry_count = 0;
 
-// Forward Declarations
 void parse_internal(char *source, bool is_import);
 void parse_struct_literal(int struct_idx);
 void parse_map_literal();
 void expression();
 void statement();
 
-// --- Error Handling ---
-
 void print_line_slice(char *start, char *end) {
-    while (start < end) {
-        fputc(*start, stderr);
-        start++;
-    }
+    while (start < end) { fputc(*start, stderr); start++; }
     fputc('\n', stderr);
 }
 
 void print_error_context() {
     if (!current_file_start || !curr.start) return;
 
-    // 1. Find boundaries of the CURRENT line
     char *line_start = curr.start;
     while (line_start > current_file_start && *(line_start - 1) != '\n') {
         line_start--;
@@ -168,10 +162,8 @@ void print_error_context() {
         line_end++;
     }
 
-    // 2. Print PREVIOUS Line (if it exists) - White
     if (line_start > current_file_start) {
         char *prev_line_end = line_start - 1;
-        // Handle Windows \r\n
         if (prev_line_end > current_file_start && *prev_line_end == '\r') prev_line_end--;
 
         char *prev_line_start = prev_line_end;
@@ -180,42 +172,38 @@ void print_error_context() {
         }
 
         if (prev_line_end >= prev_line_start) {
-            fsetTerminalColor(stderr, MyloFgWhite, MyloBgColorDefault); // Use stderr
+            fsetTerminalColor(stderr, MyloFgWhite, MyloBgColorDefault);
             fprintf(stderr, "    ");
             print_line_slice(prev_line_start, prev_line_end);
         }
     }
 
-    // 3. Print CURRENT Line - Blue
-    fsetTerminalColor(stderr, MyloFgBlue, MyloBgColorDefault); // Use stderr
+    fsetTerminalColor(stderr, MyloFgBlue, MyloBgColorDefault);
     fprintf(stderr, "    ");
     print_line_slice(line_start, line_end);
 
-    // 4. Print UNDERLINE - Red Carets (^)
     fprintf(stderr, "    ");
     int offset = (int) (curr.start - line_start);
 
-    // Print spaces up to the error (handling tabs)
     for (int i = 0; i < offset; i++) {
         char c = line_start[i];
         if (c == '\t') fputc('\t', stderr);
         else fputc(' ', stderr);
     }
 
-    fsetTerminalColor(stderr, MyloFgRed, MyloBgColorDefault); // Use stderr
+    fsetTerminalColor(stderr, MyloFgRed, MyloBgColorDefault);
     int len = curr.length;
     if (len <= 0) len = 1;
     for (int i = 0; i < len; i++) fputc('^', stderr);
     fprintf(stderr, "\n");
 
-    // 5. Print NEXT Line (if it exists) - White
     if (*line_end) {
-        char *next_line_start = line_end + 1; // Skip the \n
+        char *next_line_start = line_end + 1;
         if (*next_line_start) {
             char *next_line_end = next_line_start;
             while (*next_line_end && *next_line_end != '\n') next_line_end++;
 
-            fsetTerminalColor(stderr, MyloFgWhite, MyloBgColorDefault); // Use stderr
+            fsetTerminalColor(stderr, MyloFgWhite, MyloBgColorDefault);
             fprintf(stderr, "    ");
             print_line_slice(next_line_start, next_line_end);
         }
@@ -225,9 +213,9 @@ void print_error_context() {
 }
 
 void error(const char *fmt, ...) {
-    fprintf(stderr, "\n"); // Spacing (stderr)
+    fprintf(stderr, "\n");
     print_error_context();
-    fprintf(stderr, "\n"); // Spacing (stderr)
+    fprintf(stderr, "\n");
 
     char buffer[1024];
     va_list args;
@@ -242,7 +230,7 @@ void error(const char *fmt, ...) {
         exit(1);
     }
 
-    fsetTerminalColor(stderr, MyloFgRed, MyloBgColorDefault); // Use stderr
+    fsetTerminalColor(stderr, MyloFgRed, MyloBgColorDefault);
     fprintf(stderr, "%s\n", buffer);
     fresetTerminal(stderr);
 
@@ -460,6 +448,7 @@ void next_token() {
         else if (strcmp(curr.text, "region") == 0) curr.type = TK_REGION;
         else if (strcmp(curr.text, "clear") == 0) curr.type = TK_CLEAR;
         else if (strcmp(curr.text, "monitor") == 0) curr.type = TK_MONITOR;
+        else if (strcmp(curr.text, "debugger") == 0) curr.type = TK_DEBUGGER;
         else if (strcmp(curr.text, "any") == 0) curr.type = TK_TYPE_DEF;
         else if (strcmp(curr.text, "num") == 0) curr.type = TK_TYPE_DEF;
         else if (strcmp(curr.text, "str") == 0) curr.type = TK_TYPE_DEF;
@@ -510,56 +499,25 @@ void next_token() {
     }
 
     switch (*src++) {
-        case '(': curr.type = TK_LPAREN;
-            break;
-        case ')': curr.type = TK_RPAREN;
-            break;
-        case '{': curr.type = TK_LBRACE;
-            break;
-        case '}': curr.type = TK_RBRACE;
-            break;
-        case '[': curr.type = TK_LBRACKET;
-            break;
-        case ']': curr.type = TK_RBRACKET;
-            break;
-        case '+': curr.type = TK_PLUS;
-            break;
-        case '-': curr.type = TK_MINUS;
-            break;
-        case '*': curr.type = TK_MUL;
-            break;
-        case '/': curr.type = TK_DIV;
-            break;
-        case '%': curr.type = TK_MOD_OP;
-            break;
-        case ':': curr.type = TK_COLON;
-            break;
-        case ',': curr.type = TK_COMMA;
-            break;
-        case '.': curr.type = TK_DOT;
-            break;
-        case '?': curr.type = TK_QUESTION;
-            break;
-        case '<': if (*src == '=') {
-                src++;
-                curr.type = TK_LE;
-            } else curr.type = TK_LT;
-            break;
-        case '>': if (*src == '=') {
-                src++;
-                curr.type = TK_GE;
-            } else curr.type = TK_GT;
-            break;
-        case '!': if (*src == '=') {
-                src++;
-                curr.type = TK_NEQ;
-            } else error("Unexpected char '!'");
-            break;
-        case '=': if (*src == '=') {
-                src++;
-                curr.type = TK_EQ;
-            } else curr.type = TK_EQ_ASSIGN;
-            break;
+        case '(': curr.type = TK_LPAREN; break;
+        case ')': curr.type = TK_RPAREN; break;
+        case '{': curr.type = TK_LBRACE; break;
+        case '}': curr.type = TK_RBRACE; break;
+        case '[': curr.type = TK_LBRACKET; break;
+        case ']': curr.type = TK_RBRACKET; break;
+        case '+': curr.type = TK_PLUS; break;
+        case '-': curr.type = TK_MINUS; break;
+        case '*': curr.type = TK_MUL; break;
+        case '/': curr.type = TK_DIV; break;
+        case '%': curr.type = TK_MOD_OP; break;
+        case ':': curr.type = TK_COLON; break;
+        case ',': curr.type = TK_COMMA; break;
+        case '.': curr.type = TK_DOT; break;
+        case '?': curr.type = TK_QUESTION; break;
+        case '<': if (*src == '=') { src++; curr.type = TK_LE; } else curr.type = TK_LT; break;
+        case '>': if (*src == '=') { src++; curr.type = TK_GE; } else curr.type = TK_GT; break;
+        case '!': if (*src == '=') { src++; curr.type = TK_NEQ; } else error("Unexpected char '!'"); break;
+        case '=': if (*src == '=') { src++; curr.type = TK_EQ; } else curr.type = TK_EQ_ASSIGN; break;
         default: error("Unknown char '%c'", *(src - 1));
     }
     curr.length = (int) (src - curr.start);
@@ -588,7 +546,7 @@ bool parse_namespaced_id(char *out_name) {
 
     if (curr.type == TK_TYPE_DEF) {
         match(TK_TYPE_DEF);
-        return false; // Primitives don't have namespaces (e.g. i32::foo)
+        return false;
     }
 
     match(TK_ID);
@@ -604,8 +562,6 @@ bool parse_namespaced_id(char *out_name) {
     }
     return false;
 }
-
-// --- Helper for Type Parsing ---
 
 typedef struct {
     int id;
@@ -638,8 +594,6 @@ TypeInfo parse_type_spec() {
 }
 
 
-// --- C Generation Helpers (Refactored) ---
-
 static void c_gen_headers(FILE *fp) {
     fprintf(fp, "// Generated by Mylo Compiler\n");
     fprintf(fp, "#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n#include <math.h>\n");
@@ -671,15 +625,10 @@ static void c_gen_type_name(FILE* fp, const char* type, bool is_return) {
     else if (strcmp(type, "i16") == 0) fprintf(fp, "short");
     else if (strcmp(type, "bool") == 0 || strcmp(type, "byte") == 0) fprintf(fp, "unsigned char");
 
-    // --- ADDED: Safety Logic ---
-    // If the type is an array (contains "[]"), force return type to MyloReturn.
-    // This prevents generating "unsigned char" or "int*" as return types,
-    // which would lose the memory handle/length info when returned to the VM.
     else if (strstr(type, "[]")) {
         if (is_return) {
-            fprintf(fp, "MyloReturn"); // Returns need the full struct
+            fprintf(fp, "MyloReturn");
         } else {
-            // Parameters should be the underlying C pointer type
             if (strstr(type, "byte") || strstr(type, "bool")) fprintf(fp, "unsigned char*");
             else if (strstr(type, "i32")) fprintf(fp, "int*");
             else if (strstr(type, "f32")) fprintf(fp, "float*");
@@ -691,14 +640,12 @@ static void c_gen_type_name(FILE* fp, const char* type, bool is_return) {
 }
 
 static void c_gen_ffi_wrappers(FILE *fp) {
-    // 1. User Functions
     for (int i = 0; i < ffi_count; i++) {
         c_gen_type_name(fp, ffi_blocks[i].return_type, true);
         fprintf(fp, " __mylo_user_%d(", i);
         for (int a = 0; a < ffi_blocks[i].arg_count; a++) {
             char *type = ffi_blocks[i].args[a].type;
             c_gen_type_name(fp, type, false);
-            // Add * for C-struct pointers (except specific arrays or primitives)
              if (strlen(type) > 0 && strcmp(type, "num") != 0 && !strstr(type, "[]") &&
                  strcmp(type, "i32")!=0 && strcmp(type, "i64")!=0 && strcmp(type, "f32")!=0 &&
                  strcmp(type, "i16")!=0 && strcmp(type, "bool")!=0 && strcmp(type, "byte")!=0 &&
@@ -711,16 +658,13 @@ static void c_gen_ffi_wrappers(FILE *fp) {
         fprintf(fp, ") {\n%s\n}\n\n", ffi_blocks[i].code_body);
     }
 
-    // 2. VM Wrappers
     fprintf(fp, "// --- NATIVE WRAPPERS ---\n");
     for (int i = 0; i < ffi_count; i++) {
         fprintf(fp, "void __wrapper_%d(VM* vm) {\n", i);
-        // Pop args in reverse
         for (int a = ffi_blocks[i].arg_count - 1; a >= 0; a--) {
             fprintf(fp, "    double _raw_%s = vm_pop();\n", ffi_blocks[i].args[a].name);
         }
 
-        // Call user function
         char *ret_type = ffi_blocks[i].return_type;
         if (strcmp(ret_type, "void") != 0) {
             c_gen_type_name(fp, ret_type, false);
@@ -728,7 +672,6 @@ static void c_gen_ffi_wrappers(FILE *fp) {
         }
         fprintf(fp, "__mylo_user_%d(", i);
 
-        // Pass converted args
         for (int a = 0; a < ffi_blocks[i].arg_count; a++) {
             char *type = ffi_blocks[i].args[a].type;
             char *name = ffi_blocks[i].args[a].name;
@@ -754,7 +697,6 @@ static void c_gen_ffi_wrappers(FILE *fp) {
         }
         fprintf(fp, ");\n");
 
-        // Push Return Value
         if (strcmp(ret_type, "num") == 0) fprintf(fp, "    vm_push(res, T_NUM);\n");
         else if (strcmp(ret_type, "void") == 0) fprintf(fp, "    vm_push(0.0, T_NUM);\n");
         else if (strcmp(ret_type, "string") == 0 || strcmp(ret_type, "str") == 0) fprintf(
@@ -764,14 +706,10 @@ static void c_gen_ffi_wrappers(FILE *fp) {
             fprintf(fp, "    vm_push((double)res, T_NUM);\n");
         else if (strlen(ret_type) > 0) {
 
-            // --- ADDED: Safety Logic ---
-            // If it is an array type (has "[]"), we know we forced it to return MyloReturn above.
-            // So we simply push the components of that return struct.
             if (strstr(ret_type, "[]")) {
                 fprintf(fp, "    vm_push(res.value, res.type);\n");
             }
             else {
-                // Existing struct logic (remains unchanged)
                 int st_idx = -1;
                 for (int s = 0; s < struct_count; s++) if (strcmp(struct_defs[s].name, ret_type) == 0) st_idx = s;
                 if (st_idx != -1) {
@@ -790,8 +728,6 @@ static void c_gen_ffi_wrappers(FILE *fp) {
         fprintf(fp, "}\n");
     }
 }
-
-// --- Common Logic ---
 
 void factor() {
     if (curr.type == TK_NUM) {
@@ -889,14 +825,13 @@ void factor() {
             match(TK_ID);
         }
 
-        // --- ADDED: Array Syntax Support ---
         if (curr.type == TK_LBRACKET) {
             match(TK_LBRACKET);
             match(TK_RBRACKET);
             strcat(ffi_blocks[ffi_idx].return_type, "[]");
         }
 
-        if (curr.type != TK_LBRACE) exit(1); // Consider error() here for better UX
+        if (curr.type != TK_LBRACE) exit(1);
         char *start = src + 1;
         int braces = 1;
         char *end = start;
@@ -953,21 +888,10 @@ void factor() {
         emit(OP_PSH_STR); emit(id); emit(OP_MK_BYTES);
         match(TK_BSTR);
     } else if (curr.type == TK_ID) {
-        // ... (Parsing identifiers, function calls, variables) ...
-        // Note: The rest of factor() handles standard identifiers and is quite long.
-        // It relies on finding variables, functions, etc.
-        // Since no changes were needed below this point, I've omitted the standard logic
-        // to keep this response concise. If you need the *entire* 300-line function,
-        // let me know, but the critical change is in the "else if (curr.type == TK_ID && strcmp(curr.text, "C") == 0)" block above.
-
-        // RE-INSERT EXISTING LOGIC FROM YOUR FILE HERE FOR TK_ID
-        // (Use the code from your uploaded compiler.c for the rest of this function)
         Token start_token = curr;
         char name[MAX_IDENTIFIER];
         parse_namespaced_id(name);
-        // ... etc ...
 
-        // NOTE: For copy-paste safety, I will paste the REST of the TK_ID block below so you have the full function context.
         int enum_val = find_enum_val(name);
         if (enum_val != -1) {
             int idx = make_const((double) enum_val); emit(OP_PSH_NUM); emit(idx); return;
@@ -1152,8 +1076,6 @@ int get_var_addr(char *n, bool is_local, int explicit_type) {
     }
 }
 
-// --- Statement Decompositions ---
-
 static void parse_region() {
     match(TK_REGION);
     char name[MAX_IDENTIFIER];
@@ -1181,7 +1103,7 @@ static void parse_print() {
 }
 
 static void parse_c_block_stmt() {
-    match(TK_ID); // "C"
+    match(TK_ID);
     int ffi_idx = ffi_count++;
     ffi_blocks[ffi_idx].id = ffi_idx;
     ffi_blocks[ffi_idx].arg_count = 0;
@@ -1225,7 +1147,6 @@ static void parse_c_block_stmt() {
             match(TK_ID);
         }
 
-        // --- ADDED: Array Syntax Support ---
         if (curr.type == TK_LBRACKET) {
             match(TK_LBRACKET);
             match(TK_RBRACKET);
@@ -1259,7 +1180,6 @@ static void parse_c_block_stmt() {
 static void parse_import() {
     match(TK_IMPORT);
 
-    // 1. Native Import
     if (curr.type == TK_ID && strcmp(curr.text, "native") == 0) {
         match(TK_ID);
         if (curr.type != TK_STR) error("Expected filename");
@@ -1306,7 +1226,6 @@ static void parse_import() {
             bound_ffi_count += added_natives;
         }
     }
-    // 2. C-Header Import
     else if (curr.type == TK_ID && strcmp(curr.text, "C") == 0) {
         match(TK_ID);
         if (curr.type == TK_STR) {
@@ -1314,8 +1233,6 @@ static void parse_import() {
             match(TK_STR);
             return;
         }
-        // This handles "import C { ... }" logic which overlaps with parse_c_block_stmt logic
-        // But specifically for void return blocks used in imports often.
         int ffi_idx = ffi_count++;
         ffi_blocks[ffi_idx].id = ffi_idx;
         ffi_blocks[ffi_idx].arg_count = 0;
@@ -1379,7 +1296,6 @@ static void parse_import() {
         emit(std_count + ffi_idx);
         emit(OP_POP);
     }
-    // 3. Regular File Import
     else {
         char f[MAX_STRING_LENGTH];
         strcpy(f, curr.text);
@@ -1438,8 +1354,7 @@ static void parse_var_decl() {
 
     bool handled = false;
 
-    // 1. Typed Primitive Array: var x: i32[] = [...]
-    if (type_info.is_array && type_info.id != TYPE_ANY && type_info.id < 0 && curr.type == TK_LBRACKET) { // Changed to check id < 0
+    if (type_info.is_array && type_info.id != TYPE_ANY && type_info.id < 0 && curr.type == TK_LBRACKET) {
         match(TK_LBRACKET);
         int count = 0;
         if (curr.type != TK_RBRACKET) {
@@ -1455,7 +1370,6 @@ static void parse_var_decl() {
         emit(type_info.id);
         handled = true;
     }
-    // 2. Typed Struct Array: var x: Struct[] = [{...}, ...]
     else if (type_info.is_array && type_info.id >= 0 && curr.type == TK_LBRACKET) {
         match(TK_LBRACKET);
         int count = 0;
@@ -1472,12 +1386,10 @@ static void parse_var_decl() {
         emit(count);
         handled = true;
     }
-    // 3. Typed Struct: var x: Struct = {...}
     else if (type_info.id >= 0 && !type_info.is_array && curr.type == TK_LBRACE) {
         parse_struct_literal(type_info.id);
         handled = true;
     }
-    // 4. Untyped Map/Struct Inference: var x = {...}
     else if (type_info.id == TYPE_ANY && curr.type == TK_LBRACE) {
         char *safe_src = src;
         Token safe_curr = curr;
@@ -1492,18 +1404,14 @@ static void parse_var_decl() {
         handled = true;
     }
 
-    // 5. Default Expression
     if (!handled) {
         expression();
     }
 
-    // Explicit Cast/Check logic if typed
     if (type_info.id != TYPE_ANY && !type_info.is_array) {
         emit(OP_CAST);
         emit(type_info.id);
     }
-    // If it's a typed array we rely on op_make_arr logic above or general checking,
-    // but general checking for arrays isn't fully implemented in VM casts yet besides basic checks.
 
     int var_idx = alloc_var(inside_function, name, type_info.id, type_info.is_array);
     if (!inside_function) {
@@ -1830,7 +1738,11 @@ void for_statement() {
             match(TK_RPAREN);
             match(TK_LBRACE);
             while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
+
+            // FIX: Ensure jump back is associated with the brace line
+            int brace_line = curr.line;
             match(TK_RBRACE);
+
             int continue_dest = vm.code_size;
             EMIT_GET(is_local, var1_addr);
             EMIT_GET(is_local, s);
@@ -1841,7 +1753,11 @@ void for_statement() {
             EMIT_GET(is_local, var1_addr);
             emit(OP_SUB);
             emit(OP_JNZ);
+
+            // PATCH: Set the line number of the JMP to the brace line
             emit(loop);
+            vm.lines[vm.code_size - 1] = brace_line;
+
             pop_loop(continue_dest, vm.code_size);
             return;
         } else {
@@ -1883,7 +1799,11 @@ void for_statement() {
             match(TK_RPAREN);
             match(TK_LBRACE);
             while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
+
+            // FIX: Ensure jump back is associated with the brace line
+            int brace_line = curr.line;
             match(TK_RBRACE);
+
             int continue_dest = vm.code_size;
             EMIT_GET(is_local, i);
             emit(OP_PSH_NUM);
@@ -1891,7 +1811,11 @@ void for_statement() {
             emit(OP_ADD);
             EMIT_SET(is_local, i);
             emit(OP_JMP);
+
+            // PATCH: Set the line number of the JMP to the brace line
             emit(loop);
+            vm.lines[vm.code_size - 1] = brace_line;
+
             vm.bytecode[exit] = vm.code_size;
             pop_loop(continue_dest, vm.code_size);
         }
@@ -1905,9 +1829,18 @@ void for_statement() {
         emit(0);
         match(TK_LBRACE);
         while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
+
+        // FIX: Ensure jump back is associated with the brace line
+        int brace_line = curr.line;
         match(TK_RBRACE);
+
         emit(OP_JMP);
         emit(loop);
+
+        // PATCH: Set the line number of the JMP to the brace line
+        vm.lines[vm.code_size - 1] = brace_line;
+        vm.lines[vm.code_size - 2] = brace_line; // Patch both operand and opcode
+
         vm.bytecode[exit] = vm.code_size;
         pop_loop(loop, vm.code_size);
     }
@@ -1991,8 +1924,6 @@ void parse_map_literal() {
     match(TK_RBRACE);
 }
 
-// --- Main Statement Parser ---
-
 void statement() {
     if (curr.type == TK_REGION) {
         parse_region();
@@ -2007,7 +1938,12 @@ void statement() {
         match(TK_LPAREN);
         match(TK_RPAREN);
         emit(OP_MONITOR);
-    } else if (curr.type == TK_PRINT) {
+    }
+    else if (curr.type == TK_DEBUGGER) {
+        match(TK_DEBUGGER);
+        emit(OP_DEBUGGER);
+    }
+    else if (curr.type == TK_PRINT) {
         parse_print();
     } else if (curr.type == TK_IMPORT) {
         parse_import();
@@ -2066,9 +2002,18 @@ void statement() {
         push_loop();
         int loop_start = vm.code_size;
         while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
+
+        // FIX: Ensure jump back is associated with the brace line
+        int brace_line = curr.line;
         match(TK_RBRACE);
+
         emit(OP_JMP);
         emit(loop_start);
+
+        // PATCH: Set the line number of the JMP to the brace line
+        vm.lines[vm.code_size - 1] = brace_line;
+        vm.lines[vm.code_size - 2] = brace_line;
+
         pop_loop(loop_start, vm.code_size);
     } else if (curr.type == TK_EMBED) {
         parse_embed();
@@ -2104,8 +2049,7 @@ void function() {
     local_count = 0;
     match(TK_LPAREN);
 
-    // Store which args need explicit checks at runtime
-    struct { int offset; int type; bool is_arr; } typed_args[MAX_FFI_ARGS]; // reusing constant
+    struct { int offset; int type; bool is_arr; } typed_args[MAX_FFI_ARGS];
     int typed_arg_count = 0;
 
     while (curr.type != TK_RPAREN) {
@@ -2119,7 +2063,6 @@ void function() {
         }
         int loc = alloc_var(true, arg_name, ti.id, ti.is_array);
 
-        // If type is not ANY, queue a check
         if (ti.id != TYPE_ANY && typed_arg_count < MAX_FFI_ARGS) {
             typed_args[typed_arg_count].offset = locals[loc].offset;
             typed_args[typed_arg_count].type = ti.id;
@@ -2132,13 +2075,10 @@ void function() {
     match(TK_RPAREN);
     match(TK_LBRACE);
 
-    // Emit Check opcodes at the very start of function body
     for(int i=0; i<typed_arg_count; i++) {
         if (!typed_args[i].is_arr) {
-            // Load Var, Check Type (and implicit cast), Store back in case of cast
             emit(OP_LVAR); emit(typed_args[i].offset);
             emit(OP_CHECK_TYPE); emit(typed_args[i].type);
-            // If check_type also casts (e.g. double->int for i32), we must store the result back
             emit(OP_SVAR); emit(typed_args[i].offset);
         }
     }
@@ -2162,12 +2102,12 @@ void parse_internal(char *source, bool is_import) {
     char *os = src;
     Token oc = curr;
     int saved_line = line;
-    char *ofs = current_file_start; // Save previous file context
+    char *ofs = current_file_start;
 
     if (is_import) line = 1;
     int start_debug_idx = debug_symbol_count;
 
-    current_file_start = source; // Set new file context
+    current_file_start = source;
     src = source;
     next_token();
 
@@ -2181,9 +2121,7 @@ void parse_internal(char *source, bool is_import) {
     for (int i = start_debug_idx; i < debug_symbol_count; i++) {
         if (debug_symbols[i].end_ip == -1) debug_symbols[i].end_ip = end_ip;
     }
-    // This allows the VM to print names during OP_MONITOR without needing the compiler's arrays
     if (!is_import) {
-        // Only do this for the main module or once
         if (vm.global_symbols) free(vm.global_symbols);
         vm.global_symbols = malloc(sizeof(VMSymbol) * global_count);
         vm.global_symbol_count = global_count;
@@ -2205,7 +2143,7 @@ void parse_internal(char *source, bool is_import) {
     src = os;
     curr = oc;
     line = saved_line;
-    current_file_start = ofs; // Restore
+    current_file_start = ofs;
 }
 
 void parse(char *source) { parse_internal(source, false); }
@@ -2264,7 +2202,6 @@ void generate_binding_c_source(const char *output_filename) {
 
     fclose(fp);
 
-    // Binding message
     printf("\n");
     setTerminalColor(MyloFgBlue, MyloBgColorDefault);
     printf("----------------------------------------------------------------------------------------\n");
@@ -2441,8 +2378,6 @@ void compile_repl(char *source, int *out_start_ip) {
     }
     emit(OP_HLT);
 
-    // --- FIX: Sync Debug Symbols for REPL ---
-    // This ensures monitor() knows about variables defined in previous REPL lines
     if (vm.global_symbols) free(vm.global_symbols);
     vm.global_symbols = malloc(sizeof(VMSymbol) * global_count);
     vm.global_symbol_count = global_count;
@@ -2465,7 +2400,6 @@ void mylo_reset() {
     enum_entry_count = 0;
     search_path_count = 0;
     c_header_count = 0;
-    // Fix: Reset Line Count
     line = 1;
     int i = 0;
     while (std_library[i].name != NULL) {

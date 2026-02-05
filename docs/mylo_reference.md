@@ -315,8 +315,8 @@ print(result[0]) // 256
 Bytes can be defined using the `b""` string literal. You can use standard ASCII characters or Hexadecimal escape codes for non-printable bytes.
 
 ```javascript
-var byte = b"0"
-print(byte)
+var byte_e = b"0"
+print(byte_e)
 
 // Standard Bytes
 var byte_array = b"PNG"
