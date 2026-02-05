@@ -4,7 +4,7 @@
 #include <string.h>
 #include <math.h>
 #include <stdbool.h>
-#include <ctype.h> // for isdigit
+#include <ctype.h>
 #include "vm.h"
 #include <setjmp.h>
 #include <stdarg.h>
@@ -663,12 +663,6 @@ void enter_debugger() {
                         char* end = strrchr(val_str, '"');
                         if (end) *end = '\0';
                         *val_ptr = (double)make_string(val_str);
-                        // We can't easily change the type array here without access to the specific type pointer
-                        // But find_debug_var only returns value pointer.
-                        // Optimization: For now, we assume type safety is user's responsibility in debug console
-                        // or we rely on the fact that type shouldn't change for locals usually.
-                        // Ideally find_debug_var should return pointer to type as well to update it.
-                        // Let's refactor find_debug_var slightly? No, keeping it simple.
                         printf("Updated %s to \"%s\"\n", var_name, val_str);
                     } else {
                         // Number
@@ -736,7 +730,39 @@ static void broadcast_math(int op, double obj_val, double scalar_val, int scalar
              else if (op == OP_MOD) res = fmod(lhs, rhs);
              newBase[HEAP_HEADER_ARRAY+i] = res;
              newTypes[HEAP_HEADER_ARRAY+i] = T_NUM;
-        } else {
+        }
+        // --- NEW STRING BROADCAST SUPPORT ---
+        else if (op == OP_ADD && scalar_type == T_STR && elType == T_STR) {
+             double lhs = obj_is_lhs ? el : scalar_val;
+             double rhs = obj_is_lhs ? scalar_val : el;
+             char buf[MAX_STRING_LENGTH * 2];
+             snprintf(buf, sizeof(buf), "%s%s", vm.string_pool[(int)lhs], vm.string_pool[(int)rhs]);
+             int id = make_string(buf);
+             newBase[HEAP_HEADER_ARRAY+i] = (double)id;
+             newTypes[HEAP_HEADER_ARRAY+i] = T_STR;
+        }
+        // --- NEW BYTES BROADCAST SUPPORT ---
+        else if (op == OP_ADD && scalar_type == T_OBJ && elType == T_OBJ) {
+             double* o1 = vm_resolve_ptr_safe(obj_is_lhs ? el : scalar_val);
+             double* o2 = vm_resolve_ptr_safe(obj_is_lhs ? scalar_val : el);
+             if (o1 && o2 && (int)o1[0] == TYPE_BYTES && (int)o2[0] == TYPE_BYTES) {
+                 int l1 = (int)o1[1];
+                 int l2 = (int)o2[1];
+                 double new_bytes = heap_alloc(((l1 + l2) + 7) / 8 + 2);
+                 double* nb = vm_resolve_ptr(new_bytes);
+                 nb[0] = TYPE_BYTES;
+                 nb[1] = (double)(l1 + l2);
+                 unsigned char* dst = (unsigned char*)&nb[2];
+                 memcpy(dst, (unsigned char*)&o1[2], l1);
+                 memcpy(dst + l1, (unsigned char*)&o2[2], l2);
+
+                 newBase[HEAP_HEADER_ARRAY+i] = new_bytes;
+                 newTypes[HEAP_HEADER_ARRAY+i] = T_OBJ;
+             } else {
+                 newBase[HEAP_HEADER_ARRAY+i] = 0; newTypes[HEAP_HEADER_ARRAY+i] = T_NUM;
+             }
+        }
+        else {
              newBase[HEAP_HEADER_ARRAY+i] = 0;
              newTypes[HEAP_HEADER_ARRAY+i] = T_NUM;
         }
@@ -768,6 +794,93 @@ static void exec_math_op(int op) {
         vm.stack_types[vm.sp] = T_STR;
         return;
     }
+
+    // --- ARRAY & BYTES & TYPED ARRAY CONCATENATION ---
+    if (op == OP_ADD && ta == T_OBJ && tb == T_OBJ) {
+        double* pa = vm_resolve_ptr_safe(a);
+        double* pb = vm_resolve_ptr_safe(b);
+        if (pa && pb) {
+            int typeA = (int)pa[HEAP_OFFSET_TYPE];
+            int typeB = (int)pb[HEAP_OFFSET_TYPE];
+            int lenA = (int)pa[HEAP_OFFSET_LEN];
+            int lenB = (int)pb[HEAP_OFFSET_LEN];
+
+            // 1. Generic Arrays
+            if (typeA == TYPE_ARRAY && typeB == TYPE_ARRAY) {
+                int* typesA = vm_resolve_type(a);
+                int* typesB = vm_resolve_type(b);
+
+                double ptr = heap_alloc(lenA + lenB + HEAP_HEADER_ARRAY);
+                double* base = vm_resolve_ptr(ptr);
+                int* types = vm_resolve_type(ptr);
+
+                base[HEAP_OFFSET_TYPE] = TYPE_ARRAY;
+                base[HEAP_OFFSET_LEN] = (double)(lenA + lenB);
+
+                for(int i=0; i<lenA; i++) {
+                    base[HEAP_HEADER_ARRAY + i] = pa[HEAP_HEADER_ARRAY + i];
+                    types[HEAP_HEADER_ARRAY + i] = typesA[HEAP_HEADER_ARRAY + i];
+                }
+                for(int i=0; i<lenB; i++) {
+                    base[HEAP_HEADER_ARRAY + lenA + i] = pb[HEAP_HEADER_ARRAY + i];
+                    types[HEAP_HEADER_ARRAY + lenA + i] = typesB[HEAP_HEADER_ARRAY + i];
+                }
+                vm.stack[vm.sp] = ptr; // overwrite 'a'
+                vm.stack_types[vm.sp] = T_OBJ;
+                return;
+            }
+            // 2. Byte Arrays
+            else if (typeA == TYPE_BYTES && typeB == TYPE_BYTES) {
+                 // TYPE_BYTES layout: [TYPE, LEN, byte0, byte1...] (Offsets: 0, 1, 2...)
+                 double ptr = heap_alloc(((lenA + lenB) + 7) / 8 + 2);
+                 double* base = vm_resolve_ptr(ptr);
+                 base[0] = TYPE_BYTES;
+                 base[1] = (double)(lenA + lenB);
+
+                 unsigned char* dst = (unsigned char*)&base[2];
+                 unsigned char* srcA = (unsigned char*)&pa[2];
+                 unsigned char* srcB = (unsigned char*)&pb[2];
+
+                 memcpy(dst, srcA, lenA);
+                 memcpy(dst + lenA, srcB, lenB);
+
+                 vm.stack[vm.sp] = ptr;
+                 vm.stack_types[vm.sp] = T_OBJ;
+                 return;
+            }
+            // 3. Typed Arrays
+            else if (typeA == typeB && typeA <= TYPE_I16_ARRAY && typeA >= TYPE_BOOL_ARRAY) {
+                int elem_size = get_type_size(typeA);
+                int total_len = lenA + lenB;
+                // Calculate doubles needed: header(2) + data
+                // Data size in bytes: total_len * elem_size
+                // Doubles for data: (bytes + 7) / 8
+                int doubles_needed = 2 + (total_len * elem_size + 7) / 8;
+
+                double ptr = heap_alloc(doubles_needed);
+                double* base = vm_resolve_ptr(ptr);
+
+                base[0] = (double)typeA;
+                base[1] = (double)total_len;
+
+                char* dst = (char*)&base[2];
+                char* srcA = (char*)&pa[2];
+                char* srcB = (char*)&pb[2];
+
+                int bytesA = lenA * elem_size;
+                int bytesB = lenB * elem_size;
+
+                memcpy(dst, srcA, bytesA);
+                memcpy(dst + bytesA, srcB, bytesB);
+
+                vm.stack[vm.sp] = ptr;
+                vm.stack_types[vm.sp] = T_OBJ;
+                return;
+            }
+        }
+    }
+    // ---------------------------------------
+
     if (ta == T_OBJ || tb == T_OBJ) {
         double arrVal = (ta == T_OBJ) ? a : b;
         double scalVal = (ta == T_OBJ) ? b : a;

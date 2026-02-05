@@ -915,6 +915,19 @@ inline TestOutput test_vector_str_add() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_vector_byte_add() {
+
+    std::string src = """"
+    "var x = [b\"\\xFE\",b\"\\xFE\"]\n"
+    "x = x + b\"\\xFE\"\n"
+    "for (y in x) {\n"
+        "print(y)\n"
+    "}";
+    std::string expected = """"
+    "b\"\\xFE\\xFE\"\nb\"\\xFE\\xFE\"\n";
+    return run_source_test(src, expected);
+}
+
 inline TestOutput test_bytes_vector_add() {
 
     std::string src = """"
@@ -1202,7 +1215,7 @@ inline void test_generate_list() {
     ADD_TEST("Test Region Same Name", test_region_same_name);
     ADD_TEST("Test Strong Types i32", test_strong_types_i32);
     ADD_TEST("Test String Types Promotion byte -> num", test_type_promototion_bool);
-
+    ADD_TEST("Test Vector(byte) (add())", test_vector_byte_add);
 }
 
 #endif //MYLO_TEST_GENERATE_LIST_H
