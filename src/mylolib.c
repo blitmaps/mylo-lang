@@ -6,8 +6,14 @@
 #include "mylolib.h"
 #include "vm.h"
 #include "defines.h"
-#include "compiler.h"
+#include "os_job.h"
 
+#ifdef _WIN32
+    #include <io.h>
+    #include <windows.h>
+#else
+    #include <dirent.h>
+#endif
 // --- Helpers ---
 
 static const char *get_str(VM *vm, double val) {
@@ -825,6 +831,236 @@ void std_noise(VM *vm) {
     vm_push(res, T_NUM);
 }
 
+
+// Helper to check if string ends with suffix
+static int ends_with(const char *str, const char *suffix) {
+    if (!str || !suffix) return 0;
+    size_t lenstr = strlen(str);
+    size_t lensuffix = strlen(suffix);
+    if (lensuffix > lenstr) return 0;
+    return strncmp(str + lenstr - lensuffix, suffix, lensuffix) == 0;
+}
+
+void std_list_dir(VM *vm) {
+    // Mylo pops arguments in reverse order of how they are passed
+    double filter_id = vm_pop();
+    const char *filter = get_str(vm, filter_id);
+    
+    double path_id = vm_pop();
+    const char *path = get_str(vm, path_id);
+    
+    int count = 0;
+    int capacity = 16;
+    char **filenames = malloc(sizeof(char*) * capacity);
+
+#ifdef _WIN32
+    char search_path[MAX_PATH];
+    snprintf(search_path, MAX_PATH, "%s\\*", path);
+
+    WIN32_FIND_DATA fFD;
+    HANDLE hFind = FindFirstFile(search_path, &fFD);
+
+    if (hFind != INVALID_HANDLE_VALUE) {
+        do {
+            if (strcmp(fFD.cFileName, ".") == 0 || strcmp(fFD.cFileName, "..") == 0) continue;
+            
+            // Apply filter logic
+            if (strlen(filter) > 0 && !ends_with(fFD.cFileName, filter)) continue;
+
+            if (count >= capacity) {
+                capacity *= 2;
+                filenames = realloc(filenames, sizeof(char*) * capacity);
+            }
+            filenames[count++] = _strdup(fFD.cFileName);
+        } while (FindNextFile(hFind, &fFD));
+        FindClose(hFind);
+    }
+#else
+    DIR *d = opendir(path);
+    if (d) {
+        struct dirent *dir;
+        while ((dir = readdir(d)) != NULL) {
+            if (strcmp(dir->d_name, ".") == 0 || strcmp(dir->d_name, "..") == 0) continue;
+
+            // Apply filter logic
+            if (strlen(filter) > 0 && !ends_with(dir->d_name, filter)) continue;
+
+            if (count >= capacity) {
+                capacity *= 2;
+                filenames = realloc(filenames, sizeof(char*) * capacity);
+            }
+            filenames[count++] = strdup(dir->d_name);
+        }
+        closedir(d);
+    }
+#endif
+
+    // Push the results to the Mylo Heap
+    double arr_addr = heap_alloc(count + HEAP_HEADER_ARRAY);
+    double* base = vm_resolve_ptr(arr_addr);
+    int* types = vm_resolve_type(arr_addr);
+
+    base[HEAP_OFFSET_TYPE] = TYPE_ARRAY;
+    base[HEAP_OFFSET_LEN] = (double)count;
+
+    for (int i = 0; i < count; i++) {
+        int id = make_string(filenames[i]);
+        base[HEAP_HEADER_ARRAY + i] = (double)id;
+        types[HEAP_HEADER_ARRAY + i] = T_STR;
+        free(filenames[i]);
+    }
+    free(filenames);
+
+    vm_push(arr_addr, T_OBJ);
+}
+
+// --- 1. System (Blocking) ---
+void std_system(VM *vm) {
+    double cmd_id = vm_pop();
+    const char *cmd = get_str(vm, cmd_id);
+
+    char *out_str = NULL;
+    char *err_str = NULL;
+
+    internal_exec_command(cmd, &out_str, &err_str);
+
+    // Create Mylo Array [stdout, stderr]
+    double arr_ptr = heap_alloc(2 + HEAP_HEADER_ARRAY);
+    double* base = vm_resolve_ptr(arr_ptr);
+    int* types = vm_resolve_type(arr_ptr);
+
+    base[HEAP_OFFSET_TYPE] = TYPE_ARRAY;
+    base[HEAP_OFFSET_LEN] = 2.0;
+
+    int id_out = make_string(out_str ? out_str : "");
+    int id_err = make_string(err_str ? err_str : "");
+
+    base[HEAP_HEADER_ARRAY + 0] = (double)id_out;
+    types[HEAP_HEADER_ARRAY + 0] = T_STR;
+
+    base[HEAP_HEADER_ARRAY + 1] = (double)id_err;
+    types[HEAP_HEADER_ARRAY + 1] = T_STR;
+
+    if(out_str) free(out_str);
+    if(err_str) free(err_str);
+
+    vm_push(arr_ptr, T_OBJ);
+}
+
+// --- 2. System Thread (Non-Blocking) ---
+void std_system_thread(VM *vm) {
+    double name_id = vm_pop();
+    double cmd_id = vm_pop();
+    const char *name = get_str(vm, name_id);
+    const char *cmd = get_str(vm, cmd_id);
+
+    LOCK_JOBS;
+    int slot = -1;
+    for(int i=0; i<MAX_JOBS; i++) {
+        if(!job_registry[i].active) {
+            slot = i;
+            break;
+        }
+    }
+
+    if(slot == -1) {
+        UNLOCK_JOBS;
+        vm_push(0.0, T_NUM); // Failed (No slots)
+        return;
+    }
+
+    // Setup Job
+    strncpy(job_registry[slot].name, name, 63);
+    job_registry[slot].cmd = strdup(cmd);
+    job_registry[slot].out_res = NULL;
+    job_registry[slot].err_res = NULL;
+    job_registry[slot].status = 0; // Running
+    job_registry[slot].active = 1;
+
+    // Spawn Thread
+#ifdef _WIN32
+    unsigned threadID;
+    job_registry[slot].thread = (HANDLE)_beginthreadex(NULL, 0, &job_worker, &job_registry[slot], 0, &threadID);
+#else
+    pthread_create(&job_registry[slot].thread, NULL, &job_worker, &job_registry[slot]);
+    pthread_detach(job_registry[slot].thread); // Detach so we don't need to join
+#endif
+
+    UNLOCK_JOBS;
+    vm_push(1.0, T_NUM); // Success
+}
+
+// --- 3. Get Job (Poll Status) ---
+void std_get_job(VM *vm) {
+    double name_id = vm_pop();
+    const char *name = get_str(vm, name_id);
+
+    LOCK_JOBS;
+    int slot = -1;
+    for(int i=0; i<MAX_JOBS; i++) {
+        if(job_registry[i].active && strcmp(job_registry[i].name, name) == 0) {
+            slot = i;
+            break;
+        }
+    }
+
+    // Case 1: Job not found
+    if(slot == -1) {
+        UNLOCK_JOBS;
+        vm_push(-1.0, T_NUM);
+        return;
+    }
+
+    // Case 2: Still Running
+    if(job_registry[slot].status == 0) {
+        UNLOCK_JOBS;
+        vm_push(1.0, T_NUM);
+        return;
+    }
+
+    // Case 3: Done - Return [out, err] and clean up
+    char* o = job_registry[slot].out_res;
+    char* e = job_registry[slot].err_res;
+
+    // Make Mylo Array
+    // NOTE: We must unlock before Allocating to prevent heap locks (if heap used mutexes later)
+    // But here we need to copy strings to VM first.
+    // For safety, we will grab the raw C strings, clear the job, unlock, THEN alloc VM memory.
+
+    char* safe_o = o ? strdup(o) : strdup("");
+    char* safe_e = e ? strdup(e) : strdup("");
+
+    // Cleanup registry slot
+    if(job_registry[slot].out_res) free(job_registry[slot].out_res);
+    if(job_registry[slot].err_res) free(job_registry[slot].err_res);
+    job_registry[slot].active = 0; // Free the slot
+
+    UNLOCK_JOBS;
+
+    // Now safe to alloc on VM Heap
+    double arr_ptr = heap_alloc(2 + HEAP_HEADER_ARRAY);
+    double* base = vm_resolve_ptr(arr_ptr);
+    int* types = vm_resolve_type(arr_ptr);
+
+    base[HEAP_OFFSET_TYPE] = TYPE_ARRAY;
+    base[HEAP_OFFSET_LEN] = 2.0;
+
+    int id_out = make_string(safe_o);
+    int id_err = make_string(safe_e);
+
+    base[HEAP_HEADER_ARRAY + 0] = (double)id_out;
+    types[HEAP_HEADER_ARRAY + 0] = T_STR;
+
+    base[HEAP_HEADER_ARRAY + 1] = (double)id_err;
+    types[HEAP_HEADER_ARRAY + 1] = T_STR;
+
+    free(safe_o);
+    free(safe_e);
+
+    vm_push(arr_ptr, T_OBJ);
+}
+
+
 const StdLibDef std_library[] = {
     {"len", std_len, "num", 1, {"any"}},
     {"contains", std_contains, "num", 2, {"any", "any"}},
@@ -857,5 +1093,9 @@ const StdLibDef std_library[] = {
     {"min_list", std_list_min, "num", 1, {"arr"}},
     {"max_list", std_list_max, "num", 1, {"arr"}},
     {"noise", std_noise, "num", 3, {"num", "num", "num"}},
+    {"list_dir", std_list_dir, "arr", 2, {"str", "str"}},
+    {"system", std_system, "arr", 1, {"str"}},
+    {"system_thread", std_system_thread, "num", 2, {"str", "str"}},
+    {"get_job", std_get_job, "any", 1, {"str"}},
     {NULL, NULL, NULL, 0, {NULL}}
 };
