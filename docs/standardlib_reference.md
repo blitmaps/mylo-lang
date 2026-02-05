@@ -678,7 +678,7 @@ forever {
     if (res == 1) {
         print("Working...")
     } else {
-        print("Result: " + res[0])
+        print(f"Result: {res[0]}")
         break
     }
 }
