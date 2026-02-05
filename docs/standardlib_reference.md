@@ -40,6 +40,7 @@ The Mylo Standard Library provides essential functions for file I/O, math, and d
   * [File I/O (Binary)](#file-io-binary)
     + [`read_bytes(path: str, stride: num) -> arr`](#read_bytespath-str-stride-num-arr)
     + [`write_bytes(path: str, data: arr) -> num`](#write_bytespath-str-data-arr-num)
+  * [OS System & Process Management](#systemcommand-str---arr)
 
 <!-- TOC end -->
 
@@ -622,4 +623,63 @@ Writes an array of numbers to a file as raw bytes.
 // Write ASCII bytes for "ABC\n"
 var data = [65, 66, 67, 10]
 write_bytes("output.bin", data)
+```
+
+## System & Process Management
+
+<a name="systemcommand-str-arr"></a>
+### `system(command: str) -> arr`
+
+Executes a shell command and waits for it to complete, capturing both standard output and standard error.
+
+**Arguments:**
+* `command`: The full command string to execute (e.g., `"ls -la"` or `"dir"`).
+
+**Returns:**
+* An array containing two strings: `[stdout, stderr]`.
+
+**Example:**
+```javascript
+var output = system("echo Hello Mylo")
+print(output[0]) // "Hello Mylo"
+```
+
+<a name="system_threadcommand-str-name-str-num"></a>
+### `system_thread(command: str, name: str) -> num`
+
+Starts a shell command in a background thread. The result must be retrieved later using `get_job`.
+
+**Arguments:**
+* `command`: The command string to execute.
+* `name`: A unique identifier string to associate with this background job.
+
+**Returns:**
+* `1` if the thread started successfully, `0` otherwise.
+
+<a name="get_jobname-str-any"></a>
+### `get_job(name: str) -> any`
+
+Polls the status of a background job started by `system_thread`.
+
+**Arguments:**
+* `name`: The identifier used when the job was created.
+
+**Returns:**
+* `1`: The job is still running.
+* `-1`: The job encountered an error or the name does not exist.
+* `arr`: A two-element array `[stdout, stderr]` if the job has finished.
+
+**Example:**
+```javascript
+system_thread("sleep 2 && echo Done", "my_job")
+
+forever {
+    var res = get_job("my_job")
+    if (res == 1) {
+        print("Working...")
+    } else {
+        print("Result: " + res[0])
+        break
+    }
+}
 ```
