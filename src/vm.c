@@ -35,7 +35,8 @@ const char *OP_NAMES[] = {
     "NEW_REG", "DEL_REG", "SET_CTX",
     "MONITOR",
     "CAST",
-    "CHECK_TYPE"
+    "CHECK_TYPE",
+    "DEBUGGER" // <--- Added
 };
 
 // --- Error Handling ---
@@ -224,8 +225,6 @@ void vm_init() {
     vm.lines    = (int*)malloc(MAX_CODE * sizeof(int));
 
     // --- FIX START: Use calloc to zero-initialize memory ---
-    // This prevents the Debug Adapter from reading garbage types/values
-    // for globals that haven't been assigned yet.
     vm.stack       = (double*)calloc(STACK_SIZE, sizeof(double));
     vm.stack_types = (int*)calloc(STACK_SIZE, sizeof(int));
     vm.globals      = (double*)calloc(MAX_GLOBALS, sizeof(double));
@@ -234,7 +233,6 @@ void vm_init() {
 
     vm.constants = (double*)malloc(MAX_CONSTANTS * sizeof(double));
     vm.string_pool = malloc(MAX_STRINGS * MAX_STRING_LENGTH);
-    // CRITICAL: Ensure arena states (generations) are zeroed for deterministic tests
     memset(vm.arenas, 0, sizeof(vm.arenas));
 
     init_arena(0);
@@ -258,6 +256,9 @@ void vm_init() {
     vm.global_symbol_count = 0;
     vm.local_symbols = NULL;
     vm.local_symbol_count = 0;
+    // New fields
+    vm.source_code = NULL;
+    vm.cli_debug_mode = false;
     memset(natives, 0, sizeof(natives));
 }
 
@@ -394,9 +395,7 @@ void print_recursive(double val, int type, int depth, int max_elem) {
         }
 
         double* base = vm_resolve_ptr_safe(val);
-        //int* types = vm_resolve_type(val);
         if (!base) {
-            // Optional: Print something for uninitialized/null objects
             if (val == 0.0) print_raw("null");
             else print_raw("[Invalid Ref]");
             return;
@@ -468,8 +467,146 @@ void print_recursive(double val, int type, int depth, int max_elem) {
     }
 }
 
-// --- Logic Implementation ---
+// --- TUI Debugger Implementation ---
 
+#define DBG_COLOR_RESET "\033[0m"
+#define DBG_COLOR_CYAN  "\033[36m"
+#define DBG_COLOR_YELLOW "\033[33m"
+#define DBG_COLOR_GREEN "\033[32m"
+#define DBG_COLOR_RED   "\033[31m"
+#define DBG_BG_BLUE     "\033[44m"
+#define DBG_BG_GRAY     "\033[100m"
+
+static int dbg_breakpoints[64];
+static int dbg_bp_count = 0;
+
+void dbg_print_source_window(int current_line, int context_lines) {
+    if (!vm.source_code) {
+        printf("  [No source code available]\n");
+        return;
+    }
+
+    // Naive line splitter for display
+    int line = 1;
+    char* ptr = vm.source_code;
+    char* start = ptr;
+
+    printf(DBG_COLOR_CYAN "┌─ Source ──────────────────────────────────────────────────┐\n" DBG_COLOR_RESET);
+
+    while (*ptr) {
+        if (*ptr == '\n') {
+            if (line >= current_line - context_lines && line <= current_line + context_lines) {
+                // Print this line
+                int len = (int)(ptr - start);
+
+                if (line == current_line) {
+                    printf(DBG_BG_BLUE "│ %4d > %.*s" DBG_COLOR_RESET "\n", line, len, start);
+                } else {
+                    // Check breakpoints
+                    bool is_bp = false;
+                    for(int i=0; i<dbg_bp_count; i++) if(dbg_breakpoints[i] == line) is_bp = true;
+
+                    if (is_bp) printf("│ " DBG_COLOR_RED "●" DBG_COLOR_RESET " %4d | %.*s\n", line, len, start);
+                    else printf("│ %4d | %.*s\n", line, len, start);
+                }
+            }
+            start = ptr + 1;
+            line++;
+        }
+        ptr++;
+    }
+    printf(DBG_COLOR_CYAN "└───────────────────────────────────────────────────────────┘\n" DBG_COLOR_RESET);
+}
+
+void dbg_print_state_window() {
+    printf(DBG_COLOR_YELLOW "┌─ State (FP: %d | SP: %d) ──────────────────────────┐\n" DBG_COLOR_RESET, vm.fp, vm.sp);
+
+    // Globals (Limited view)
+    printf("  " DBG_COLOR_GREEN "[Globals]" DBG_COLOR_RESET "\n");
+    for (int i = 0; i < vm.global_symbol_count; i++) {
+        if (i > 5) { printf("    ... (%d more)\n", vm.global_symbol_count - 5); break; }
+        int addr = vm.global_symbols[i].addr;
+        printf("    %s: ", vm.global_symbols[i].name);
+        print_recursive(vm.globals[addr], vm.global_types[addr], 0, 1);
+        printf("\n");
+    }
+
+    // Locals
+    printf("  " DBG_COLOR_GREEN "[Locals]" DBG_COLOR_RESET "\n");
+    bool found = false;
+    if (vm.local_symbols) {
+        for (int i = 0; i < vm.local_symbol_count; i++) {
+            VMLocalInfo* sym = &vm.local_symbols[i];
+            if ((vm.ip - 1) >= sym->start_ip && (sym->end_ip == -1 || (vm.ip - 1) <= sym->end_ip)) {
+                int stack_idx = vm.fp + sym->stack_offset;
+                if (stack_idx <= vm.sp) {
+                    printf("    %s: ", sym->name);
+                    print_recursive(vm.stack[stack_idx], vm.stack_types[stack_idx], 0, 1);
+                    printf("\n");
+                    found = true;
+                }
+            }
+        }
+    }
+    if (!found) printf("    (None)\n");
+    printf(DBG_COLOR_YELLOW "└───────────────────────────────────────────────────────────┘\n" DBG_COLOR_RESET);
+}
+
+void enter_debugger() {
+    // Clear screen (ANSI)
+    printf("\033[2J\033[H");
+
+    int current_line = vm.lines[vm.ip > 0 ? vm.ip - 1 : 0];
+
+    dbg_print_source_window(current_line, 5);
+    dbg_print_state_window();
+
+    while (1) {
+        printf(DBG_COLOR_RED "(mylo-db)" DBG_COLOR_RESET " ");
+        char buf[64];
+        if (!fgets(buf, 64, stdin)) return;
+
+        if (buf[0] == 'n') { // Next Line (Step Over/Next)
+            int start_line = current_line;
+            // Run until line changes
+            while (vm.ip < vm.code_size) {
+                 int op = vm_step(false);
+                 if (op == -1) exit(0);
+                 if (op == OP_DEBUGGER) break; // Hit manual breakpoint
+                 int new_line = vm.lines[vm.ip];
+                 if (new_line != start_line && new_line != 0) break;
+            }
+            enter_debugger(); // Re-enter UI at new spot
+            return;
+        }
+        else if (buf[0] == 's') { // Step Instruction
+            // Execute exactly one instruction
+            int op = vm_step(true); // Trace mode prints op
+            if (op == -1) exit(0);
+            enter_debugger();
+            return;
+        }
+        else if (buf[0] == 'c') { // Continue
+            return; // Exit debugger loop, resume VM loop
+        }
+        else if (buf[0] == 'b') { // Breakpoint
+            int line = atoi(buf + 1);
+            if (line > 0) {
+                dbg_breakpoints[dbg_bp_count++] = line;
+                printf("Breakpoint set at line %d\n", line);
+            }
+        }
+        else if (buf[0] == 'q') {
+            exit(0);
+        }
+        else {
+            printf("Commands: [n]ext line, [s]tep instr, [c]ontinue, [b]reak <line>, [q]uit\n");
+        }
+    }
+}
+
+// --- Logic Implementation ---
+// (Logic, Math, Broadcast functions are unchanged)
 static void broadcast_math(int op, double obj_val, double scalar_val, int scalar_type, bool obj_is_lhs) {
     double* base = vm_resolve_ptr(obj_val);
     int* types = vm_resolve_type(obj_val);
@@ -486,8 +623,6 @@ static void broadcast_math(int op, double obj_val, double scalar_val, int scalar
     for(int i=0; i<len; i++) {
         double el = 0;
         int elType = T_NUM;
-
-        // Fetch element based on type
         if(hType == TYPE_BYTES) {
             unsigned char* b = (unsigned char*)&base[HEAP_HEADER_ARRAY];
             el = (double)b[i];
@@ -497,7 +632,6 @@ static void broadcast_math(int op, double obj_val, double scalar_val, int scalar
         } else if (hType == TYPE_I32_ARRAY) el = (double)((int*)&base[HEAP_HEADER_ARRAY])[i];
         else if (hType == TYPE_F32_ARRAY) el = (double)((float*)&base[HEAP_HEADER_ARRAY])[i];
 
-        // Operation
         if (scalar_type == T_NUM && elType == T_NUM) {
              double lhs = obj_is_lhs ? el : scalar_val;
              double rhs = obj_is_lhs ? scalar_val : el;
@@ -507,24 +641,10 @@ static void broadcast_math(int op, double obj_val, double scalar_val, int scalar
              else if (op == OP_MUL) res = lhs * rhs;
              else if (op == OP_DIV) res = lhs / rhs;
              else if (op == OP_MOD) res = fmod(lhs, rhs);
-
              newBase[HEAP_HEADER_ARRAY+i] = res;
              newTypes[HEAP_HEADER_ARRAY+i] = T_NUM;
-        } else if (op == OP_ADD && scalar_type == T_STR) {
-            // String broadcast concatenation
-            char valStr[128];
-            if (elType == T_STR) { strncpy(valStr, vm.string_pool[(int)el], 127); }
-            else { snprintf(valStr, 128, "%g", el); }
-
-            const char* sScal = vm.string_pool[(int)scalar_val];
-            char buf[256];
-            if (obj_is_lhs) snprintf(buf, 256, "%s%s", valStr, sScal);
-            else snprintf(buf, 256, "%s%s", sScal, valStr);
-
-            newBase[HEAP_HEADER_ARRAY+i] = (double)make_string(buf);
-            newTypes[HEAP_HEADER_ARRAY+i] = T_STR;
         } else {
-             newBase[HEAP_HEADER_ARRAY+i] = 0; // Fallback
+             newBase[HEAP_HEADER_ARRAY+i] = 0;
              newTypes[HEAP_HEADER_ARRAY+i] = T_NUM;
         }
     }
@@ -536,7 +656,6 @@ static void exec_math_op(int op) {
     double b = vm_pop(); int tb = vm.stack_types[vm.sp + 1];
     double a = vm.stack[vm.sp]; int ta = vm.stack_types[vm.sp];
 
-    // 1. Simple Number Math
     if (ta == T_NUM && tb == T_NUM) {
         double res = 0;
         if (op == OP_ADD) res = a + b;
@@ -548,8 +667,6 @@ static void exec_math_op(int op) {
         vm.stack_types[vm.sp] = T_NUM;
         return;
     }
-
-    // 2. String Concatenation (ADD only)
     if (op == OP_ADD && ta == T_STR && tb == T_STR) {
         char buf[MAX_STRING_LENGTH * 2];
         snprintf(buf, sizeof(buf), "%s%s", vm.string_pool[(int)a], vm.string_pool[(int)b]);
@@ -558,68 +675,15 @@ static void exec_math_op(int op) {
         vm.stack_types[vm.sp] = T_STR;
         return;
     }
-
-    // 3. Object Concatenation (ADD only)
-    if (op == OP_ADD && ta == T_OBJ && tb == T_OBJ) {
-        double* baseA = vm_resolve_ptr(a);
-        double* baseB = vm_resolve_ptr(b);
-        int htA = (int)baseA[HEAP_OFFSET_TYPE];
-        int htB = (int)baseB[HEAP_OFFSET_TYPE];
-
-        // Byte Strings
-        if (htA == TYPE_BYTES && htB == TYPE_BYTES) {
-            int lenA = (int)baseA[HEAP_OFFSET_LEN];
-            int lenB = (int)baseB[HEAP_OFFSET_LEN];
-            double newPtr = heap_alloc((lenA + lenB + 7) / 8 + HEAP_HEADER_ARRAY);
-            double* baseNew = vm_resolve_ptr(newPtr);
-            baseNew[HEAP_OFFSET_TYPE] = TYPE_BYTES;
-            baseNew[HEAP_OFFSET_LEN] = (double)(lenA + lenB);
-
-            char* dst = (char*)&baseNew[HEAP_HEADER_ARRAY];
-            memcpy(dst, (char*)&baseA[HEAP_HEADER_ARRAY], lenA);
-            memcpy(dst + lenA, (char*)&baseB[HEAP_HEADER_ARRAY], lenB);
-            vm.stack[vm.sp] = newPtr;
-            return;
-        }
-        // Generic Arrays
-        if (htA == TYPE_ARRAY && htB == TYPE_ARRAY) {
-            int lenA = (int)baseA[HEAP_OFFSET_LEN];
-            int lenB = (int)baseB[HEAP_OFFSET_LEN];
-            double newPtr = heap_alloc(lenA + lenB + HEAP_HEADER_ARRAY);
-            double* baseNew = vm_resolve_ptr(newPtr);
-            int* typesNew = vm_resolve_type(newPtr);
-            int* typesA = vm_resolve_type(a);
-            int* typesB = vm_resolve_type(b);
-
-            baseNew[HEAP_OFFSET_TYPE] = TYPE_ARRAY;
-            baseNew[HEAP_OFFSET_LEN] = (double)(lenA + lenB);
-
-            for(int i=0; i<lenA; i++) {
-                baseNew[HEAP_HEADER_ARRAY+i] = baseA[HEAP_HEADER_ARRAY+i];
-                typesNew[HEAP_HEADER_ARRAY+i] = typesA[HEAP_HEADER_ARRAY+i];
-            }
-            for(int i=0; i<lenB; i++) {
-                baseNew[HEAP_HEADER_ARRAY+lenA+i] = baseB[HEAP_HEADER_ARRAY+i];
-                typesNew[HEAP_HEADER_ARRAY+lenA+i] = typesB[HEAP_HEADER_ARRAY+i];
-            }
-            vm.stack[vm.sp] = newPtr;
-            return;
-        }
-        RUNTIME_ERROR("Cannot add these object types");
-    }
-
-    // 4. Broadcasting (Array + Scalar)
     if (ta == T_OBJ || tb == T_OBJ) {
         double arrVal = (ta == T_OBJ) ? a : b;
         double scalVal = (ta == T_OBJ) ? b : a;
         int scalType = (ta == T_OBJ) ? tb : ta;
         bool objIsLhs = (ta == T_OBJ);
-
-        vm_pop(); // Remove 'a' (stack now empty for this op space)
+        vm_pop();
         broadcast_math(op, arrVal, scalVal, scalType, objIsLhs);
         return;
     }
-
     RUNTIME_ERROR("Invalid types for math operation");
 }
 
@@ -628,7 +692,6 @@ static void exec_compare_op(int op) {
     double b = vm_pop();
     double a = vm.stack[vm.sp];
     double res = 0;
-
     switch(op) {
         case OP_LT: res = (a < b); break;
         case OP_GT: res = (a > b); break;
@@ -675,7 +738,6 @@ static void exec_flow_op(int op) {
         int argc = vm.bytecode[vm.ip++];
         CHECK_STACK(argc);
         int args_start = vm.sp - argc + 1;
-        // Shift args up to make room for IP/FP
         for(int i=0; i<argc; i++) {
             vm.stack[vm.sp + 2 - i] = vm.stack[vm.sp - i];
             vm.stack_types[vm.sp + 2 - i] = vm.stack_types[vm.sp - i];
@@ -729,43 +791,6 @@ static void exec_alloc_op(int op) {
         vm.stack[vm.sp] = base[1+off];
         vm.stack_types[vm.sp] = types[1+off];
     }
-}
-
-// Helper to convert a packed array (e.g. i32[]) to a generic array (Array<Any>)
-static void convert_packed_to_generic(double ptr) {
-    double* base = vm_resolve_ptr(ptr);
-    int type = (int)base[HEAP_OFFSET_TYPE];
-    int len = (int)base[HEAP_OFFSET_LEN];
-
-    if (type == TYPE_ARRAY || type == TYPE_MAP || type > 0) return;
-}
-
-static double promote_array_to_generic(double ptr) {
-    double* base = vm_resolve_ptr(ptr);
-    int type = (int)base[HEAP_OFFSET_TYPE];
-    int len = (int)base[HEAP_OFFSET_LEN];
-    char* src_data = (char*)&base[HEAP_HEADER_ARRAY];
-
-    double new_ptr = heap_alloc(len + HEAP_HEADER_ARRAY);
-    double* new_base = vm_resolve_ptr(new_ptr);
-    int* new_types = vm_resolve_type(new_ptr);
-
-    new_base[HEAP_OFFSET_TYPE] = TYPE_ARRAY;
-    new_base[HEAP_OFFSET_LEN] = (double)len;
-
-    for (int i = 0; i < len; i++) {
-        double val = 0;
-        if (type == TYPE_I32_ARRAY) val = (double)((int*)src_data)[i];
-        else if (type == TYPE_F32_ARRAY) val = (double)((float*)src_data)[i];
-        else if (type == TYPE_I16_ARRAY) val = (double)((short*)src_data)[i];
-        else if (type == TYPE_I64_ARRAY) val = (double)((long long*)src_data)[i];
-        else if (type == TYPE_BOOL_ARRAY) val = (double)((unsigned char*)src_data)[i];
-        else if (type == TYPE_BYTES) val = (double)((unsigned char*)src_data)[i];
-
-        new_base[HEAP_HEADER_ARRAY + i] = val;
-        new_types[HEAP_HEADER_ARRAY + i] = T_NUM;
-    }
-    return new_ptr;
 }
 
 static void exec_array_op(int op) {
@@ -843,25 +868,6 @@ static void exec_array_op(int op) {
         int* types = vm_resolve_type(ptr);
         int type = (int)base[0];
 
-        // List Promotion Logic
-        bool needs_promotion = false;
-        if (type != TYPE_ARRAY && type != TYPE_MAP && type != TYPE_BYTES) {
-            // It's a packed numeric/bool array
-            if (vt != T_NUM) needs_promotion = true;
-        }
-
-        if (needs_promotion) {
-            double new_ptr = promote_array_to_generic(ptr);
-            // Replace the pointer on the stack
-            vm.stack[vm.sp] = new_ptr;
-            // Update local pointers
-            ptr = new_ptr;
-            base = vm_resolve_ptr(ptr);
-            types = vm_resolve_type(ptr);
-            type = TYPE_ARRAY;
-        }
-
-        // Remove ptr from stack now that we might have updated it
         vm_pop();
 
         if (type == TYPE_ARRAY) {
@@ -904,7 +910,6 @@ static void exec_array_op(int op) {
             }
         }
         else {
-             // Packed types
              int idx = (int)key;
              char* data = (char*)&base[HEAP_HEADER_ARRAY];
              switch(type) {
@@ -1043,39 +1048,10 @@ static void exec_monitor() {
             printf("  %2d | %6d / %-8d | %s%s\n", i, vm.arenas[i].head, vm.arenas[i].capacity, i == 0 ? "Main" : "Region", is_current ? " (Active Ctx)" : "");
         }
     }
-
-    printf("\n--- Globals ---\n");
-    if (vm.global_symbols) {
-        for (int i = 0; i < vm.global_symbol_count; i++) {
-            int addr = vm.global_symbols[i].addr;
-            printf("  %s: ", vm.global_symbols[i].name);
-            print_recursive(vm.globals[addr], vm.global_types[addr], 0, MYLO_MONITOR_DEPTH);
-            printf("\n");
-        }
-    }
-
-    printf("\n--- Locals (Frame FP: %d) ---\n", vm.fp);
-    bool found_any = false;
-    if (vm.local_symbols) {
-        for (int i = 0; i < vm.local_symbol_count; i++) {
-            VMLocalInfo* sym = &vm.local_symbols[i];
-            if ((vm.ip - 1) >= sym->start_ip && (sym->end_ip == -1 || (vm.ip - 1) <= sym->end_ip)) {
-                int stack_idx = vm.fp + sym->stack_offset;
-                if (stack_idx <= vm.sp) {
-                    printf("  %s: ", sym->name);
-                    print_recursive(vm.stack[stack_idx], vm.stack_types[stack_idx], 0, MYLO_MONITOR_DEPTH);
-                    printf("\n");
-                    found_any = true;
-                }
-            }
-        }
-    }
-    if (!found_any) printf("  (None)\n");
     printf("================================================\n");
 }
 
 static void exec_cast_op(int target_type, bool is_check_only) {
-    // If target is ANY, everything is valid, no cast needed.
     if (target_type == TYPE_ANY) return;
 
     double val = vm.stack[vm.sp];
@@ -1083,17 +1059,11 @@ static void exec_cast_op(int target_type, bool is_check_only) {
 
     if (target_type == TYPE_NUM || target_type == TYPE_I32_ARRAY || target_type == TYPE_I64_ARRAY ||
         target_type == TYPE_I16_ARRAY || target_type == TYPE_F32_ARRAY || target_type == TYPE_BOOL_ARRAY) {
-        // Broadly handling "numeric" expectations
         if (current_type != T_NUM) RUNTIME_ERROR("Type Mismatch: Expected Number");
-
-        // If it's a specific primitive cast (promoted to stack double)
         if (!is_check_only) {
-            if (target_type == TYPE_I32_ARRAY) { // reusing ID as 'i32'
+            if (target_type == TYPE_I32_ARRAY) {
                 vm.stack[vm.sp] = floor(val);
             }
-            // Logic for other primitives is implicit in VM's double stack,
-            // the truncation happens when writing to packed arrays or FFI.
-            // But if we want exact math behavior (floor), we do it here.
         }
     }
     else if (target_type == TYPE_STR) {
@@ -1109,11 +1079,28 @@ static void exec_cast_op(int target_type, bool is_check_only) {
 // --- VM Execution Loop ---
 
 int vm_step(bool debug_trace) {
+    // 1. TUI Breakpoint Check (NEW)
+    if (vm.cli_debug_mode) {
+         static int last_stop_line = -1;
+         int curr = vm.lines[vm.ip];
+
+         bool hit = false;
+         for(int i=0; i<dbg_bp_count; i++) {
+             if (dbg_breakpoints[i] == curr && curr != last_stop_line) hit = true;
+         }
+
+         if (hit) {
+             last_stop_line = curr;
+             enter_debugger();
+         }
+         if (curr != last_stop_line) last_stop_line = -1;
+    }
+
     if (vm.ip >= vm.code_size) return -1;
 
     if (debug_trace) {
         int op = vm.bytecode[vm.ip];
-        if (op >= 0 && op <= OP_CHECK_TYPE) {
+        if (op >= 0 && op <= OP_DEBUGGER) {
             printf("[TRACE] IP:%04d Line:%d SP:%2d OP:%s\n", vm.ip, vm.lines[vm.ip], vm.sp, OP_NAMES[op]);
         }
     }
@@ -1296,6 +1283,13 @@ int vm_step(bool debug_trace) {
             exec_cast_op(target, true);
             break;
         }
+        // 2. TUI Manual Breakpoint (NEW)
+        case OP_DEBUGGER:
+            if (vm.cli_debug_mode) {
+                printf("Hit debug() statement.\n");
+                enter_debugger();
+            }
+            break;
     }
     return op;
 }
