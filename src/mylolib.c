@@ -7,12 +7,7 @@
 #include "vm.h"
 #include "defines.h"
 #include "compiler.h"
-#ifdef _WIN32
-    #include <io.h>
-    #include <windows.h>
-#else
-    #include <dirent.h>
-#endif
+
 // --- Helpers ---
 
 static const char *get_str(VM *vm, double val) {
@@ -830,90 +825,6 @@ void std_noise(VM *vm) {
     vm_push(res, T_NUM);
 }
 
-
-// Helper to check if string ends with suffix
-static int ends_with(const char *str, const char *suffix) {
-    if (!str || !suffix) return 0;
-    size_t lenstr = strlen(str);
-    size_t lensuffix = strlen(suffix);
-    if (lensuffix > lenstr) return 0;
-    return strncmp(str + lenstr - lensuffix, suffix, lensuffix) == 0;
-}
-
-void std_list_dir(VM *vm) {
-    // Mylo pops arguments in reverse order of how they are passed
-    double filter_id = vm_pop();
-    const char *filter = get_str(vm, filter_id);
-    
-    double path_id = vm_pop();
-    const char *path = get_str(vm, path_id);
-    
-    int count = 0;
-    int capacity = 16;
-    char **filenames = malloc(sizeof(char*) * capacity);
-
-#ifdef _WIN32
-    char search_path[MAX_PATH];
-    snprintf(search_path, MAX_PATH, "%s\\*", path);
-
-    WIN32_FIND_DATA fFD;
-    HANDLE hFind = FindFirstFile(search_path, &fFD);
-
-    if (hFind != INVALID_HANDLE_VALUE) {
-        do {
-            if (strcmp(fFD.cFileName, ".") == 0 || strcmp(fFD.cFileName, "..") == 0) continue;
-            
-            // Apply filter logic
-            if (strlen(filter) > 0 && !ends_with(fFD.cFileName, filter)) continue;
-
-            if (count >= capacity) {
-                capacity *= 2;
-                filenames = realloc(filenames, sizeof(char*) * capacity);
-            }
-            filenames[count++] = _strdup(fFD.cFileName);
-        } while (FindNextFile(hFind, &fFD));
-        FindClose(hFind);
-    }
-#else
-    DIR *d = opendir(path);
-    if (d) {
-        struct dirent *dir;
-        while ((dir = readdir(d)) != NULL) {
-            if (strcmp(dir->d_name, ".") == 0 || strcmp(dir->d_name, "..") == 0) continue;
-
-            // Apply filter logic
-            if (strlen(filter) > 0 && !ends_with(dir->d_name, filter)) continue;
-
-            if (count >= capacity) {
-                capacity *= 2;
-                filenames = realloc(filenames, sizeof(char*) * capacity);
-            }
-            filenames[count++] = strdup(dir->d_name);
-        }
-        closedir(d);
-    }
-#endif
-
-    // Push the results to the Mylo Heap
-    double arr_addr = heap_alloc(count + HEAP_HEADER_ARRAY);
-    double* base = vm_resolve_ptr(arr_addr);
-    int* types = vm_resolve_type(arr_addr);
-
-    base[HEAP_OFFSET_TYPE] = TYPE_ARRAY;
-    base[HEAP_OFFSET_LEN] = (double)count;
-
-    for (int i = 0; i < count; i++) {
-        int id = make_string(filenames[i]);
-        base[HEAP_HEADER_ARRAY + i] = (double)id;
-        types[HEAP_HEADER_ARRAY + i] = T_STR;
-        free(filenames[i]);
-    }
-    free(filenames);
-
-    vm_push(arr_addr, T_OBJ);
-}
-
-
 const StdLibDef std_library[] = {
     {"len", std_len, "num", 1, {"any"}},
     {"contains", std_contains, "num", 2, {"any", "any"}},
@@ -946,6 +857,5 @@ const StdLibDef std_library[] = {
     {"min_list", std_list_min, "num", 1, {"arr"}},
     {"max_list", std_list_max, "num", 1, {"arr"}},
     {"noise", std_noise, "num", 3, {"num", "num", "num"}},
-    {"list_dir", std_list_dir, "arr", 2, {"str", "str"}},
     {NULL, NULL, NULL, 0, {NULL}}
 };
