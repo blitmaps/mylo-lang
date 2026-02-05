@@ -6,7 +6,8 @@
 #include "mylolib.h"
 #include "vm.h"
 #include "defines.h"
-#include "compiler.h"
+#include "os_job.h"
+
 #ifdef _WIN32
     #include <io.h>
     #include <windows.h>
@@ -913,6 +914,152 @@ void std_list_dir(VM *vm) {
     vm_push(arr_addr, T_OBJ);
 }
 
+// --- 1. System (Blocking) ---
+void std_system(VM *vm) {
+    double cmd_id = vm_pop();
+    const char *cmd = get_str(vm, cmd_id);
+
+    char *out_str = NULL;
+    char *err_str = NULL;
+
+    internal_exec_command(cmd, &out_str, &err_str);
+
+    // Create Mylo Array [stdout, stderr]
+    double arr_ptr = heap_alloc(2 + HEAP_HEADER_ARRAY);
+    double* base = vm_resolve_ptr(arr_ptr);
+    int* types = vm_resolve_type(arr_ptr);
+
+    base[HEAP_OFFSET_TYPE] = TYPE_ARRAY;
+    base[HEAP_OFFSET_LEN] = 2.0;
+
+    int id_out = make_string(out_str ? out_str : "");
+    int id_err = make_string(err_str ? err_str : "");
+
+    base[HEAP_HEADER_ARRAY + 0] = (double)id_out;
+    types[HEAP_HEADER_ARRAY + 0] = T_STR;
+
+    base[HEAP_HEADER_ARRAY + 1] = (double)id_err;
+    types[HEAP_HEADER_ARRAY + 1] = T_STR;
+
+    if(out_str) free(out_str);
+    if(err_str) free(err_str);
+
+    vm_push(arr_ptr, T_OBJ);
+}
+
+// --- 2. System Thread (Non-Blocking) ---
+void std_system_thread(VM *vm) {
+    double name_id = vm_pop();
+    double cmd_id = vm_pop();
+    const char *name = get_str(vm, name_id);
+    const char *cmd = get_str(vm, cmd_id);
+
+    LOCK_JOBS;
+    int slot = -1;
+    for(int i=0; i<MAX_JOBS; i++) {
+        if(!job_registry[i].active) {
+            slot = i;
+            break;
+        }
+    }
+
+    if(slot == -1) {
+        UNLOCK_JOBS;
+        vm_push(0.0, T_NUM); // Failed (No slots)
+        return;
+    }
+
+    // Setup Job
+    strncpy(job_registry[slot].name, name, 63);
+    job_registry[slot].cmd = strdup(cmd);
+    job_registry[slot].out_res = NULL;
+    job_registry[slot].err_res = NULL;
+    job_registry[slot].status = 0; // Running
+    job_registry[slot].active = 1;
+
+    // Spawn Thread
+#ifdef _WIN32
+    unsigned threadID;
+    job_registry[slot].thread = (HANDLE)_beginthreadex(NULL, 0, &job_worker, &job_registry[slot], 0, &threadID);
+#else
+    pthread_create(&job_registry[slot].thread, NULL, &job_worker, &job_registry[slot]);
+    pthread_detach(job_registry[slot].thread); // Detach so we don't need to join
+#endif
+
+    UNLOCK_JOBS;
+    vm_push(1.0, T_NUM); // Success
+}
+
+// --- 3. Get Job (Poll Status) ---
+void std_get_job(VM *vm) {
+    double name_id = vm_pop();
+    const char *name = get_str(vm, name_id);
+
+    LOCK_JOBS;
+    int slot = -1;
+    for(int i=0; i<MAX_JOBS; i++) {
+        if(job_registry[i].active && strcmp(job_registry[i].name, name) == 0) {
+            slot = i;
+            break;
+        }
+    }
+
+    // Case 1: Job not found
+    if(slot == -1) {
+        UNLOCK_JOBS;
+        vm_push(-1.0, T_NUM);
+        return;
+    }
+
+    // Case 2: Still Running
+    if(job_registry[slot].status == 0) {
+        UNLOCK_JOBS;
+        vm_push(1.0, T_NUM);
+        return;
+    }
+
+    // Case 3: Done - Return [out, err] and clean up
+    char* o = job_registry[slot].out_res;
+    char* e = job_registry[slot].err_res;
+
+    // Make Mylo Array
+    // NOTE: We must unlock before Allocating to prevent heap locks (if heap used mutexes later)
+    // But here we need to copy strings to VM first.
+    // For safety, we will grab the raw C strings, clear the job, unlock, THEN alloc VM memory.
+
+    char* safe_o = o ? strdup(o) : strdup("");
+    char* safe_e = e ? strdup(e) : strdup("");
+
+    // Cleanup registry slot
+    if(job_registry[slot].out_res) free(job_registry[slot].out_res);
+    if(job_registry[slot].err_res) free(job_registry[slot].err_res);
+    job_registry[slot].active = 0; // Free the slot
+
+    UNLOCK_JOBS;
+
+    // Now safe to alloc on VM Heap
+    double arr_ptr = heap_alloc(2 + HEAP_HEADER_ARRAY);
+    double* base = vm_resolve_ptr(arr_ptr);
+    int* types = vm_resolve_type(arr_ptr);
+
+    base[HEAP_OFFSET_TYPE] = TYPE_ARRAY;
+    base[HEAP_OFFSET_LEN] = 2.0;
+
+    int id_out = make_string(safe_o);
+    int id_err = make_string(safe_e);
+
+    base[HEAP_HEADER_ARRAY + 0] = (double)id_out;
+    types[HEAP_HEADER_ARRAY + 0] = T_STR;
+
+    base[HEAP_HEADER_ARRAY + 1] = (double)id_err;
+    types[HEAP_HEADER_ARRAY + 1] = T_STR;
+
+    free(safe_o);
+    free(safe_e);
+
+    vm_push(arr_ptr, T_OBJ);
+}
+
 
 const StdLibDef std_library[] = {
     {"len", std_len, "num", 1, {"any"}},
@@ -947,5 +1094,8 @@ const StdLibDef std_library[] = {
     {"max_list", std_list_max, "num", 1, {"arr"}},
     {"noise", std_noise, "num", 3, {"num", "num", "num"}},
     {"list_dir", std_list_dir, "arr", 2, {"str", "str"}},
+    {"system", std_system, "arr", 1, {"str"}},
+    {"system_thread", std_system_thread, "num", 2, {"str", "str"}},
+    {"get_job", std_get_job, "any", 1, {"str"}},
     {NULL, NULL, NULL, 0, {NULL}}
 };
