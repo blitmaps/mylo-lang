@@ -149,6 +149,7 @@ void run_vm(bool debug_trace);
 int vm_step(bool debug_trace);
 void mylo_reset();
 double* vm_resolve_ptr(double ptr_val);
+double* vm_resolve_ptr_safe(double ptr_val);
 int* vm_resolve_type(double ptr_val);
 double vm_store_copy(void* data, size_t size, const char* type_name);
 double vm_store_ptr(void* ptr, const char* type_name);

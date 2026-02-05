@@ -41,14 +41,20 @@ const char *OP_NAMES[] = {
 // --- Error Handling ---
 
 void mylo_runtime_error(const char* fmt, ...) {
+    char buffer[1024];
     va_list args;
     va_start(args, fmt);
 
     printf("[Line %d] Runtime Error: ", vm.lines[vm.ip - 1]);
-    vprintf(fmt, args);
-    printf("\n");
+    vsnprintf(buffer, 1024, fmt, args);
+    printf("%s\n", buffer); // Print to console
 
     va_end(args);
+    if (MyloConfig.debug_mode && MyloConfig.error_callback) {
+        MyloConfig.error_callback(buffer);
+        // We still need to stop execution, but let the callback handle the exit/event
+        exit(1);
+    }
 
     if (MyloConfig.repl_jmp_buf) {
         longjmp(*(jmp_buf*)MyloConfig.repl_jmp_buf, 1);
@@ -136,6 +142,19 @@ void vm_free_ref(int id) {
     }
 }
 
+double* vm_resolve_ptr_safe(double ptr_val) {
+    int id = UNPACK_ARENA(ptr_val);
+    int offset = UNPACK_OFFSET(ptr_val);
+    int gen = UNPACK_GEN(ptr_val);
+
+    if (id < 0 || id >= MAX_ARENAS) return NULL;
+    if (!vm.arenas[id].active) return NULL;
+    if (vm.arenas[id].generation != gen) return NULL;
+    if (offset < 0 || offset >= vm.arenas[id].capacity) return NULL;
+
+    return &vm.arenas[id].memory[offset];
+}
+
 // --- Arena & Memory Management ---
 
 void init_arena(int id) {
@@ -147,8 +166,9 @@ void init_arena(int id) {
 
     if (vm.arenas[id].memory == NULL) {
         vm.arenas[id].capacity = MAX_HEAP;
-        vm.arenas[id].memory = (double*)malloc(MAX_HEAP * sizeof(double));
-        vm.arenas[id].types = (int*)malloc(MAX_HEAP * sizeof(int));
+        // CHANGE: Use calloc to ensure heap is zeroed
+        vm.arenas[id].memory = (double*)calloc(MAX_HEAP, sizeof(double));
+        vm.arenas[id].types = (int*)calloc(MAX_HEAP, sizeof(int));
     }
 
     vm.arenas[id].head = 0;
@@ -202,13 +222,18 @@ void vm_init() {
 
     vm.bytecode = (int*)malloc(MAX_CODE * sizeof(int));
     vm.lines    = (int*)malloc(MAX_CODE * sizeof(int));
-    vm.stack       = (double*)malloc(STACK_SIZE * sizeof(double));
-    vm.stack_types = (int*)malloc(STACK_SIZE * sizeof(int));
-    vm.globals      = (double*)malloc(MAX_GLOBALS * sizeof(double));
-    vm.global_types = (int*)malloc(MAX_GLOBALS * sizeof(int));
+
+    // --- FIX START: Use calloc to zero-initialize memory ---
+    // This prevents the Debug Adapter from reading garbage types/values
+    // for globals that haven't been assigned yet.
+    vm.stack       = (double*)calloc(STACK_SIZE, sizeof(double));
+    vm.stack_types = (int*)calloc(STACK_SIZE, sizeof(int));
+    vm.globals      = (double*)calloc(MAX_GLOBALS, sizeof(double));
+    vm.global_types = (int*)calloc(MAX_GLOBALS, sizeof(int));
+    // --- FIX END ---
+
     vm.constants = (double*)malloc(MAX_CONSTANTS * sizeof(double));
     vm.string_pool = malloc(MAX_STRINGS * MAX_STRING_LENGTH);
-
     // CRITICAL: Ensure arena states (generations) are zeroed for deterministic tests
     memset(vm.arenas, 0, sizeof(vm.arenas));
 
@@ -368,10 +393,15 @@ void print_recursive(double val, int type, int depth, int max_elem) {
             return;
         }
 
-        double* base = vm_resolve_ptr(val);
+        double* base = vm_resolve_ptr_safe(val);
+        //int* types = vm_resolve_type(val);
+        if (!base) {
+            // Optional: Print something for uninitialized/null objects
+            if (val == 0.0) print_raw("null");
+            else print_raw("[Invalid Ref]");
+            return;
+        }
         int* types = vm_resolve_type(val);
-        if (!base) return;
-
         int obj_type = (int)base[HEAP_OFFSET_TYPE];
 
         if (obj_type == TYPE_ARRAY) {
