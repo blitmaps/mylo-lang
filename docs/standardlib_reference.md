@@ -40,8 +40,7 @@ The Mylo Standard Library provides essential functions for file I/O, math, and d
   * [File I/O (Binary)](#file-io-binary)
     + [`read_bytes(path: str, stride: num) -> arr`](#read_bytespath-str-stride-num-arr)
     + [`write_bytes(path: str, data: arr) -> num`](#write_bytespath-str-data-arr-num)
-  * [OS Functions](#list_dirpath-str-filter-str-arr)
-    + [`list_dir(path: str, filter: str) -> arr`](#list_dirpath-str-filter-str-arr)
+
 <!-- TOC end -->
 
 <!-- TOC --><a name="math-functions"></a>
@@ -623,47 +622,4 @@ Writes an array of numbers to a file as raw bytes.
 // Write ASCII bytes for "ABC\n"
 var data = [65, 66, 67, 10]
 write_bytes("output.bin", data)
-```
-
-
-## File I/O (Directory)
-
-<a name="list_dirpath-str-filter-str-arr"></a>
-### `list_dir(path: str, filter: str) -> arr`
-
-Returns an array of filenames contained within a specified directory. This function is cross-platform and works on both Windows and POSIX (Linux/macOS) systems.
-
-**Arguments:**
-* `path`: The path to the directory to list.
-* `filter`: A string representing a file extension or suffix to filter by (e.g., `".txt"`).
-    * Pass an empty string `""` to return all files and directories.
-
-**Returns:**
-* An array of strings containing the names of files and subdirectories found.
-* Returns an empty array if the directory cannot be opened or no matches are found.
-
-**Behavior:**
-* **Cross-Platform**: On Windows, it automatically handles path wildcards (e.g., `\*`).
-* **Filtered Results**: Only files ending with the exact string provided in the `filter` argument will be included.
-* **Exclusions**: Automatically ignores the system directory entries `.` (current directory) and `..` (parent directory).
-
-**Examples:**
-
-```javascript
-// Example 1: List all files in the current directory
-var all_files = list_dir(".", "")
-print(all_files) 
-// Result: ["main.mylo", "utils.mylo", "data", "README.md"]
-
-// Example 2: List only Mylo source files
-var src_files = list_dir("./src", ".mylo")
-for (file in src_files) {
-    print(f"Found source: {file}")
-}
-
-// Example 3: Filter for specific extensions
-var images = list_dir("assets/images", ".png")
-if (len(images) == 0) {
-    print("No PNG images found.")
-}
 ```
