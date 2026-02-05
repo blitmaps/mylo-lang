@@ -11,7 +11,8 @@ add_executable(mylo src/main.c src/compiler.c src/vm.h src/vm.c
         src/mylolib.h
         src/mylolib.c
         src/loader.c
-        src/debug_adapter.c)
+        src/debug_adapter.c
+        src/os_job.c)
 add_executable(tests tests/tests.cpp src/compiler.c src/vm.h src/vm.c
         src/utils.c
         src/mylolib.h
@@ -22,7 +23,11 @@ IF (WIN32)
   # Math not needed on Windows
 ELSE()
   # Math needed on other plats
-  target_link_libraries(mylo m -static)
-  target_link_libraries(tests m)
+  IF (APPLE)
+    target_link_libraries(mylo m)
+  ELSE()
+    target_link_libraries(mylo m -static)
+  ENDIF ()
+    target_link_libraries(tests m)
 ENDIF()
 
