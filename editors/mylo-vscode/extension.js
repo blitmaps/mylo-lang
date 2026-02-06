@@ -28,7 +28,7 @@ function activate(context) {
             // 2. Pass 'cwd' in the options object (3rd argument)
             return new vscode.DebugAdapterExecutable(
                 myloPath,
-                ['--debug', program],
+                ['--dap', program],
                 {
                     env: spawnedEnv,
                     cwd: cwd

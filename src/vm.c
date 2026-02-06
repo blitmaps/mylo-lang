@@ -476,6 +476,8 @@ void print_recursive(double val, int type, int depth, int max_elem) {
 #define UI_BOLD         "\033[1m"
 #define EXTEND          "\033[K"         // Extend bg color to end of line
 
+#define LINES_CONTEXT 12
+
 static int dbg_breakpoints[64];
 static int dbg_bp_count = 0;
 
@@ -591,13 +593,13 @@ void enter_debugger() {
 
     int current_line = vm.lines[vm.ip > 0 ? vm.ip - 1 : 0];
 
-    dbg_print_source_window(current_line, 6);
+    dbg_print_source_window(current_line, LINES_CONTEXT);
     dbg_print_state_window();
 
     printf(UI_BG_HEADER UI_BOLD UI_FG_WHITE "  DEBUG CONSOLE  " EXTEND UI_RST "\n");
 
     while (1) {
-        printf(UI_BG_CONTENT UI_FG_ACCENT "(mylo-db) " UI_RST);
+        printf(UI_BG_CONTENT UI_FG_ACCENT "mylo-db > " UI_RST);
         char buf[128];
         if (!fgets(buf, 128, stdin)) return;
 
