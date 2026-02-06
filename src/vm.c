@@ -1311,17 +1311,52 @@ static void exec_slice_op(int op) {
 }
 
 static void exec_monitor() {
-    printf("\n================ [ VM MONITOR ] ================\n");
-    printf("--- Regions (Arenas) ---\n");
-    printf("  ID | Usage (Doubles)     | Status\n");
-    printf("  ---|---------------------|-------\n");
+    //printf("\n================ [ VM MONITOR ] ================\n");
+    printf(UI_BG_HEADER UI_BOLD UI_FG_WHITE "  Memory Monitor" EXTEND UI_RST "\n");
+
+   // printf("--- Regions (Arenas) ---\n");
+    printf(UI_BG_CONTENT UI_BOLD UI_FG_GRAY "  Regions (Arenas)" EXTEND UI_RST "\n");
+    printf(UI_BG_CONTENT UI_FG_GRAY "  ID | Usage (Doubles)     | Status" EXTEND UI_RST "\n");
+    //printf(UI_BG_CONTENT UI_FG_GRAY "  " EXTEND UI_RST "\n");
+    //printf("  ---|---------------------|-------\n");
     for (int i = 0; i < MAX_ARENAS; i++) {
         if (vm.arenas[i].active) {
             bool is_current = (i == vm.current_arena);
             printf("  %2d | %6d / %-8d | %s%s\n", i, vm.arenas[i].head, vm.arenas[i].capacity, i == 0 ? "Main" : "Region", is_current ? " (Active Ctx)" : "");
         }
     }
-    printf("================================================\n");
+
+    //printf("\n--- Globals ---\n");
+    printf(UI_BG_CONTENT UI_BOLD UI_FG_GRAY "  Globals" EXTEND UI_RST "\n");
+    if (vm.global_symbols) {
+        for (int i = 0; i < vm.global_symbol_count; i++) {
+            int addr = vm.global_symbols[i].addr;
+            printf("  %s: ", vm.global_symbols[i].name);
+            print_recursive(vm.globals[addr], vm.global_types[addr], 0, MYLO_MONITOR_DEPTH);
+            printf("\n");
+        }
+    }
+
+    //printf("\n--- Locals (Frame FP: %d) ---\n", vm.fp);
+    printf(UI_BG_CONTENT UI_BOLD UI_FG_GRAY "  Locals (Frame #%d)" EXTEND UI_RST "\n", vm.fp);
+
+    bool found_any = false;
+    if (vm.local_symbols) {
+        for (int i = 0; i < vm.local_symbol_count; i++) {
+            VMLocalInfo* sym = &vm.local_symbols[i];
+            if ((vm.ip - 1) >= sym->start_ip && (sym->end_ip == -1 || (vm.ip - 1) <= sym->end_ip)) {
+                int stack_idx = vm.fp + sym->stack_offset;
+                if (stack_idx <= vm.sp) {
+                    printf("  %s: ", sym->name);
+                    print_recursive(vm.stack[stack_idx], vm.stack_types[stack_idx], 0, MYLO_MONITOR_DEPTH);
+                    printf("\n");
+                    found_any = true;
+                }
+            }
+        }
+    }
+    if (!found_any) printf("  (None)\n");
+   //printf("================================================\n");
 }
 
 static void exec_cast_op(int target_type, bool is_check_only) {
