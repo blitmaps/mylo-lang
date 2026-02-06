@@ -1327,7 +1327,7 @@ static void exec_monitor() {
     }
 
     //printf("\n--- Globals ---\n");
-    printf(UI_BG_CONTENT UI_BOLD UI_FG_GRAY "  Globals" EXTEND UI_RST "\n");
+    printf(UI_BG_CONTENT UI_BOLD UI_FG_GRAY "\n   Globals" EXTEND UI_RST "\n");
     if (vm.global_symbols) {
         for (int i = 0; i < vm.global_symbol_count; i++) {
             int addr = vm.global_symbols[i].addr;
@@ -1338,7 +1338,7 @@ static void exec_monitor() {
     }
 
     //printf("\n--- Locals (Frame FP: %d) ---\n", vm.fp);
-    printf(UI_BG_CONTENT UI_BOLD UI_FG_GRAY "  Locals (Frame #%d)" EXTEND UI_RST "\n", vm.fp);
+    printf(UI_BG_CONTENT UI_BOLD UI_FG_GRAY "\n   Locals (Frame #%d)" EXTEND UI_RST "\n", vm.fp);
 
     bool found_any = false;
     if (vm.local_symbols) {
