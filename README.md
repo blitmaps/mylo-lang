@@ -60,7 +60,8 @@ FLAGS:
   --repl          Start the interactive Read-Eval-Print Loop.                                                                                                                                                                                                                                                             
   --version       Display the current version information.
   --help          Show this help message.
-  --debug         Enable DAP debugging
+  --dap           Enable DAP debugging.
+  --db            Debug mode, load the code and jump into an interactive debugger.
   --trace         Run as normal but print every VM state change
   --build         Build and generate a .c bootstrapping source file.
   --bind          Generate a .c source file binding for later interpreted or compiled dynamic linking
