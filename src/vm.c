@@ -166,6 +166,7 @@ void init_arena(int id) {
 
     if (vm.arenas[id].memory == NULL) {
         vm.arenas[id].capacity = MAX_HEAP;
+        // Use calloc for safety (zeroed memory) on NEW allocations
         vm.arenas[id].memory = (double*)calloc(MAX_HEAP, sizeof(double));
         vm.arenas[id].types = (int*)calloc(MAX_HEAP, sizeof(int));
     }
@@ -217,7 +218,71 @@ void vm_cleanup() {
 }
 
 void vm_init() {
-    if (vm.bytecode) vm_cleanup();
+    // OPTIMIZATION: Soft Reset if VM is already initialized
+    // Instead of freeing everything and calloc-ing (zeroing) the whole heap again,
+    // we reuse the pointers and only zero-out the memory that was *used* in the last run.
+    if (vm.bytecode) {
+        // 1. Reset Registers & Counters
+        vm.sp = -1;
+        vm.ip = 0;
+        vm.fp = 0;
+        vm.code_size = 0;
+        vm.str_count = 0;
+        vm.const_count = 0;
+        vm.function_count = 0;
+        vm.output_mem_pos = 0;
+        vm.output_char_buffer[0] = '\0';
+        vm.global_symbol_count = 0;
+        vm.local_symbol_count = 0;
+        vm.cli_debug_mode = false;
+        vm.last_debug_line = -1;
+
+        // 2. Clear Small Buffers
+        memset(natives, 0, sizeof(natives));
+        memset(vm.globals, 0, MAX_GLOBALS * sizeof(double));
+        memset(vm.global_types, 0, MAX_GLOBALS * sizeof(int));
+        // Note: Stack doesn't need explicit clearing as sp=-1 protects it,
+        // but if paranoid: memset(vm.stack, 0, STACK_SIZE * sizeof(double));
+
+        // 3. Clean up References
+        for (int i = 0; i < ref_next_id; i++) {
+            if (ref_store[i].is_copy && ref_store[i].ptr) free(ref_store[i].ptr);
+            ref_store[i].ptr = NULL;
+        }
+        ref_next_id = 0;
+
+        // 4. Reset Arena 0 (Main Heap) - Reuse Memory!
+        // We only zero the portion that was used (`head`), not the whole capacity.
+        if (vm.arenas[0].memory) {
+            size_t used_doubles = vm.arenas[0].head;
+            if (used_doubles > 0) {
+                memset(vm.arenas[0].memory, 0, used_doubles * sizeof(double));
+                memset(vm.arenas[0].types, 0, used_doubles * sizeof(int));
+            }
+            // Logic from init_arena logic, manually applied for speed
+            vm.arenas[0].generation = (vm.arenas[0].generation + 1) & 0x3FFF;
+            if (vm.arenas[0].generation == 0) vm.arenas[0].generation = 1;
+            vm.arenas[0].head = 0;
+            vm.arenas[0].active = true;
+        } else {
+            // Fallback if Arena 0 was manually freed for some reason
+            init_arena(0);
+        }
+
+        // 5. Free Extra Regions (Tests expect a clean slate)
+        for (int i = 1; i < MAX_ARENAS; i++) {
+            free_arena(i);
+        }
+        vm.current_arena = 0;
+
+        // 6. Clear Debug Symbols (Compiler re-allocates these)
+        if (vm.global_symbols) { free(vm.global_symbols); vm.global_symbols = NULL; }
+        if (vm.local_symbols) { free(vm.local_symbols); vm.local_symbols = NULL; }
+
+        return; // Done! Skip the heavy allocations below.
+    }
+
+    // --- Cold Start (First Run) ---
 
     vm.bytecode = (int*)malloc(MAX_CODE * sizeof(int));
     vm.lines    = (int*)malloc(MAX_CODE * sizeof(int));
