@@ -24,11 +24,7 @@ IF (WIN32)
   # Math not needed on Windows
 ELSE()
   # Math needed on other plats
-  IF (APPLE)
     target_link_libraries(mylo m)
-  ELSE()
-    target_link_libraries(mylo m -static)
-  ENDIF ()
     target_link_libraries(tests m)
 ENDIF()
 

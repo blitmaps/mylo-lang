@@ -388,15 +388,6 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // 1. If Debugging, Hand off control immediately (Do NOT parse yet)
-    // The Debug Adapter manages its own parsing/execution loop via stdin/out commands
-    if (debug_mode) {
-        start_debug_adapter(&vm, fn, content);
-        free(content);
-        vm_cleanup(&vm);
-        return 0;
-    }
-
     // Apply TUI Debugger settings to VM instance
     vm.source_code = content;
     vm.cli_debug_mode = cli_debug_mode;
@@ -408,6 +399,15 @@ int main(int argc, char** argv) {
         char out_name[1024];
         snprintf(out_name, 1024, "%s_bind.c", fn);
         generate_binding_c_source(&vm, out_name);
+        free(content);
+        vm_cleanup(&vm);
+        return 0;
+    }
+
+    // 1. If Debugging, Hand off control immediately (Do NOT parse yet)
+    // The Debug Adapter manages its own parsing/execution loop via stdin/out commands
+    if (debug_mode) {
+        start_debug_adapter(&vm, fn, content);
         free(content);
         vm_cleanup(&vm);
         return 0;

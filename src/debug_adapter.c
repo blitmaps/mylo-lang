@@ -5,25 +5,41 @@
 #include <stdbool.h>
 #include <stdarg.h>
 #include <ctype.h>
+
 #ifdef _WIN32
     #include <windows.h>
-    #define sleep(x) Sleep(1000 * (x))
+    #include <io.h>
+    #include <fcntl.h>
+    #define sleep_ms(x) Sleep(x)
 #else
     #include <unistd.h>
+    #define sleep_ms(x) usleep((x) * 1000)
 #endif
+
 #include "debug_adapter.h"
 #include "vm.h"
-#include "compiler.h" // For global symbol definition if needed
+#include "compiler.h"
 
-#define MAX_PACKET_SIZE 8192
+// --- State ---
 static char current_source_path[4096];
-static char* pending_source_content = NULL;
+static int breakpoints[128];
+static int bp_count = 0;
+
+// --- Logging Helper ---
+// Prints to stderr so it shows up in VS Code without breaking the JSON protocol
+void log_debug(const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    fprintf(stderr, "[Mylo Adapter] ");
+    vfprintf(stderr, fmt, args);
+    fprintf(stderr, "\n");
+    va_end(args);
+    fflush(stderr); // Ensure it sends immediately
+}
 
 const char* get_function_name(VM* vm, int ip) {
     const char* best_name = "main";
     int best_addr = -1;
-    // Uses the global function registry from compiler.h, which is static state
-    // If we wanted to be pure VM, we should use vm->functions
     for(int i=0; i<vm->function_count; i++) {
         if (vm->functions[i].addr <= ip && vm->functions[i].addr > best_addr) {
             best_name = vm->functions[i].name;
@@ -36,6 +52,7 @@ const char* get_function_name(VM* vm, int ip) {
 // --- JSON Helpers ---
 void send_json(const char* content) {
     int len = strlen(content);
+    log_debug("<< Sending: %s", content); // Log outgoing
     fprintf(stdout, "Content-Length: %d\r\n\r\n%s", len, content);
     fflush(stdout);
 }
@@ -52,58 +69,94 @@ void send_response(int seq, const char* command, const char* body_json) {
     send_json(buf);
 }
 
-// --- Protocol Loop ---
+// --- Execution Loop ---
+void run_debug_session(VM* vm, bool step_mode) {
+    log_debug("Starting execution loop (Step Mode: %d)", step_mode);
 
-void run_debug_loop(VM* vm, bool step_mode) {
-    // If in step mode, we execute one instruction then stop
-    if (step_mode) {
-        // Send Stopped Event
-        send_event("stopped", "{\"reason\": \"step\", \"threadId\": 1, \"allThreadsStopped\": true}");
-    } else {
-        // We are launching/continuing, so we run until breakpoint or end
-        // Simple blocking run for now
-        // Send Stopped on entry? No, usually 'initialized' does that.
-    }
+    while (vm->ip < vm->code_size) {
+        int prev_line = (vm->lines) ? vm->lines[vm->ip] : 0;
 
-    // Input Loop
-    char header[1024];
-    while (1) {
-        // Simple blocking read of headers
-        // Real implementations use select/poll, here we just assume lock-step for simplicity
-        if (step_mode) {
-             // In step mode we don't block on VM, we wait for DAP command
-        } else {
-             // Run VM step
-             int res = vm_step(vm, false);
-             if (res == -1) {
-                 send_event("terminated", "{}");
-                 exit(0);
-             }
-             // Check Breakpoints
-             // (Requires compiler line mapping which is in VM now)
-             // ...
-             // If breakpoint hit:
-             // step_mode = true;
-             // send_event("stopped", "{\"reason\": \"breakpoint\"}");
-             continue; // Keep running
+        int op = vm_step(vm, false);
+        if (op == -1) {
+            log_debug("VM Terminated naturally");
+            send_event("terminated", "{}");
+            exit(0);
         }
 
-        // Read Header
-        if (!fgets(header, sizeof(header), stdin)) break;
+        int current_line = (vm->lines) ? vm->lines[vm->ip] : 0;
+
+        // Check if we hit a breakpoint or finished a step
+        if (current_line != prev_line || step_mode) {
+
+            // Check Breakpoints
+            for(int i=0; i<bp_count; i++) {
+                if (breakpoints[i] == current_line) {
+                    log_debug("Hit Breakpoint at line %d", current_line);
+                    send_event("stopped", "{\"reason\": \"breakpoint\", \"threadId\": 1}");
+                    return;
+                }
+            }
+
+            if (step_mode) {
+                log_debug("Step complete at line %d", current_line);
+                send_event("stopped", "{\"reason\": \"step\", \"threadId\": 1}");
+                return;
+            }
+        }
+    }
+
+    log_debug("VM execution finished");
+    send_event("terminated", "{}");
+    exit(0);
+}
+
+// --- Main Adapter Loop ---
+void start_debug_adapter(VM* vm, const char* filename, char* source_content) {
+    // Force Binary Mode on Windows to prevent \r\n translation issues
+    #ifdef _WIN32
+    _setmode(_fileno(stdin), _O_BINARY);
+    _setmode(_fileno(stdout), _O_BINARY);
+    _setmode(_fileno(stderr), _O_BINARY);
+    #endif
+
+    // Unbuffer stderr so logs appear instantly
+    setvbuf(stderr, NULL, _IONBF, 0);
+
+    log_debug("Adapter Started. Waiting for handshake...");
+
+    if (filename) strcpy(current_source_path, filename);
+    else strcpy(current_source_path, "unknown.mylo");
+
+    char header[1024];
+
+    while (1) {
+        // 1. Read Header
+        if (!fgets(header, sizeof(header), stdin)) {
+            log_debug("Stdin closed or error.");
+            break;
+        }
+
         if (strncmp(header, "Content-Length: ", 16) == 0) {
             int len = atoi(header + 16);
-            while(fgets(header, sizeof(header), stdin) && strcmp(header, "\r\n") != 0); // Skip other headers
 
+            // Consume separator lines
+            while(fgets(header, sizeof(header), stdin) && strcmp(header, "\r\n") != 0 && strcmp(header, "\n") != 0);
+
+            // 2. Read Body
             char* body = malloc(len + 1);
-            fread(body, 1, len, stdin);
-            body[len] = 0;
+            if (!body) { log_debug("OOM reading body"); break; }
 
-            // Very Basic Parser
+            int read_len = fread(body, 1, len, stdin);
+            body[read_len] = 0;
+
+            log_debug(">> Received (%d bytes): %s", read_len, body);
+
+            // 3. Parse Command
             int seq = 0;
             char command[64] = {0};
 
             char* seq_ptr = strstr(body, "\"seq\"");
-            if (seq_ptr) seq = atoi(seq_ptr + 6); // Approximation
+            if (seq_ptr) seq = atoi(seq_ptr + 6);
 
             char* cmd_ptr = strstr(body, "\"command\"");
             if (cmd_ptr) {
@@ -113,36 +166,63 @@ void run_debug_loop(VM* vm, bool step_mode) {
                     if (start) {
                         start++;
                         char* end = strchr(start, '"');
-                        if (end) {
-                            strncpy(command, start, end - start);
-                        }
+                        if (end) strncpy(command, start, end - start);
                     }
                 }
             }
 
-            // Handle Commands
+            // 4. Handle Commands
             if (strcmp(command, "initialize") == 0) {
                 send_response(seq, command, "{\"supportsConfigurationDoneRequest\": true}");
                 send_event("initialized", "{}");
             }
             else if (strcmp(command, "launch") == 0) {
                 send_response(seq, command, "{}");
-                // Stop at start?
-                send_event("stopped", "{\"reason\": \"entry\", \"threadId\": 1}");
-                step_mode = true;
+                log_debug("Launch request received. Waiting for configuration.");
             }
             else if (strcmp(command, "setBreakpoints") == 0) {
-                 // TODO: Parse breakpoints
-                 send_response(seq, command, "{\"breakpoints\": []}");
+                bp_count = 0;
+                char* lines_ptr = strstr(body, "\"lines\"");
+                if (lines_ptr) {
+                    char* p = strchr(lines_ptr, '[');
+                    if (p) {
+                        p++;
+                        while (*p && *p != ']') {
+                            if (isdigit(*p)) {
+                                if(bp_count < 128) breakpoints[bp_count++] = atoi(p);
+                                while(isdigit(*p)) p++;
+                            } else p++;
+                        }
+                    }
+                }
+                log_debug("Set %d breakpoints", bp_count);
+                send_response(seq, command, "{\"breakpoints\": []}");
+            }
+            else if (strcmp(command, "configurationDone") == 0) {
+                send_response(seq, command, "{}");
+
+                int start_line = (vm->lines && vm->code_size > 0) ? vm->lines[vm->ip] : 0;
+                bool hit_start = false;
+                for(int i=0; i<bp_count; i++) if (breakpoints[i] == start_line) hit_start = true;
+
+                if (hit_start) {
+                    log_debug("Stopped at entry breakpoint (Line %d)", start_line);
+                    send_event("stopped", "{\"reason\": \"breakpoint\", \"threadId\": 1}");
+                } else {
+                    log_debug("Starting run...");
+                    send_event("stopped", "{\"reason\": \"entry\", \"threadId\": 1}");
+                    // To auto-run on start, uncomment line below and remove send_event above
+                    // run_debug_session(vm, false);
+                }
             }
             else if (strcmp(command, "threads") == 0) {
                 send_response(seq, command, "{\"threads\": [{\"id\": 1, \"name\": \"Main Thread\"}]}");
             }
             else if (strcmp(command, "stackTrace") == 0) {
                 char stack[4096];
-                int line = vm->lines[vm->ip > 0 ? vm->ip - 1 : 0];
+                int line = (vm->lines && vm->ip > 0) ? vm->lines[vm->ip] : 1;
                 const char* fn = get_function_name(vm, vm->ip);
-                // We send a single frame for simplicity in this basic adapter
+
                 snprintf(stack, 4096, "{\"stackFrames\": [{\"id\": 1, \"name\": \"%s\", \"source\": {\"name\": \"%s\", \"path\": \"%s\"}, \"line\": %d, \"column\": 1}], \"totalFrames\": 1}",
                     fn, "source.mylo", current_source_path, line);
                 send_response(seq, command, stack);
@@ -151,39 +231,37 @@ void run_debug_loop(VM* vm, bool step_mode) {
                 send_response(seq, command, "{\"scopes\": [{\"name\": \"Locals\", \"variablesReference\": 1, \"expensive\": false}, {\"name\": \"Globals\", \"variablesReference\": 2, \"expensive\": false}]}");
             }
             else if (strcmp(command, "variables") == 0) {
-                // Parse ref
                 int ref = 0;
                 char* ref_ptr = strstr(body, "\"variablesReference\"");
                 if (ref_ptr) ref = atoi(ref_ptr + 21);
 
                 char json[8192] = "[";
+                bool first = true;
+
                 if (ref == 1) { // Locals
-                    bool first = true;
-                    // Use VM local symbols
                     if (vm->local_symbols) {
                         for(int i=0; i<vm->local_symbol_count; i++) {
                              VMLocalInfo* sym = &vm->local_symbols[i];
-                             if ((vm->ip-1) >= sym->start_ip && (sym->end_ip == -1 || (vm->ip-1) <= sym->end_ip)) {
+                             if (vm->ip >= sym->start_ip && vm->ip <= sym->end_ip) {
                                  int stack_idx = vm->fp + sym->stack_offset;
                                  if (stack_idx <= vm->sp) {
-                                     double val = vm->stack[stack_idx];
-                                     int type = vm->stack_types[stack_idx];
                                      if (!first) strcat(json, ",");
                                      char item[512];
+                                     double val = vm->stack[stack_idx];
+                                     int type = vm->stack_types[stack_idx];
+
                                      if (type == T_NUM) snprintf(item, 512, "{\"name\": \"%s\", \"value\": \"%g\", \"variablesReference\": 0}", sym->name, val);
-                                     else if (type == T_STR) {
-                                         const char* s = vm->string_pool[(int)val];
-                                         snprintf(item, 512, "{\"name\": \"%s\", \"value\": \"\\\"%s\\\"\", \"variablesReference\": 0}", sym->name, s);
-                                     }
+                                     else if (type == T_STR) snprintf(item, 512, "{\"name\": \"%s\", \"value\": \"\\\"...\\\"\", \"variablesReference\": 0}", sym->name);
                                      else snprintf(item, 512, "{\"name\": \"%s\", \"value\": \"[Object]\", \"variablesReference\": 0}", sym->name);
+
                                      strcat(json, item);
                                      first = false;
                                  }
                              }
                         }
                     }
-                } else if (ref == 2) { // Globals
-                    bool first = true;
+                }
+                else if (ref == 2) { // Globals
                     if (vm->global_symbols) {
                          for(int i=0; i<vm->global_symbol_count; i++) {
                              if (!first) strcat(json, ",");
@@ -191,54 +269,39 @@ void run_debug_loop(VM* vm, bool step_mode) {
                              double val = vm->globals[addr];
                              int type = vm->global_types[addr];
                              char item[512];
+
                              if (type == T_NUM) snprintf(item, 512, "{\"name\": \"%s\", \"value\": \"%g\", \"variablesReference\": 0}", vm->global_symbols[i].name, val);
-                             else if (type == T_STR) {
-                                  const char* s = vm->string_pool[(int)val];
-                                  snprintf(item, 512, "{\"name\": \"%s\", \"value\": \"\\\"%s\\\"\", \"variablesReference\": 0}", vm->global_symbols[i].name, s);
-                             }
+                             else if (type == T_STR) snprintf(item, 512, "{\"name\": \"%s\", \"value\": \"\\\"...\\\"\", \"variablesReference\": 0}", vm->global_symbols[i].name);
                              else snprintf(item, 512, "{\"name\": \"%s\", \"value\": \"[Object]\", \"variablesReference\": 0}", vm->global_symbols[i].name);
+
                              strcat(json, item);
                              first = false;
                          }
                     }
                 }
                 strcat(json, "]");
-                char full[8250];
+                char full[9000];
                 sprintf(full, "{\"variables\": %s}", json);
                 send_response(seq, command, full);
             }
             else if (strcmp(command, "next") == 0 || strcmp(command, "stepIn") == 0) {
                 send_response(seq, command, "{}");
-                int op = vm_step(vm, false);
-                if (op == -1) {
-                     send_event("terminated", "{}");
-                     exit(0);
-                }
-                send_event("stopped", "{\"reason\": \"step\", \"threadId\": 1}");
+                run_debug_session(vm, true);
             }
             else if (strcmp(command, "continue") == 0) {
                 send_response(seq, command, "{}");
-                step_mode = false;
+                run_debug_session(vm, false);
             }
             else if (strcmp(command, "disconnect") == 0) {
                 send_response(seq, command, "{}");
                 exit(0);
             }
             else {
+                log_debug("Unknown command: %s", command);
                 send_response(seq, command, "{}");
             }
 
             free(body);
         }
     }
-}
-
-void start_debug_adapter(VM* vm, const char* filename, char* source_content) {
-    if (filename) strcpy(current_source_path, filename);
-    else strcpy(current_source_path, "unknown.mylo");
-
-    pending_source_content = source_content;
-
-    // We start in a fake step mode to handle the handshake
-    run_debug_loop(vm, true);
 }
