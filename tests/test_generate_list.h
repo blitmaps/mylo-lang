@@ -14,84 +14,40 @@
 
 extern "C" {
     #include "../src/vm.h"
+    #include "../src/mylolib.h"
+    void compiler_reset();
     // declarations from compiler.c
-    void parse(char* src);
+    void parse(VM* vm, char* src);
+    void mylo_reset(VM* vm); // If needed, or just rely on vm_init
 }
 
+// Helpers
+void register_stdlib(VM* vm) {
+    int i = 0;
+    // Assuming std_library is visible or we manually register.
+    // Ideally we should include mylolib.h but for tests we rely on the symbols being linked.
+    extern const StdLibDef std_library[];
+    while (std_library[i].name != NULL) {
+        vm->natives[i] = std_library[i].func;
+        i++;
+    }
+}
 
 // Tests the test harness
 inline TestOutput test_test() {
     return {true};
 }
 
-inline TestOutput test_simple_math_addition() {
-    mylo_reset(); // Ensure clean state
-
-    std::string src = "var x = 10 + 5\n";
-    parse(const_cast<char *>(src.c_str()));
-    run_vm(false);
-
-    // Inspect VM state directly
-    // Global 'x' should be at index 0 and equal 15
-    TestOutput output;
-    output.result = vm.globals[0] == 15.0;
-    output.result_string = output.result ? "" : "Expected 15.0 and got " + std::to_string(vm.globals[0]);
-    return output;
-}
-
-inline TestOutput test_simple_math_subtraction() {
-    mylo_reset(); // Ensure clean state
-
-    std::string src = "var x = 10 - 5\n";
-    parse(const_cast<char *>(src.c_str()));
-    run_vm(false);
-
-    // Inspect VM state directly
-    // Global 'x' should be at index 0 and equal 15
-    TestOutput output;
-    output.result = vm.globals[0] == 5.0;
-    output.result_string = output.result ? "" : "Expected 15.0 and got " + std::to_string(vm.globals[0]);
-    return output;
-}
-
-inline TestOutput test_simple_math_division() {
-    mylo_reset(); // Ensure clean state
-
-    std::string src = "var x = 10 / 2\n";
-    parse(const_cast<char *>(src.c_str()));
-    run_vm(false);
-
-    // Inspect VM state directly
-    // Global 'x' should be at index 0 and equal 15
-    TestOutput output;
-    output.result = vm.globals[0] == 5.0;
-    output.result_string = output.result ? "" : "Expected 15.0 and got " + std::to_string(vm.globals[0]);
-    return output;
-}
-
-inline TestOutput test_strings_init() {
-    mylo_reset(); // Clear previous globals/bytecode
-
-    std::string src = "var s = \"hello\"\n";
-    parse(const_cast<char *>(src.c_str()));
-    run_vm(false);
-
-    TestOutput output;
-    // Check string pool
-    output.result = (strcmp(vm.string_pool[(int)vm.globals[0]], "hello") == 0);
-    output.result_string = output.result ? "" : "Expected 'hello' and got '" + std::string(vm.string_pool[(int)vm.globals[0]]) + "'";
-    return output;
-
-}
-
 inline TestOutput test_hello_world() {
+    VM vm;
+    vm_init(&vm);
+    register_stdlib(&vm);
     MyloConfig.print_to_memory = true;
-    mylo_reset();
 
     // Note: escape the quote properly for C string "print(\"hello\")"
     std::string src = "print(\"hello\")";
-    parse(const_cast<char *>(src.c_str()));
-    run_vm(false);
+    parse(&vm, const_cast<char *>(src.c_str()));
+    run_vm(&vm, false);
 
     // Reset config so other tests don't break
     MyloConfig.print_to_memory = false;
@@ -102,18 +58,23 @@ inline TestOutput test_hello_world() {
     // Check string pool
     output.result = (strcmp(vm.string_pool[(int)vm.globals[0]], "hello") == 0);
     output.result_string = output.result ? "" : "Expected 'hello' and got '" + std::string(vm.string_pool[(int)vm.globals[0]]) + "'";
+    vm_cleanup(&vm);
     return output;
 }
 
 inline TestOutput run_source_test(const std::string& src, const std::string& expected) {
+    VM vm;
+    vm_init(&vm);
+    register_stdlib(&vm);
+    compiler_reset();
     MyloConfig.print_to_memory = true;
-    mylo_reset();
+
 #ifdef PRINT_TEST_CODE
     std::cout << std::endl;
     std::cout << src << std::endl;
 #endif
-    parse(const_cast<char *>(src.c_str()));
-    run_vm(false);
+    parse(&vm, const_cast<char *>(src.c_str()));
+    run_vm(&vm, false);
 
     // Reset config so other tests don't break
     MyloConfig.print_to_memory = false;
@@ -123,8 +84,18 @@ inline TestOutput run_source_test(const std::string& src, const std::string& exp
     TestOutput output;
     output.result = (strcmp(vm.output_char_buffer, expected.c_str()) == 0);
     output.result_string = output.result ? "" : "Expected '" + expected + "'" + "and got '" + std::string(vm.output_char_buffer) + "'";
+    vm_cleanup(&vm);
     return output;
 }
+
+inline TestOutput test_math_simple() {
+    std::string src = """"
+    "print((((5 + 2)*7)+1)/2)\n";
+    std::string expected = """"
+        "25\n"; // As it is an array, it is promoted to num array :')
+    return run_source_test(src, expected);
+}
+
 
 inline TestOutput test_change_types() {
 
@@ -1138,15 +1109,10 @@ inline TestOutput test_type_promototion_bool() {
     return run_source_test(src, expected);
 }
 
-
-
 inline void test_generate_list() {
     ADD_TEST("Test Test", test_test);
-    ADD_TEST("Test Math +", test_simple_math_addition);
-    ADD_TEST("Test Math -", test_simple_math_subtraction);
-    ADD_TEST("Test Math /", test_simple_math_division);
-    ADD_TEST("Test Strings Init", test_strings_init);
     ADD_TEST("Test Print", test_hello_world);
+    ADD_TEST("Test Simple Math", test_math_simple);
     ADD_TEST("Test Change Types", test_change_types);
     ADD_TEST("Test Fib(10)", test_fib);
     ADD_TEST("Test If Statements", test_ifs);

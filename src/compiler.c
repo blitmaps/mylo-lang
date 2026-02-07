@@ -94,6 +94,8 @@ static Token curr;
 static bool inside_function = false;
 static char current_namespace[MAX_IDENTIFIER] = "";
 static int line = 1;
+// NOTE: We now use a pointer to the active VM being compiled
+static VM* compiling_vm = NULL;
 
 char search_paths[MAX_SEARCH_PATHS][MAX_STRING_LENGTH];
 int search_path_count = 0;
@@ -241,13 +243,13 @@ void error(const char *fmt, ...) {
 }
 
 void emit(int op) {
-    if (vm.code_size >= MAX_CODE) {
+    if (compiling_vm->code_size >= MAX_CODE) {
         fprintf(stderr, "Error: Code overflow\n");
         exit(1);
     }
-    vm.bytecode[vm.code_size] = op;
-    vm.lines[vm.code_size] = curr.line > 0 ? curr.line : line;
-    vm.code_size++;
+    compiling_vm->bytecode[compiling_vm->code_size] = op;
+    compiling_vm->lines[compiling_vm->code_size] = curr.line > 0 ? curr.line : line;
+    compiling_vm->code_size++;
 }
 
 int find_local(char *name) {
@@ -292,6 +294,23 @@ int find_stdlib_func(char *name) {
     return -1;
 }
 
+void compiler_reset() {
+    global_count = 0;
+    local_count = 0;
+    func_count = 0;
+    struct_count = 0;
+    enum_entry_count = 0;
+    ffi_count = 0;
+    bound_ffi_count = 0;
+    debug_symbol_count = 0;
+    loop_depth = 0;
+    current_namespace[0] = '\0';
+    search_path_count = 0;
+    c_header_count = 0;
+    line = 1;
+    inside_function = false;
+}
+
 void get_mangled_name(char *out, char *raw_name) {
     if (strlen(current_namespace) > 0) {
         sprintf(out, "%s_%s", current_namespace, raw_name);
@@ -311,10 +330,10 @@ void pop_loop(int continue_addr, int break_addr) {
     loop_depth--;
     LoopControl *loop = &loop_stack[loop_depth];
     for (int i = 0; i < loop->continue_count; i++) {
-        vm.bytecode[loop->continue_patches[i]] = continue_addr;
+        compiling_vm->bytecode[loop->continue_patches[i]] = continue_addr;
     }
     for (int i = 0; i < loop->break_count; i++) {
-        vm.bytecode[loop->break_patches[i]] = break_addr;
+        compiling_vm->bytecode[loop->break_patches[i]] = break_addr;
     }
 }
 
@@ -323,7 +342,7 @@ void emit_break() {
     LoopControl *loop = &loop_stack[loop_depth - 1];
     if (loop->break_count >= MAX_JUMPS_PER_LOOP) error("Too many 'break' statements");
     emit(OP_JMP);
-    loop->break_patches[loop->break_count++] = vm.code_size;
+    loop->break_patches[loop->break_count++] = compiling_vm->code_size;
     emit(0);
 }
 
@@ -332,7 +351,7 @@ void emit_continue() {
     LoopControl *loop = &loop_stack[loop_depth - 1];
     if (loop->continue_count >= MAX_JUMPS_PER_LOOP) error("Too many 'continue' statements");
     emit(OP_JMP);
-    loop->continue_patches[loop->continue_count++] = vm.code_size;
+    loop->continue_patches[loop->continue_count++] = compiling_vm->code_size;
     emit(0);
 }
 
@@ -643,6 +662,10 @@ static void c_gen_ffi_wrappers(FILE *fp) {
     for (int i = 0; i < ffi_count; i++) {
         c_gen_type_name(fp, ffi_blocks[i].return_type, true);
         fprintf(fp, " __mylo_user_%d(", i);
+        // Added VM* argument to generated C functions for access
+        fprintf(fp, "VM* vm");
+        if (ffi_blocks[i].arg_count > 0) fprintf(fp, ", ");
+
         for (int a = 0; a < ffi_blocks[i].arg_count; a++) {
             char *type = ffi_blocks[i].args[a].type;
             c_gen_type_name(fp, type, false);
@@ -662,7 +685,7 @@ static void c_gen_ffi_wrappers(FILE *fp) {
     for (int i = 0; i < ffi_count; i++) {
         fprintf(fp, "void __wrapper_%d(VM* vm) {\n", i);
         for (int a = ffi_blocks[i].arg_count - 1; a >= 0; a--) {
-            fprintf(fp, "    double _raw_%s = vm_pop();\n", ffi_blocks[i].args[a].name);
+            fprintf(fp, "    double _raw_%s = vm_pop(vm);\n", ffi_blocks[i].args[a].name);
         }
 
         char *ret_type = ffi_blocks[i].return_type;
@@ -670,7 +693,8 @@ static void c_gen_ffi_wrappers(FILE *fp) {
             c_gen_type_name(fp, ret_type, false);
             fprintf(fp, " res = ");
         }
-        fprintf(fp, "__mylo_user_%d(", i);
+        fprintf(fp, "__mylo_user_%d(vm", i);
+        if (ffi_blocks[i].arg_count > 0) fprintf(fp, ", ");
 
         for (int a = 0; a < ffi_blocks[i].arg_count; a++) {
             char *type = ffi_blocks[i].args[a].type;
@@ -685,73 +709,73 @@ static void c_gen_ffi_wrappers(FILE *fp) {
             else if (strcmp(type, "bool") == 0 || strcmp(type, "byte") == 0) fprintf(
                 fp, "(unsigned char)_raw_%s", name);
             else if (strcmp(type, "bytes") == 0) fprintf(
-                fp, "(unsigned char*)(vm_resolve_ptr(_raw_%s) + HEAP_HEADER_ARRAY)", name);
-            else if (strcmp(type, "byte[]") == 0 || strcmp(type, "bool[]") == 0) fprintf(fp, "(unsigned char*)(vm_resolve_ptr(_raw_%s) + HEAP_HEADER_ARRAY)", name);
-            else if (strcmp(type, "i32[]") == 0) fprintf(fp, "(int*)(vm_resolve_ptr(_raw_%s) + HEAP_HEADER_ARRAY)", name);
-            else if (strcmp(type, "i64[]") == 0) fprintf(fp, "(long long*)(vm_resolve_ptr(_raw_%s) + HEAP_HEADER_ARRAY)", name);
-            else if (strcmp(type, "f32[]") == 0) fprintf(fp, "(float*)(vm_resolve_ptr(_raw_%s) + HEAP_HEADER_ARRAY)", name);
-            else if (strcmp(type, "i16[]") == 0) fprintf(fp, "(short*)(vm_resolve_ptr(_raw_%s) + HEAP_HEADER_ARRAY)", name);
-            else if (strstr(type, "[]")) fprintf(fp, "(void*)(vm_resolve_ptr(_raw_%s) + HEAP_HEADER_ARRAY)", name);
-            else fprintf(fp, "(c_%s*)(vm_resolve_ptr(_raw_%s) + HEAP_HEADER_STRUCT)", type, name);
+                fp, "(unsigned char*)(vm_resolve_ptr(vm, _raw_%s) + HEAP_HEADER_ARRAY)", name);
+            else if (strcmp(type, "byte[]") == 0 || strcmp(type, "bool[]") == 0) fprintf(fp, "(unsigned char*)(vm_resolve_ptr(vm, _raw_%s) + HEAP_HEADER_ARRAY)", name);
+            else if (strcmp(type, "i32[]") == 0) fprintf(fp, "(int*)(vm_resolve_ptr(vm, _raw_%s) + HEAP_HEADER_ARRAY)", name);
+            else if (strcmp(type, "i64[]") == 0) fprintf(fp, "(long long*)(vm_resolve_ptr(vm, _raw_%s) + HEAP_HEADER_ARRAY)", name);
+            else if (strcmp(type, "f32[]") == 0) fprintf(fp, "(float*)(vm_resolve_ptr(vm, _raw_%s) + HEAP_HEADER_ARRAY)", name);
+            else if (strcmp(type, "i16[]") == 0) fprintf(fp, "(short*)(vm_resolve_ptr(vm, _raw_%s) + HEAP_HEADER_ARRAY)", name);
+            else if (strstr(type, "[]")) fprintf(fp, "(void*)(vm_resolve_ptr(vm, _raw_%s) + HEAP_HEADER_ARRAY)", name);
+            else fprintf(fp, "(c_%s*)(vm_resolve_ptr(vm, _raw_%s) + HEAP_HEADER_STRUCT)", type, name);
             if (a < ffi_blocks[i].arg_count - 1) fprintf(fp, ", ");
         }
         fprintf(fp, ");\n");
 
-        if (strcmp(ret_type, "num") == 0) fprintf(fp, "    vm_push(res, T_NUM);\n");
-        else if (strcmp(ret_type, "void") == 0) fprintf(fp, "    vm_push(0.0, T_NUM);\n");
+        if (strcmp(ret_type, "num") == 0) fprintf(fp, "    vm_push(vm, res, T_NUM);\n");
+        else if (strcmp(ret_type, "void") == 0) fprintf(fp, "    vm_push(vm, 0.0, T_NUM);\n");
         else if (strcmp(ret_type, "string") == 0 || strcmp(ret_type, "str") == 0) fprintf(
-            fp, "    int id = make_string(res);\n    vm_push((double)id, T_STR);\n");
+            fp, "    int id = make_string(vm, res);\n    vm_push(vm, (double)id, T_STR);\n");
         else if (strcmp(ret_type, "i32") == 0 || strcmp(ret_type, "i64") == 0 || strcmp(ret_type, "f32") == 0 ||
                  strcmp(ret_type, "i16") == 0 || strcmp(ret_type, "byte") == 0 || strcmp(ret_type, "bool") == 0)
-            fprintf(fp, "    vm_push((double)res, T_NUM);\n");
+            fprintf(fp, "    vm_push(vm, (double)res, T_NUM);\n");
         else if (strlen(ret_type) > 0) {
 
             if (strstr(ret_type, "[]")) {
-                fprintf(fp, "    vm_push(res.value, res.type);\n");
+                fprintf(fp, "    vm_push(vm, res.value, res.type);\n");
             }
             else {
                 int st_idx = -1;
                 for (int s = 0; s < struct_count; s++) if (strcmp(struct_defs[s].name, ret_type) == 0) st_idx = s;
                 if (st_idx != -1) {
-                    fprintf(fp, "    double ptr = heap_alloc(%d + HEAP_HEADER_STRUCT);\n", struct_defs[st_idx].field_count);
-                    fprintf(fp, "    double* base = vm_resolve_ptr(ptr);\n");
+                    fprintf(fp, "    double ptr = heap_alloc(vm, %d + HEAP_HEADER_STRUCT);\n", struct_defs[st_idx].field_count);
+                    fprintf(fp, "    double* base = vm_resolve_ptr(vm, ptr);\n");
                     fprintf(fp, "    base[HEAP_OFFSET_TYPE] = %d.0;\n", st_idx);
                     for (int f = 0; f < struct_defs[st_idx].field_count; f++) fprintf(
                         fp, "    base[HEAP_HEADER_STRUCT + %d] = res.%s;\n", f, struct_defs[st_idx].fields[f]);
-                    fprintf(fp, "    vm_push(ptr, T_OBJ);\n");
+                    fprintf(fp, "    vm_push(vm, ptr, T_OBJ);\n");
                 } else {
-                    fprintf(fp, "    vm_push(0.0, T_OBJ);\n");
+                    fprintf(fp, "    vm_push(vm, 0.0, T_OBJ);\n");
                 }
             }
 
-        } else fprintf(fp, "    vm_push(res.value, res.type);\n");
+        } else fprintf(fp, "    vm_push(vm, res.value, res.type);\n");
         fprintf(fp, "}\n");
     }
 }
 
 void factor() {
     if (curr.type == TK_NUM) {
-        int idx = make_const(curr.val_float);
+        int idx = make_const(compiling_vm, curr.val_float);
         emit(OP_PSH_NUM); emit(idx);
         match(TK_NUM);
     } else if (curr.type == TK_STR) {
-        int id = make_string(curr.text);
+        int id = make_string(compiling_vm, curr.text);
         emit(OP_PSH_STR); emit(id);
         match(TK_STR);
     } else if (curr.type == TK_TRUE) {
-        emit(OP_PSH_NUM); emit(make_const(1.0));
+        emit(OP_PSH_NUM); emit(make_const(compiling_vm, 1.0));
         match(TK_TRUE);
     } else if (curr.type == TK_FALSE) {
-        emit(OP_PSH_NUM); emit(make_const(0.0));
+        emit(OP_PSH_NUM); emit(make_const(compiling_vm, 0.0));
         match(TK_FALSE);
     } else if (curr.type == TK_MINUS) {
         match(TK_MINUS);
         if (curr.type == TK_NUM) {
-            int idx = make_const(-curr.val_float);
+            int idx = make_const(compiling_vm, -curr.val_float);
             emit(OP_PSH_NUM); emit(idx);
             match(TK_NUM);
         } else {
-            emit(OP_PSH_NUM); emit(make_const(0.0));
+            emit(OP_PSH_NUM); emit(make_const(compiling_vm, 0.0));
             factor();
             emit(OP_SUB);
         }
@@ -765,6 +789,7 @@ void factor() {
         match(TK_RBRACKET);
         emit(OP_ARR); emit(count);
     } else if (curr.type == TK_LBRACE) {
+        // ... [Same struct/map literal logic] ...
         char *safe_src = src; Token safe_curr = curr; int safe_line = line;
         match(TK_LBRACE);
         bool is_map = (curr.type == TK_STR || curr.type == TK_RBRACE);
@@ -782,6 +807,7 @@ void factor() {
             else error("Could not infer struct type from field '%s'", first_field);
         }
     } else if (curr.type == TK_ID && strcmp(curr.text, "C") == 0) {
+        // ... [FFI Block logic same] ...
         match(TK_ID);
         int ffi_idx = ffi_count++;
         ffi_blocks[ffi_idx].id = ffi_idx;
@@ -852,7 +878,8 @@ void factor() {
         while (std_library[std_count].name != NULL) std_count++;
         emit(std_count + ffi_idx);
     } else if (curr.type == TK_FSTR) {
-        int empty_id = make_string("");
+        // ... [FSTR logic same] ...
+        int empty_id = make_string(compiling_vm, "");
         emit(OP_PSH_STR); emit(empty_id);
         char *raw = curr.text; char *ptr = raw; char *start = ptr;
         while (*ptr) {
@@ -861,7 +888,7 @@ void factor() {
                     char chunk[MAX_STRING_LENGTH]; int len = (int) (ptr - start);
                     if (len >= MAX_STRING_LENGTH) len = MAX_STRING_LENGTH - 1;
                     strncpy(chunk, start, len); chunk[len] = '\0';
-                    int id = make_string(chunk); emit(OP_PSH_STR); emit(id); emit(OP_CAT);
+                    int id = make_string(compiling_vm, chunk); emit(OP_PSH_STR); emit(id); emit(OP_CAT);
                 }
                 ptr++; char *expr_start = ptr;
                 while (*ptr && *ptr != '}') ptr++;
@@ -880,11 +907,11 @@ void factor() {
             char chunk[MAX_STRING_LENGTH]; int len = (int) (ptr - start);
             if (len >= MAX_STRING_LENGTH) len = MAX_STRING_LENGTH - 1;
             strncpy(chunk, start, len); chunk[len] = '\0';
-            int id = make_string(chunk); emit(OP_PSH_STR); emit(id); emit(OP_CAT);
+            int id = make_string(compiling_vm, chunk); emit(OP_PSH_STR); emit(id); emit(OP_CAT);
         }
         match(TK_FSTR);
     } else if (curr.type == TK_BSTR) {
-        int id = make_string(curr.text);
+        int id = make_string(compiling_vm, curr.text);
         emit(OP_PSH_STR); emit(id); emit(OP_MK_BYTES);
         match(TK_BSTR);
     } else if (curr.type == TK_ID) {
@@ -894,7 +921,7 @@ void factor() {
 
         int enum_val = find_enum_val(name);
         if (enum_val != -1) {
-            int idx = make_const((double) enum_val); emit(OP_PSH_NUM); emit(idx); return;
+            int idx = make_const(compiling_vm, (double) enum_val); emit(OP_PSH_NUM); emit(idx); return;
         }
         if (curr.type == TK_LPAREN) {
             match(TK_LPAREN);
@@ -928,7 +955,10 @@ void factor() {
             while (curr.type == TK_DOT || curr.type == TK_LBRACKET) {
                 if (curr.type == TK_DOT) {
                     match(TK_DOT); char f[MAX_IDENTIFIER]; strcpy(f, curr.text); match(TK_ID);
-                    if (type_id == -1) error("Accessing member '%s' of untyped var.", f);
+
+                    // --- FIX: Check for negative type_id (Primitives or ANY) ---
+                    if (type_id < 0) error("Accessing member '%s' of untyped/primitive var.", f);
+
                     int offset = find_field(type_id, f);
                     if (offset == -1) error("Struct '%s' has no field '%s'", struct_defs[type_id].name, f);
                     emit(OP_HGET); emit(offset); emit(type_id); type_id = -1;
@@ -943,7 +973,6 @@ void factor() {
         match(TK_LPAREN); expression(); match(TK_RPAREN);
     } else error("Unexpected token '%s' in expression", curr.text);
 }
-
 
 void term() {
     factor();
@@ -1008,16 +1037,16 @@ void expression() {
     if (curr.type == TK_QUESTION) {
         match(TK_QUESTION);
         emit(OP_JZ);
-        int p1 = vm.code_size;
+        int p1 = compiling_vm->code_size;
         emit(0);
         expression();
         emit(OP_JMP);
-        int p2 = vm.code_size;
+        int p2 = compiling_vm->code_size;
         emit(0);
-        vm.bytecode[p1] = vm.code_size;
+        compiling_vm->bytecode[p1] = compiling_vm->code_size;
         match(TK_ELSE);
         expression();
-        vm.bytecode[p2] = vm.code_size;
+        compiling_vm->bytecode[p2] = compiling_vm->code_size;
     }
 }
 
@@ -1033,7 +1062,7 @@ int alloc_var(bool is_loc, char *name, int type_id, bool is_array) {
         if (debug_symbol_count < MAX_DEBUG_SYMBOLS) {
             if (name) strcpy(debug_symbols[debug_symbol_count].name, name);
             debug_symbols[debug_symbol_count].stack_offset = local_count;
-            debug_symbols[debug_symbol_count].start_ip = vm.code_size;
+            debug_symbols[debug_symbol_count].start_ip = compiling_vm->code_size;
             debug_symbols[debug_symbol_count].end_ip = -1;
             debug_symbol_count++;
         }
@@ -1063,7 +1092,7 @@ int get_var_addr(char *n, bool is_local, int explicit_type) {
         int loc = find_local(n);
         if (loc != -1) return loc;
         emit(OP_PSH_NUM);
-        emit(make_const(0.0));
+        emit(make_const(compiling_vm, 0.0));
         return alloc_var(true, n, explicit_type, false);
     } else {
         char m[MAX_IDENTIFIER * 2];
@@ -1071,7 +1100,7 @@ int get_var_addr(char *n, bool is_local, int explicit_type) {
         int glob = find_global(m);
         if (glob != -1) return glob;
         emit(OP_PSH_NUM);
-        emit(make_const(0.0));
+        emit(make_const(compiling_vm, 0.0));
         return alloc_var(false, n, explicit_type, false);
     }
 }
@@ -1094,7 +1123,7 @@ static void parse_print() {
     match(TK_PRINT);
     match(TK_LPAREN);
     if (curr.type == TK_STR) {
-        int id = make_string(curr.text);
+        int id = make_string(compiling_vm, curr.text);
         emit(OP_PSH_STR); emit(id);
         match(TK_STR);
     } else expression();
@@ -1220,9 +1249,9 @@ static void parse_import() {
             api.store_ptr = vm_store_ptr;
             api.get_ref = vm_get_ref;
             api.free_ref = vm_free_ref;
-            api.natives_array = natives;
-            api.string_pool = vm.string_pool;
-            binder(&vm, std_count + start_ffi_index, &api);
+            api.natives_array = compiling_vm->natives;
+            api.string_pool = compiling_vm->string_pool;
+            binder(compiling_vm, std_count + start_ffi_index, &api);
             bound_ffi_count += added_natives;
         }
     }
@@ -1421,7 +1450,7 @@ static void parse_var_decl() {
 
     if (specific_region) {
         emit(OP_PSH_NUM);
-        emit(make_const(0.0));
+        emit(make_const(compiling_vm, 0.0));
         emit(OP_SET_CTX);
     }
 }
@@ -1578,22 +1607,22 @@ static void parse_if() {
     match(TK_IF);
     expression();
     emit(OP_JZ);
-    int p1 = vm.code_size;
+    int p1 = compiling_vm->code_size;
     emit(0);
     match(TK_LBRACE);
     while (curr.type != TK_RBRACE) statement();
     match(TK_RBRACE);
     if (curr.type == TK_ELSE) {
         emit(OP_JMP);
-        int p2 = vm.code_size;
+        int p2 = compiling_vm->code_size;
         emit(0);
-        vm.bytecode[p1] = vm.code_size;
+        compiling_vm->bytecode[p1] = compiling_vm->code_size;
         match(TK_ELSE);
         match(TK_LBRACE);
         while (curr.type != TK_RBRACE) statement();
         match(TK_RBRACE);
-        vm.bytecode[p2] = vm.code_size;
-    } else vm.bytecode[p1] = vm.code_size;
+        compiling_vm->bytecode[p2] = compiling_vm->code_size;
+    } else compiling_vm->bytecode[p1] = compiling_vm->code_size;
 }
 
 static void parse_embed() {
@@ -1697,7 +1726,7 @@ void for_statement() {
             if (is_pair) error("Cannot unpack key/value from range loop");
             EMIT_SET(is_local, var1_addr);
             match(TK_RANGE);
-            int t = make_const(curr.val_float);
+            int t = make_const(compiling_vm, curr.val_float);
             match(TK_NUM);
             int s = alloc_var(is_local, "_step", TYPE_ANY, false);
             EMIT_GET(is_local, var1_addr);
@@ -1705,36 +1734,36 @@ void for_statement() {
             emit(t);
             emit(OP_LT);
             emit(OP_JZ);
-            int p1 = vm.code_size;
+            int p1 = compiling_vm->code_size;
             emit(0);
             emit(OP_PSH_NUM);
-            emit(make_const(1.0));
+            emit(make_const(compiling_vm, 1.0));
             emit(OP_JMP);
-            int p2 = vm.code_size;
+            int p2 = compiling_vm->code_size;
             emit(0);
-            vm.bytecode[p1] = vm.code_size;
+            compiling_vm->bytecode[p1] = compiling_vm->code_size;
             EMIT_GET(is_local, var1_addr);
             emit(OP_PSH_NUM);
             emit(t);
             emit(OP_GT);
             emit(OP_JZ);
-            int p3 = vm.code_size;
+            int p3 = compiling_vm->code_size;
             emit(0);
             emit(OP_PSH_NUM);
-            emit(make_const(-1.0));
+            emit(make_const(compiling_vm, -1.0));
             emit(OP_JMP);
-            int p4 = vm.code_size;
+            int p4 = compiling_vm->code_size;
             emit(0);
-            vm.bytecode[p3] = vm.code_size;
+            compiling_vm->bytecode[p3] = compiling_vm->code_size;
             emit(OP_PSH_NUM);
-            emit(make_const(0.0));
-            vm.bytecode[p2] = vm.code_size;
-            vm.bytecode[p4] = vm.code_size;
+            emit(make_const(compiling_vm, 0.0));
+            compiling_vm->bytecode[p2] = compiling_vm->code_size;
+            compiling_vm->bytecode[p4] = compiling_vm->code_size;
             if (!is_local) {
                 emit(OP_SET);
                 emit(s);
             }
-            int loop = vm.code_size;
+            int loop = compiling_vm->code_size;
             match(TK_RPAREN);
             match(TK_LBRACE);
             while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
@@ -1743,7 +1772,7 @@ void for_statement() {
             int brace_line = curr.line;
             match(TK_RBRACE);
 
-            int continue_dest = vm.code_size;
+            int continue_dest = compiling_vm->code_size;
             EMIT_GET(is_local, var1_addr);
             EMIT_GET(is_local, s);
             emit(OP_ADD);
@@ -1756,9 +1785,9 @@ void for_statement() {
 
             // PATCH: Set the line number of the JMP to the brace line
             emit(loop);
-            vm.lines[vm.code_size - 1] = brace_line;
+            compiling_vm->lines[compiling_vm->code_size - 1] = brace_line;
 
-            pop_loop(continue_dest, vm.code_size);
+            pop_loop(continue_dest, compiling_vm->code_size);
             return;
         } else {
             int a = alloc_var(is_local, "_arr", TYPE_ANY, true);
@@ -1768,18 +1797,18 @@ void for_statement() {
             }
             int i = alloc_var(is_local, "_idx", TYPE_NUM, false);
             emit(OP_PSH_NUM);
-            emit(make_const(0.0));
+            emit(make_const(compiling_vm, 0.0));
             if (!is_local) {
                 emit(OP_SET);
                 emit(i);
             }
-            int loop = vm.code_size;
+            int loop = compiling_vm->code_size;
             EMIT_GET(is_local, i);
             EMIT_GET(is_local, a);
             emit(OP_ALEN);
             emit(OP_LT);
             emit(OP_JZ);
-            int exit = vm.code_size;
+            int exit = compiling_vm->code_size;
             emit(0);
             if (is_pair) {
                 EMIT_GET(is_local, a);
@@ -1804,28 +1833,28 @@ void for_statement() {
             int brace_line = curr.line;
             match(TK_RBRACE);
 
-            int continue_dest = vm.code_size;
+            int continue_dest = compiling_vm->code_size;
             EMIT_GET(is_local, i);
             emit(OP_PSH_NUM);
-            emit(make_const(1.0));
+            emit(make_const(compiling_vm, 1.0));
             emit(OP_ADD);
             EMIT_SET(is_local, i);
             emit(OP_JMP);
 
             // PATCH: Set the line number of the JMP to the brace line
             emit(loop);
-            vm.lines[vm.code_size - 1] = brace_line;
+            compiling_vm->lines[compiling_vm->code_size - 1] = brace_line;
 
-            vm.bytecode[exit] = vm.code_size;
-            pop_loop(continue_dest, vm.code_size);
+            compiling_vm->bytecode[exit] = compiling_vm->code_size;
+            pop_loop(continue_dest, compiling_vm->code_size);
         }
     } else {
         push_loop();
-        int loop = vm.code_size;
+        int loop = compiling_vm->code_size;
         expression();
         match(TK_RPAREN);
         emit(OP_JZ);
-        int exit = vm.code_size;
+        int exit = compiling_vm->code_size;
         emit(0);
         match(TK_LBRACE);
         while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
@@ -1838,11 +1867,11 @@ void for_statement() {
         emit(loop);
 
         // PATCH: Set the line number of the JMP to the brace line
-        vm.lines[vm.code_size - 1] = brace_line;
-        vm.lines[vm.code_size - 2] = brace_line; // Patch both operand and opcode
+        compiling_vm->lines[compiling_vm->code_size - 1] = brace_line;
+        compiling_vm->lines[compiling_vm->code_size - 2] = brace_line; // Patch both operand and opcode
 
-        vm.bytecode[exit] = vm.code_size;
-        pop_loop(loop, vm.code_size);
+        compiling_vm->bytecode[exit] = compiling_vm->code_size;
+        pop_loop(loop, compiling_vm->code_size);
     }
 }
 
@@ -1911,7 +1940,7 @@ void parse_map_literal() {
     while (curr.type != TK_RBRACE && curr.type != TK_EOF) {
         emit(OP_DUP);
         if (curr.type != TK_STR) error("Map keys must be strings");
-        int id = make_string(curr.text);
+        int id = make_string(compiling_vm, curr.text);
         emit(OP_PSH_STR);
         emit(id);
         match(TK_STR);
@@ -2000,7 +2029,7 @@ void statement() {
         match(TK_FOREVER);
         match(TK_LBRACE);
         push_loop();
-        int loop_start = vm.code_size;
+        int loop_start = compiling_vm->code_size;
         while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
 
         // FIX: Ensure jump back is associated with the brace line
@@ -2011,17 +2040,17 @@ void statement() {
         emit(loop_start);
 
         // PATCH: Set the line number of the JMP to the brace line
-        vm.lines[vm.code_size - 1] = brace_line;
-        vm.lines[vm.code_size - 2] = brace_line;
+        compiling_vm->lines[compiling_vm->code_size - 1] = brace_line;
+        compiling_vm->lines[compiling_vm->code_size - 2] = brace_line;
 
-        pop_loop(loop_start, vm.code_size);
+        pop_loop(loop_start, compiling_vm->code_size);
     } else if (curr.type == TK_EMBED) {
         parse_embed();
     } else if (curr.type == TK_RET) {
         match(TK_RET);
         if (curr.type == TK_RBRACE) {
             emit(OP_PSH_NUM);
-            emit(make_const(0.0));
+            emit(make_const(compiling_vm, 0.0));
         } else expression();
         emit(OP_RET);
     } else if (curr.type != TK_EOF) next_token();
@@ -2035,13 +2064,13 @@ void function() {
     strcpy(name, curr.text);
     match(TK_ID);
     emit(OP_JMP);
-    int p = vm.code_size;
+    int p = compiling_vm->code_size;
     emit(0);
     char m[MAX_IDENTIFIER * 2];
     get_mangled_name(m, name);
     strcpy(funcs[func_count].name, m);
-    funcs[func_count++].addr = vm.code_size;
-    vm_register_function(&vm, name, vm.code_size);
+    funcs[func_count++].addr = compiling_vm->code_size;
+    vm_register_function(compiling_vm, name, compiling_vm->code_size);
     int start_debug_idx = debug_symbol_count;
     bool ps = inside_function;
     int pl = local_count;
@@ -2086,11 +2115,11 @@ void function() {
     while (curr.type != TK_RBRACE) statement();
     match(TK_RBRACE);
     emit(OP_PSH_NUM);
-    int z = make_const(0.0);
+    int z = make_const(compiling_vm, 0.0);
     emit(z);
     emit(OP_RET);
-    vm.bytecode[p] = vm.code_size;
-    int func_end_ip = vm.code_size;
+    compiling_vm->bytecode[p] = compiling_vm->code_size;
+    int func_end_ip = compiling_vm->code_size;
     for (int i = start_debug_idx; i < debug_symbol_count; i++) {
         if (debug_symbols[i].end_ip == -1) debug_symbols[i].end_ip = func_end_ip;
     }
@@ -2117,27 +2146,27 @@ void parse_internal(char *source, bool is_import) {
     }
     if (!is_import) emit(OP_HLT);
 
-    int end_ip = vm.code_size;
+    int end_ip = compiling_vm->code_size;
     for (int i = start_debug_idx; i < debug_symbol_count; i++) {
         if (debug_symbols[i].end_ip == -1) debug_symbols[i].end_ip = end_ip;
     }
     if (!is_import) {
-        if (vm.global_symbols) free(vm.global_symbols);
-        vm.global_symbols = malloc(sizeof(VMSymbol) * global_count);
-        vm.global_symbol_count = global_count;
+        if (compiling_vm->global_symbols) free(compiling_vm->global_symbols);
+        compiling_vm->global_symbols = malloc(sizeof(VMSymbol) * global_count);
+        compiling_vm->global_symbol_count = global_count;
         for (int i = 0; i < global_count; i++) {
-            strcpy(vm.global_symbols[i].name, globals[i].name);
-            vm.global_symbols[i].addr = globals[i].addr;
+            strcpy(compiling_vm->global_symbols[i].name, globals[i].name);
+            compiling_vm->global_symbols[i].addr = globals[i].addr;
         }
 
-        if (vm.local_symbols) free(vm.local_symbols);
-        vm.local_symbols = malloc(sizeof(VMLocalInfo) * debug_symbol_count);
-        vm.local_symbol_count = debug_symbol_count;
+        if (compiling_vm->local_symbols) free(compiling_vm->local_symbols);
+        compiling_vm->local_symbols = malloc(sizeof(VMLocalInfo) * debug_symbol_count);
+        compiling_vm->local_symbol_count = debug_symbol_count;
         for (int i = 0; i < debug_symbol_count; i++) {
-            strcpy(vm.local_symbols[i].name, debug_symbols[i].name);
-            vm.local_symbols[i].stack_offset = debug_symbols[i].stack_offset;
-            vm.local_symbols[i].start_ip = debug_symbols[i].start_ip;
-            vm.local_symbols[i].end_ip = debug_symbols[i].end_ip;
+            strcpy(compiling_vm->local_symbols[i].name, debug_symbols[i].name);
+            compiling_vm->local_symbols[i].stack_offset = debug_symbols[i].stack_offset;
+            compiling_vm->local_symbols[i].start_ip = debug_symbols[i].start_ip;
+            compiling_vm->local_symbols[i].end_ip = debug_symbols[i].end_ip;
         }
     }
     src = os;
@@ -2146,9 +2175,13 @@ void parse_internal(char *source, bool is_import) {
     current_file_start = ofs;
 }
 
-void parse(char *source) { parse_internal(source, false); }
+void parse(VM* vm, char *source) {
+    compiling_vm = vm;
+    parse_internal(source, false);
+}
 
-void generate_binding_c_source(const char *output_filename) {
+void generate_binding_c_source(VM* vm, const char *output_filename) {
+    compiling_vm = vm;
     FILE *fp = fopen(output_filename, "w");
     if (!fp) {
         printf("Failed to open output file\n");
@@ -2159,15 +2192,15 @@ void generate_binding_c_source(const char *output_filename) {
     c_gen_headers(fp);
 
     fprintf(fp, "// --- HOST API BRIDGE ---\n");
-    fprintf(fp, "void (*host_vm_push)(double, int);\n");
-    fprintf(fp, "double (*host_vm_pop)();\n");
-    fprintf(fp, "int (*host_make_string)(const char*);\n");
-    fprintf(fp, "double (*host_heap_alloc)(int);\n");
-    fprintf(fp, "double* (*host_vm_resolve_ptr)(double);\n");
-    fprintf(fp, "double (*host_vm_store_copy)(void*, size_t, const char*);\n");
-    fprintf(fp, "double (*host_vm_store_ptr)(void*, const char*);\n");
-    fprintf(fp, "void* (*host_vm_get_ref)(int, const char*);\n");
-    fprintf(fp, "void (*host_vm_free_ref)(int);\n");
+    fprintf(fp, "void (*host_vm_push)(VM*, double, int);\n");
+    fprintf(fp, "double (*host_vm_pop)(VM*);\n");
+    fprintf(fp, "int (*host_make_string)(VM*, const char*);\n");
+    fprintf(fp, "double (*host_heap_alloc)(VM*, int);\n");
+    fprintf(fp, "double* (*host_vm_resolve_ptr)(VM*, double);\n");
+    fprintf(fp, "double (*host_vm_store_copy)(VM*, void*, size_t, const char*);\n");
+    fprintf(fp, "double (*host_vm_store_ptr)(VM*, void*, const char*);\n");
+    fprintf(fp, "void* (*host_vm_get_ref)(VM*, int, const char*);\n");
+    fprintf(fp, "void (*host_vm_free_ref)(VM*, int);\n");
     fprintf(fp, "NativeFunc* host_natives_array;\n");
 
     fprintf(fp, "#define vm_push (*host_vm_push)\n");
@@ -2217,37 +2250,19 @@ void generate_binding_c_source(const char *output_filename) {
     setTerminalColor(MyloFgYellow, MyloBgColorDefault);
     printf("    + ");
     setTerminalColor(MyloFgDefault, MyloBgColorDefault);
-    printf("The Mylo VM header (vm.h), located in 'mylo-lang/src'\n");
+    printf("A C Compiler (gcc, clang, cl, etc)\n");
     setTerminalColor(MyloFgYellow, MyloBgColorDefault);
     printf("    + ");
     setTerminalColor(MyloFgDefault, MyloBgColorDefault);
-    printf("The Mylo Standard Library header (mylolib.h), located in 'mylo-lang/src'\n");
-    setTerminalColor(MyloFgYellow, MyloBgColorDefault);
-    printf("    + ");
-    setTerminalColor(MyloFgDefault, MyloBgColorDefault);
-    printf("A 'C' Compiler (GCC, MSVC, Clang, Zig etc.), referred to as ('cc' below.)\n");
-    setTerminalColor(MyloFgYellow, MyloBgColorDefault);
-    printf("    + ");
-    setTerminalColor(MyloFgDefault, MyloBgColorDefault);
-    printf("The Shared Object (.so) file to have the same name as your .mylo wrapper `libname.so`\n");
-    setTerminalColor(MyloFgYellow, MyloBgColorDefault);
-    printf("    + ");
-    setTerminalColor(MyloFgDefault, MyloBgColorDefault);
-    printf("Position independent code, so the .so can be loaded at runtime by the interpreter \n\n");
-    setTerminalColor(MyloFgCyan, MyloBgColorDefault);
-    printf("  ! ");
-    setTerminalColor(MyloFgDefault, MyloBgColorDefault);
-    printf("To build into a single executable instead, use --build on your main mylo file \n");
-    setTerminalColor(MyloFgBlue, MyloBgColorDefault);
-    printf("----------------------------------------------------------------------------------------\n");
-    setTerminalColor(MyloFgYellow, MyloBgColorDefault);
-    printf("  Example Command:\n\n");
+    printf("Mylo Headers (defines.h, vm.h)\n\n");
     setTerminalColor(MyloFgWhite, MyloBgColorDefault);
-    printf("     cc -shared -fPIC %s -Isrc/ -o libname.so\n", output_filename);
-    setTerminalColor(MyloFgDefault, MyloBgColorDefault);
+    printf("  Example (GCC/Linux):\n");
+    setTerminalColor(MyloFgGreen, MyloBgColorDefault);
+    printf("    gcc -shared -fPIC -o mylib.so %s\n\n", output_filename);
 }
 
-void compile_to_c_source(const char *output_filename) {
+void compile_to_c_source(VM* vm, const char *output_filename) {
+    compiling_vm = vm;
     FILE *fp = fopen(output_filename, "w");
     if (!fp) {
         printf("Failed to open output file\n");
@@ -2258,97 +2273,92 @@ void compile_to_c_source(const char *output_filename) {
     c_gen_structs(fp);
     c_gen_ffi_wrappers(fp);
 
-    fprintf(fp, "\n// --- STATIC DATA ---\n");
-    fprintf(fp, "int static_bytecode[] = {");
-    for (int i = 0; i < vm.code_size; i++) fprintf(fp, "%d,", vm.bytecode[i]);
-    fprintf(fp, "};\n");
-    fprintf(fp, "int static_lines[] = {");
-    for (int i = 0; i < vm.code_size; i++) fprintf(fp, "%d,", vm.lines[i]);
-    fprintf(fp, "};\n");
-    fprintf(fp, "double static_constants[] = {");
-    for (int i = 0; i < vm.const_count; i++) fprintf(fp, "%f,", vm.constants[i]);
-    fprintf(fp, "};\n");
+    fprintf(fp, "int bytecode[] = {\n");
+    for (int i = 0; i < vm->code_size; i++) {
+        fprintf(fp, "%d,", vm->bytecode[i]);
+        if ((i + 1) % 16 == 0) fprintf(fp, "\n");
+    }
+    fprintf(fp, "};\n\n");
 
-    if (vm.str_count > 0) {
-        fprintf(fp, "const char* static_strings[] = {");
-        for (int i = 0; i < vm.str_count; i++) {
-            fprintf(fp, "\"");
-            for (int c = 0; vm.string_pool[i][c]; c++) {
-                if (vm.string_pool[i][c] == '"') fprintf(fp, "\\\"");
-                else if (vm.string_pool[i][c] == '\n') fprintf(fp, "\\n");
-                else fputc(vm.string_pool[i][c], fp);
-            }
-            fprintf(fp, "\",");
+    fprintf(fp, "double constants[] = {\n");
+    for (int i = 0; i < vm->const_count; i++) {
+        fprintf(fp, "%f,", vm->constants[i]);
+        if ((i + 1) % 8 == 0) fprintf(fp, "\n");
+    }
+    fprintf(fp, "};\n\n");
+
+    fprintf(fp, "char string_pool[%d][%d] = {\n", MAX_STRINGS, MAX_STRING_LENGTH);
+    for (int i = 0; i < vm->str_count; i++) {
+        fprintf(fp, "  \"");
+        for (int j = 0; j < MAX_STRING_LENGTH; j++) {
+            char c = vm->string_pool[i][j];
+            if (c == '\0') break;
+            if (c == '"') fprintf(fp, "\\\"");
+            else if (c == '\\') fprintf(fp, "\\\\");
+            else if (c == '\n') fprintf(fp, "\\n");
+            else if (c == '\r') fprintf(fp, "\\r");
+            else if (c >= 32 && c <= 126) fprintf(fp, "%c", c);
+            else fprintf(fp, "\\x%02x", (unsigned char) c);
         }
-        fprintf(fp, "};\n");
-    } else fprintf(fp, "const char** static_strings = NULL;\n");
+        fprintf(fp, "\",\n");
+    }
+    fprintf(fp, "};\n\n");
 
-    fprintf(fp, "\n// --- MAIN ---\nint main() {\n    vm_init();\n");
-    fprintf(fp, "    memcpy(vm.bytecode, static_bytecode, sizeof(static_bytecode));\n");
-    fprintf(fp, "    memcpy(vm.lines, static_lines, sizeof(static_lines));\n");
-    fprintf(fp, "    vm.code_size = %d;\n", vm.code_size);
-    fprintf(fp, "    memcpy(vm.constants, static_constants, sizeof(static_constants));\n");
-    fprintf(fp, "    vm.const_count = %d;\n", vm.const_count);
+    // Main Entry Point
+    fprintf(fp, "int main(int argc, char** argv) {\n");
+    // Instantiate VM on stack or heap
+    fprintf(fp, "    VM vm;\n");
+    fprintf(fp, "    vm_init(&vm);\n\n");
 
-    if (vm.str_count > 0) fprintf(
-        fp, "    for(int i=0; i<%d; i++) strcpy(vm.string_pool[i], static_strings[i]);\n    vm.str_count = %d;\n",
-        vm.str_count, vm.str_count);
-    else fprintf(fp, "    vm.str_count = 0;\n");
+    fprintf(fp, "    // Load Embedded Code\n");
+    fprintf(fp, "    vm.code_size = %d;\n", vm->code_size);
+    fprintf(fp, "    memcpy(vm.bytecode, bytecode, sizeof(bytecode));\n\n");
 
-    fprintf(
-        fp,
-        "    int std_idx = 0;\n    while(std_library[std_idx].name != NULL) { natives[std_idx] = std_library[std_idx].func; std_idx++; }\n");
-    for (int i = 0; i < ffi_count; i++) fprintf(fp, "    natives[std_idx + %d] = __wrapper_%d;\n", i, i);
-    fprintf(fp, "    run_vm(false);\n    vm_cleanup();\n    return 0;\n}\n");
+    fprintf(fp, "    vm.const_count = %d;\n", vm->const_count);
+    fprintf(fp, "    memcpy(vm.constants, constants, sizeof(constants));\n\n");
+
+    fprintf(fp, "    vm.str_count = %d;\n", vm->str_count);
+    fprintf(fp, "    memcpy(vm.string_pool, string_pool, sizeof(string_pool));\n\n");
+    fprintf(fp, "    vm.global_symbol_count = %d;\n", vm->global_symbol_count);
+
+    fprintf(fp, "    // Register Standard Library\n");
+    fprintf(fp, "    int i = 0;\n");
+    fprintf(fp, "    while (std_library[i].name != NULL) {\n");
+    fprintf(fp, "        vm.natives[i] = std_library[i].func;\n");
+    fprintf(fp, "        i++;\n");
+    fprintf(fp, "    }\n");
+
+    fprintf(fp, "    // Register FFI Wrappers\n");
+    for (int i = 0; i < ffi_count; i++) fprintf(fp, "    vm.natives[i + %d] = __wrapper_%d;\n", bound_ffi_count + i, i);
+
+    fprintf(fp, "\n    // Run\n");
+    fprintf(fp, "    run_vm(&vm, false);\n");
+    fprintf(fp, "    vm_cleanup(&vm);\n");
+    fprintf(fp, "    return 0;\n");
+    fprintf(fp, "}\n");
+
     fclose(fp);
 
     printf("\n");
     setTerminalColor(MyloFgBlue, MyloBgColorDefault);
     printf("----------------------------------------------------------------------------------------\n");
     setTerminalColor(MyloFgCyan, MyloBgColorDefault);
-    printf("Build complete. File: ");
+    printf("Compilation complete. C source code generated to: ");
     setTerminalColor(MyloFgMagenta, MyloBgColorDefault);
     printf(" %s\n", output_filename);
     setTerminalColor(MyloFgBlue, MyloBgColorDefault);
     printf("----------------------------------------------------------------------------------------\n\n");
     setTerminalColor(MyloFgDefault, MyloBgColorDefault);
-
-    setTerminalColor(MyloFgWhite, MyloBgColorDefault);
-    printf("  To build %s into an executable you need:\n\n", output_filename);
-    setTerminalColor(MyloFgYellow, MyloBgColorDefault);
-    printf("    + ");
-    setTerminalColor(MyloFgDefault, MyloBgColorDefault);
-    printf("The Mylo VM implementation code (vm.c and vm.h), located in 'mylo-lang/src'\n");
-    setTerminalColor(MyloFgYellow, MyloBgColorDefault);
-    printf("    + ");
-    setTerminalColor(MyloFgDefault, MyloBgColorDefault);
-    printf("The Mylo Standard Library (mylolib.c and mylolib.h), located in 'mylo-lang/src'\n");
-    setTerminalColor(MyloFgYellow, MyloBgColorDefault);
-    printf("    + ");
-    setTerminalColor(MyloFgDefault, MyloBgColorDefault);
-    printf("A 'C' Compiler (GCC, MSVC, Clang, Zig etc.), referred to as ('cc' below.)\n");
-    setTerminalColor(MyloFgYellow, MyloBgColorDefault);
-    printf("    + ");
-    setTerminalColor(MyloFgDefault, MyloBgColorDefault);
-    printf("Link the C Standard Math Library and any other libraries you are using (-lm below)\n\n");
-
-
-    setTerminalColor(MyloFgBlue, MyloBgColorDefault);
-    printf("----------------------------------------------------------------------------------------\n");
-    setTerminalColor(MyloFgYellow, MyloBgColorDefault);
-    printf("  Example Command:\n\n");
-    setTerminalColor(MyloFgWhite, MyloBgColorDefault);
-    printf("     cc %s src/vm.c src/mylolib.c -Isrc/ -o mylo_executable -lm\n\n", output_filename);
-    setTerminalColor(MyloFgDefault, MyloBgColorDefault);
-
 }
-void compile_repl(char *source, int *out_start_ip) {
+
+void compile_repl(VM* vm, char *source, int *out_start_ip) {
+    compiling_vm = vm;
     current_file_start = source;
     line = 1;
 
     src = source;
     next_token();
-    *out_start_ip = vm.code_size;
+    *out_start_ip = vm->code_size;
 
     if (curr.type == TK_EOF) return;
 
@@ -2361,13 +2371,13 @@ void compile_repl(char *source, int *out_start_ip) {
              curr.type == TK_MONITOR) {
         statement();
     } else if (curr.type == TK_ID) {
-        int saved_code_size = vm.code_size;
+        int saved_code_size = vm->code_size;
         int saved_line = line;
 
         statement();
 
         if (curr.type != TK_EOF) {
-            vm.code_size = saved_code_size;
+            vm->code_size = saved_code_size;
             src = source;
             line = saved_line;
             next_token();
@@ -2378,32 +2388,11 @@ void compile_repl(char *source, int *out_start_ip) {
     }
     emit(OP_HLT);
 
-    if (vm.global_symbols) free(vm.global_symbols);
-    vm.global_symbols = malloc(sizeof(VMSymbol) * global_count);
-    vm.global_symbol_count = global_count;
+    if (vm->global_symbols) free(vm->global_symbols);
+    vm->global_symbols = malloc(sizeof(VMSymbol) * global_count);
+    vm->global_symbol_count = global_count;
     for (int i = 0; i < global_count; i++) {
-        strcpy(vm.global_symbols[i].name, globals[i].name);
-        vm.global_symbols[i].addr = globals[i].addr;
-    }
-}
-
-void mylo_reset() {
-    vm_init();
-    global_count = 0;
-    local_count = 0;
-    func_count = 0;
-    struct_count = 0;
-    ffi_count = 0;
-    bound_ffi_count = 0;
-    inside_function = false;
-    current_namespace[0] = '\0';
-    enum_entry_count = 0;
-    search_path_count = 0;
-    c_header_count = 0;
-    line = 1;
-    int i = 0;
-    while (std_library[i].name != NULL) {
-        natives[i] = std_library[i].func;
-        i++;
+        strcpy(vm->global_symbols[i].name, globals[i].name);
+        vm->global_symbols[i].addr = globals[i].addr;
     }
 }
