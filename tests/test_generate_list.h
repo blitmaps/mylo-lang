@@ -14,23 +14,10 @@
 
 extern "C" {
     #include "../src/vm.h"
-    #include "../src/mylolib.h"
     void compiler_reset();
     // declarations from compiler.c
     void parse(VM* vm, char* src);
     void mylo_reset(VM* vm); // If needed, or just rely on vm_init
-}
-
-// Helpers
-void register_stdlib(VM* vm) {
-    int i = 0;
-    // Assuming std_library is visible or we manually register.
-    // Ideally we should include mylolib.h but for tests we rely on the symbols being linked.
-    extern const StdLibDef std_library[];
-    while (std_library[i].name != NULL) {
-        vm->natives[i] = std_library[i].func;
-        i++;
-    }
 }
 
 // Tests the test harness
@@ -41,7 +28,6 @@ inline TestOutput test_test() {
 inline TestOutput test_hello_world() {
     VM vm;
     vm_init(&vm);
-    register_stdlib(&vm);
     MyloConfig.print_to_memory = true;
 
     // Note: escape the quote properly for C string "print(\"hello\")"
@@ -65,7 +51,6 @@ inline TestOutput test_hello_world() {
 inline TestOutput run_source_test(const std::string& src, const std::string& expected) {
     VM vm;
     vm_init(&vm);
-    register_stdlib(&vm);
     compiler_reset();
     MyloConfig.print_to_memory = true;
 

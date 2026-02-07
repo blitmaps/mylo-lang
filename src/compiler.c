@@ -38,7 +38,7 @@ typedef enum {
     TK_REGION,
     TK_CLEAR,
     TK_MONITOR,
-    TK_DEBUGGER, // <--- Added!
+    TK_DEBUGGER,
 } MyloTokenType;
 
 // Token Names for pretty printing
@@ -54,7 +54,7 @@ const char *TOKEN_NAMES[] = {
     "break", "continue", "enum", "module_path",
     "true", "false", "*", "/", "%",
     "embed", "Type Definition", "region", "clear", "monitor",
-    "debugger" // <--- Added!
+    "debugger"
 };
 
 const char *get_token_name(MyloTokenType t) {
@@ -84,6 +84,13 @@ typedef struct {
     char return_type[MAX_IDENTIFIER];
 } FFIBlock;
 
+// --- [INSERT] TypeInfo Definition ---
+typedef struct {
+    int id;
+    bool is_array;
+} TypeInfo;
+// ------------------------------------
+
 FFIBlock ffi_blocks[MAX_NATIVES];
 int ffi_count = 0;
 int bound_ffi_count = 0;
@@ -94,7 +101,9 @@ static Token curr;
 static bool inside_function = false;
 static char current_namespace[MAX_IDENTIFIER] = "";
 static int line = 1;
-// NOTE: We now use a pointer to the active VM being compiled
+// NOTE: Compiler still uses a global VM instance for bytecode generation
+// In a full multi-instance compilation scenario, this would be passed around.
+// For now, we update it to be a struct instance, not a pointer to global scope.
 static VM* compiling_vm = NULL;
 
 char search_paths[MAX_SEARCH_PATHS][MAX_STRING_LENGTH];
@@ -292,23 +301,6 @@ int find_stdlib_func(char *name) {
         i++;
     }
     return -1;
-}
-
-void compiler_reset() {
-    global_count = 0;
-    local_count = 0;
-    func_count = 0;
-    struct_count = 0;
-    enum_entry_count = 0;
-    ffi_count = 0;
-    bound_ffi_count = 0;
-    debug_symbol_count = 0;
-    loop_depth = 0;
-    current_namespace[0] = '\0';
-    search_path_count = 0;
-    c_header_count = 0;
-    line = 1;
-    inside_function = false;
 }
 
 void get_mangled_name(char *out, char *raw_name) {
@@ -582,10 +574,22 @@ bool parse_namespaced_id(char *out_name) {
     return false;
 }
 
-typedef struct {
-    int id;
-    bool is_array;
-} TypeInfo;
+void compiler_reset() {
+    global_count = 0;
+    local_count = 0;
+    func_count = 0;
+    struct_count = 0;
+    enum_entry_count = 0;
+    ffi_count = 0;
+    bound_ffi_count = 0;
+    debug_symbol_count = 0;
+    loop_depth = 0;
+    current_namespace[0] = '\0';
+    search_path_count = 0;
+    c_header_count = 0;
+    line = 1;
+    inside_function = false;
+}
 
 TypeInfo parse_type_spec() {
     TypeInfo info = {TYPE_ANY, false};
@@ -789,7 +793,6 @@ void factor() {
         match(TK_RBRACKET);
         emit(OP_ARR); emit(count);
     } else if (curr.type == TK_LBRACE) {
-        // ... [Same struct/map literal logic] ...
         char *safe_src = src; Token safe_curr = curr; int safe_line = line;
         match(TK_LBRACE);
         bool is_map = (curr.type == TK_STR || curr.type == TK_RBRACE);
@@ -807,7 +810,6 @@ void factor() {
             else error("Could not infer struct type from field '%s'", first_field);
         }
     } else if (curr.type == TK_ID && strcmp(curr.text, "C") == 0) {
-        // ... [FFI Block logic same] ...
         match(TK_ID);
         int ffi_idx = ffi_count++;
         ffi_blocks[ffi_idx].id = ffi_idx;
@@ -878,7 +880,6 @@ void factor() {
         while (std_library[std_count].name != NULL) std_count++;
         emit(std_count + ffi_idx);
     } else if (curr.type == TK_FSTR) {
-        // ... [FSTR logic same] ...
         int empty_id = make_string(compiling_vm, "");
         emit(OP_PSH_STR); emit(empty_id);
         char *raw = curr.text; char *ptr = raw; char *start = ptr;
@@ -956,7 +957,6 @@ void factor() {
                 if (curr.type == TK_DOT) {
                     match(TK_DOT); char f[MAX_IDENTIFIER]; strcpy(f, curr.text); match(TK_ID);
 
-                    // --- FIX: Check for negative type_id (Primitives or ANY) ---
                     if (type_id < 0) error("Accessing member '%s' of untyped/primitive var.", f);
 
                     int offset = find_field(type_id, f);
@@ -973,6 +973,7 @@ void factor() {
         match(TK_LPAREN); expression(); match(TK_RPAREN);
     } else error("Unexpected token '%s' in expression", curr.text);
 }
+
 
 void term() {
     factor();
@@ -1552,7 +1553,9 @@ static void parse_id_statement(Token start_token, char *name) {
                 char f[MAX_IDENTIFIER];
                 strcpy(f, curr.text);
                 match(TK_ID);
-                if (type_id == -1) error("Accessing member '%s' of untyped var.", f);
+
+                if (type_id < 0) error("Accessing member '%s' of untyped/primitive var.", f);
+
                 int offset = find_field(type_id, f);
                 if (offset == -1) error("Struct '%s' has no field '%s'", struct_defs[type_id].name, f);
                 if (curr.type == TK_EQ_ASSIGN) {
@@ -2250,15 +2253,34 @@ void generate_binding_c_source(VM* vm, const char *output_filename) {
     setTerminalColor(MyloFgYellow, MyloBgColorDefault);
     printf("    + ");
     setTerminalColor(MyloFgDefault, MyloBgColorDefault);
-    printf("A C Compiler (gcc, clang, cl, etc)\n");
+    printf("The Mylo VM header (vm.h), located in 'mylo-lang/src'\n");
     setTerminalColor(MyloFgYellow, MyloBgColorDefault);
     printf("    + ");
     setTerminalColor(MyloFgDefault, MyloBgColorDefault);
-    printf("Mylo Headers (defines.h, vm.h)\n\n");
+    printf("The Mylo Standard Library header (mylolib.h), located in 'mylo-lang/src'\n");
+    setTerminalColor(MyloFgYellow, MyloBgColorDefault);
+    printf("    + ");
+    setTerminalColor(MyloFgDefault, MyloBgColorDefault);
+    printf("A 'C' Compiler (GCC, MSVC, Clang, Zig etc.), referred to as ('cc' below.)\n");
+    setTerminalColor(MyloFgYellow, MyloBgColorDefault);
+    printf("    + ");
+    setTerminalColor(MyloFgDefault, MyloBgColorDefault);
+    printf("The Shared Object (.so) file to have the same name as your .mylo wrapper `libname.so`\n");
+    setTerminalColor(MyloFgYellow, MyloBgColorDefault);
+    printf("    + ");
+    setTerminalColor(MyloFgDefault, MyloBgColorDefault);
+    printf("Position independent code, so the .so can be loaded at runtime by the interpreter \n\n");
+    setTerminalColor(MyloFgCyan, MyloBgColorDefault);
+    printf("  ! ");
+    setTerminalColor(MyloFgDefault, MyloBgColorDefault);
+    printf("To build into a single executable instead, use --build on your main mylo file \n");
+    setTerminalColor(MyloFgBlue, MyloBgColorDefault);
+    printf("----------------------------------------------------------------------------------------\n");
+    setTerminalColor(MyloFgYellow, MyloBgColorDefault);
+    printf("  Example Command:\n\n");
     setTerminalColor(MyloFgWhite, MyloBgColorDefault);
-    printf("  Example (GCC/Linux):\n");
-    setTerminalColor(MyloFgGreen, MyloBgColorDefault);
-    printf("    gcc -shared -fPIC -o mylib.so %s\n\n", output_filename);
+    printf("     cc -shared -fPIC %s -Isrc/ -o libname.so\n", output_filename);
+    setTerminalColor(MyloFgDefault, MyloBgColorDefault);
 }
 
 void compile_to_c_source(VM* vm, const char *output_filename) {
@@ -2324,6 +2346,7 @@ void compile_to_c_source(VM* vm, const char *output_filename) {
     fprintf(fp, "    // Register Standard Library\n");
     fprintf(fp, "    int i = 0;\n");
     fprintf(fp, "    while (std_library[i].name != NULL) {\n");
+    // NOTE: Use vm.natives here since we are inside main() using the 'vm' instance
     fprintf(fp, "        vm.natives[i] = std_library[i].func;\n");
     fprintf(fp, "        i++;\n");
     fprintf(fp, "    }\n");
@@ -2343,11 +2366,39 @@ void compile_to_c_source(VM* vm, const char *output_filename) {
     setTerminalColor(MyloFgBlue, MyloBgColorDefault);
     printf("----------------------------------------------------------------------------------------\n");
     setTerminalColor(MyloFgCyan, MyloBgColorDefault);
-    printf("Compilation complete. C source code generated to: ");
+    printf("Build complete. File: ");
     setTerminalColor(MyloFgMagenta, MyloBgColorDefault);
     printf(" %s\n", output_filename);
     setTerminalColor(MyloFgBlue, MyloBgColorDefault);
     printf("----------------------------------------------------------------------------------------\n\n");
+    setTerminalColor(MyloFgDefault, MyloBgColorDefault);
+
+    setTerminalColor(MyloFgWhite, MyloBgColorDefault);
+    printf("  To build %s into an executable you need:\n\n", output_filename);
+    setTerminalColor(MyloFgYellow, MyloBgColorDefault);
+    printf("    + ");
+    setTerminalColor(MyloFgDefault, MyloBgColorDefault);
+    printf("The Mylo VM implementation code (vm.c and vm.h), located in 'mylo-lang/src'\n");
+    setTerminalColor(MyloFgYellow, MyloBgColorDefault);
+    printf("    + ");
+    setTerminalColor(MyloFgDefault, MyloBgColorDefault);
+    printf("The Mylo Standard Library (mylolib.c and mylolib.h), located in 'mylo-lang/src'\n");
+    setTerminalColor(MyloFgYellow, MyloBgColorDefault);
+    printf("    + ");
+    setTerminalColor(MyloFgDefault, MyloBgColorDefault);
+    printf("A 'C' Compiler (GCC, MSVC, Clang, Zig etc.), referred to as ('cc' below.)\n");
+    setTerminalColor(MyloFgYellow, MyloBgColorDefault);
+    printf("    + ");
+    setTerminalColor(MyloFgDefault, MyloBgColorDefault);
+    printf("Link the C Standard Math Library and any other libraries you are using (-lm below)\n\n");
+
+
+    setTerminalColor(MyloFgBlue, MyloBgColorDefault);
+    printf("----------------------------------------------------------------------------------------\n");
+    setTerminalColor(MyloFgYellow, MyloBgColorDefault);
+    printf("  Example Command:\n\n");
+    setTerminalColor(MyloFgWhite, MyloBgColorDefault);
+    printf("     cc %s src/vm.c src/mylolib.c -Isrc/ -o mylo_executable -lm\n\n", output_filename);
     setTerminalColor(MyloFgDefault, MyloBgColorDefault);
 }
 

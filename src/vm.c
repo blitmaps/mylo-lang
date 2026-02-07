@@ -9,6 +9,8 @@
 #include <setjmp.h>
 #include <stdarg.h>
 
+#include "mylolib.h"
+
 // --- Global Instance ---
 // VM vm; // REMOVED GLOBAL VM
 MyloConfigType MyloConfig = {false, false, false, NULL, NULL, NULL};
@@ -215,7 +217,13 @@ void vm_cleanup(VM* vm) {
     if (vm->global_symbols) { free(vm->global_symbols); vm->global_symbols = NULL; }
     if (vm->local_symbols) { free(vm->local_symbols); vm->local_symbols = NULL; }
 }
-
+void register_stdlib(VM* vm) {
+    int i = 0;
+    while (std_library[i].name != NULL) {
+        vm->natives[i] = std_library[i].func;
+        i++;
+    }
+}
 void vm_init(VM* vm) {
     // OPTIMIZATION: Soft Reset if VM is already initialized
     // Instead of freeing everything and calloc-ing (zeroing) the whole heap again,
@@ -278,6 +286,7 @@ void vm_init(VM* vm) {
         if (vm->global_symbols) { free(vm->global_symbols); vm->global_symbols = NULL; }
         if (vm->local_symbols) { free(vm->local_symbols); vm->local_symbols = NULL; }
 
+        register_stdlib(vm);
         return; // Done! Skip the heavy allocations below.
     }
 
@@ -320,6 +329,7 @@ void vm_init(VM* vm) {
     vm->cli_debug_mode = false;
     vm->last_debug_line = -1;
     memset(vm->natives, 0, sizeof(vm->natives));
+    register_stdlib(vm);
 }
 
 double* vm_resolve_ptr(VM* vm, double ptr_val) {
