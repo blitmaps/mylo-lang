@@ -93,7 +93,11 @@ typedef struct {
     int end_ip;
 } VMLocalInfo;
 
-typedef struct {
+// Forward declaration
+struct VM;
+typedef void (*NativeFunc)(struct VM *);
+
+typedef struct VM {
     double* stack;
     double* globals;
     double* constants;
@@ -121,53 +125,56 @@ typedef struct {
     // --- Debugger Fields ---
     char* source_code;
     bool cli_debug_mode;
-    int last_debug_line; // <--- ADDED: Persist step state
+    int last_debug_line;
+    // --- Native Interface ---
+    NativeFunc natives[MAX_NATIVES];
 } VM;
 
-extern VM vm;
-typedef void (*NativeFunc)(VM *);
-extern NativeFunc natives[MAX_NATIVES];
-
 typedef struct {
-    void (*push)(double, int);
-    double (*pop)();
-    int (*make_string)(const char*);
-    double (*heap_alloc)(int);
-    double* (*resolve_ptr)(double);
-    double (*store_copy)(void*, size_t, const char*);
-    double (*store_ptr)(void*, const char*);
-    void* (*get_ref)(int, const char*);
-    void (*free_ref)(int);
+    void (*push)(VM*, double, int);
+    double (*pop)(VM*);
+    int (*make_string)(VM*, const char*);
+    double (*heap_alloc)(VM*, int);
+    double* (*resolve_ptr)(VM*, double);
+    double (*store_copy)(VM*, void*, size_t, const char*);
+    double (*store_ptr)(VM*, void*, const char*);
+    void* (*get_ref)(VM*, int, const char*);
+    void (*free_ref)(VM*, int);
     NativeFunc* natives_array;
     char (*string_pool)[MAX_STRING_LENGTH];
 } MyloAPI;
 
-void vm_init();
-void vm_cleanup();
-void vm_push(double val, int type);
-double vm_pop();
-int make_string(const char *s);
-int make_const(double val);
-double heap_alloc(int size);
-void run_vm_from(int start_ip, bool debug_trace);
-void run_vm(bool debug_trace);
-int vm_step(bool debug_trace);
-void mylo_reset();
-double* vm_resolve_ptr(double ptr_val);
-double* vm_resolve_ptr_safe(double ptr_val);
-int* vm_resolve_type(double ptr_val);
-double vm_store_copy(void* data, size_t size, const char* type_name);
-double vm_store_ptr(void* ptr, const char* type_name);
-void* vm_get_ref(int id, const char* expected_type_name);
-void vm_free_ref(int id);
+void vm_init(VM* vm);
+void vm_cleanup(VM* vm);
+void vm_push(VM* vm, double val, int type);
+double vm_pop(VM* vm);
+int make_string(VM* vm, const char *s);
+int make_const(VM* vm, double val);
+double heap_alloc(VM* vm, int size);
+void run_vm_from(VM* vm, int start_ip, bool debug_trace);
+void run_vm(VM* vm, bool debug_trace);
+int vm_step(VM* vm, bool debug_trace);
+void mylo_reset(VM* vm);
+double* vm_resolve_ptr(VM* vm, double ptr_val);
+double* vm_resolve_ptr_safe(VM* vm, double ptr_val);
+int* vm_resolve_type(VM* vm, double ptr_val);
+double vm_store_copy(VM* vm, void* data, size_t size, const char* type_name);
+double vm_store_ptr(VM* vm, void* ptr, const char* type_name);
+void* vm_get_ref(VM* vm, int id, const char* expected_type_name);
+void vm_free_ref(VM* vm, int id);
 int vm_find_function(VM* vm, const char* name);
 void vm_register_function(VM* vm, const char* name, int addr);
-void print_recursive(double val, int type, int depth, int max_elem);
-void enter_debugger();
+void print_recursive(VM* vm, double val, int type, int depth, int max_elem);
+void enter_debugger(VM* vm);
 
-#define MYLO_STORE(val, type_name) vm_store_copy(&(val), sizeof(val), type_name)
-#define MYLO_RETRIEVE(id, c_type, type_name) (c_type*)vm_get_ref((int)(id), type_name)
-#define MYLO_REGISTER(ptr, type_name) vm_store_ptr((void*)(ptr), type_name)
+#define MYLO_STORE(val, type_name) vm_store_copy(vm, &(val), sizeof(val), type_name)
+#define MYLO_RETRIEVE(id, c_type, type_name) (c_type*)vm_get_ref(vm, (int)(id), type_name)
+#define MYLO_REGISTER(ptr, type_name) vm_store_ptr(vm, (void*)(ptr), type_name)
+
+#define MYLO_STORE_TO_VM(vm, val, type_name) vm_store_copy(vm, &(val), sizeof(val), type_name)
+#define MYLO_RETRIEVE_FROM_VM(vm, id, c_type, type_name) (c_type*)vm_get_ref(vm, (int)(id), type_name)
+#define MYLO_REGISTER_IN_VM(vm, ptr, type_name) vm_store_ptr(vm, (void*)(ptr), type_name)
+
 
 #endif
 #endif

@@ -1,4 +1,4 @@
-#define VERSION_INFO "0.2.1"
+#define VERSION_INFO "0.3.0"
 #define MAX_INPUT 4096
 
 #include <setjmp.h>
@@ -10,27 +10,27 @@
 #include "utils.h"
 #include "debug_adapter.h"
 #include "compiler.h"
-
 // Defined in compiler.c
-void parse(char* source);
-void compile_to_c_source(const char* output_filename);
-void generate_binding_c_source(const char* output_filename);
-void mylo_reset();
-void disassemble();
-extern void enter_debugger();
+// Note: Signatures updated to take VM*
+void parse(VM* vm, char* source);
+void compile_to_c_source(VM* vm, const char* output_filename);
+void generate_binding_c_source(VM* vm, const char* output_filename);
+void compiler_reset();
+void disassemble(VM* vm);
+extern void enter_debugger(VM* vm);
 
-// NEW: extern the counters
+// extern the counters from compiler.c
 extern int ffi_count;
 extern int bound_ffi_count;
 
-void disassemble() {
+void disassemble(VM* vm) {
     printf("\n--- Disassembly ---\n");
     int i = 0;
-    while (i < vm.code_size) {
-        int op = vm.bytecode[i];
+    while (i < vm->code_size) {
+        int op = vm->bytecode[i];
 
         // Updated range check to include OP_EMBED
-        if (op < 0 || op > OP_EMBED) {
+        if (op < 0 || op > OP_DEBUGGER) {
             printf("%04d UNKNOWN %d\n", i, op);
             i++;
             continue;
@@ -41,65 +41,65 @@ void disassemble() {
 
         switch (op) {
             case OP_PSH_NUM: {
-                int idx = vm.bytecode[i++];
-                printf("[%d] (%g)", idx, vm.constants[idx]);
+                int idx = vm->bytecode[i++];
+                printf("[%d] (%g)", idx, vm->constants[idx]);
                 break;
             }
             case OP_PSH_STR: {
-                int idx = vm.bytecode[i++];
-                printf("[%d] (\"%s\")", idx, vm.string_pool[idx]);
+                int idx = vm->bytecode[i++];
+                printf("[%d] (\"%s\")", idx, vm->string_pool[idx]);
                 break;
             }
             case OP_JMP:
             case OP_JZ:
             case OP_JNZ: {
-                int addr = vm.bytecode[i++];
+                int addr = vm->bytecode[i++];
                 printf("-> %04d", addr);
                 break;
             }
             case OP_SET:
             case OP_GET: {
-                int idx = vm.bytecode[i++];
+                int idx = vm->bytecode[i++];
                 printf("G[%d]", idx);
                 break;
             }
             case OP_LVAR:
             case OP_SVAR: {
-                int off = vm.bytecode[i++];
+                int off = vm->bytecode[i++];
                 printf("FP[%d]", off);
                 break;
             }
             case OP_CALL: {
-                int target = vm.bytecode[i++];
-                int args = vm.bytecode[i++];
+                int target = vm->bytecode[i++];
+                int args = vm->bytecode[i++];
                 printf("-> %04d (%d args)", target, args);
                 break;
             }
             case OP_ALLOC: {
-                int size = vm.bytecode[i++];
-                int type_id = vm.bytecode[i++]; // Consumes 2nd arg
+                int size = vm->bytecode[i++];
+                int type_id = vm->bytecode[i++]; // Consumes 2nd arg
                 printf("(fields: %d, type_id: %d)", size, type_id);
                 break;
             }
             case OP_HSET:
             case OP_HGET: {
-                int off = vm.bytecode[i++];
-                int type_id = vm.bytecode[i++]; // Consumes 2nd arg
+                int off = vm->bytecode[i++];
+                int type_id = vm->bytecode[i++]; // Consumes 2nd arg
                 printf("(offset: %d, type_id: %d)", off, type_id);
                 break;
             }
             case OP_NATIVE: {
-                int id = vm.bytecode[i++];
+                int id = vm->bytecode[i++];
                 printf("Native[%d]", id);
                 break;
             }
             case OP_ARR: {
-                int count = vm.bytecode[i++];
+                int count = vm->bytecode[i++];
                 printf("(count: %d)", count);
                 break;
             }
             case OP_EMBED: {
-                int len = vm.bytecode[i++];
+                int len = vm->bytecode[i++];
                 printf("(len: %d) <embedded data>", len);
                 // Important: Skip the raw data bytes so we don't interpret them as opcodes
                 i += len;
@@ -125,7 +125,11 @@ void start_repl() {
 
     // Setup
     print_greeting();
-    mylo_reset();
+
+    // Instantiate VM
+    VM vm;
+    vm_init(&vm);
+    compiler_reset();
 
     // 1. Setup Error Recovery Environment
     jmp_buf repl_env;
@@ -144,8 +148,8 @@ void start_repl() {
             vm.sp = -1;       // Clear Stack
             open_braces = 0;  // Reset multiline parsing
             buffer[0] = '\0'; // Clear input buffer
-            
-            // Note: We do NOT call mylo_reset() because we want to keep 
+
+            // Note: We do NOT call vm_init() again because we want to keep
             // functions/variables defined in previous successful lines.
         }
 
@@ -186,10 +190,10 @@ void start_repl() {
             }
 
             int start_ip = 0;
-            compile_repl(buffer, &start_ip);
+            compile_repl(&vm, buffer, &start_ip);
 
             int stack_start = vm.sp;
-            run_vm_from(start_ip, false);
+            run_vm_from(&vm, start_ip, false);
 
             if (vm.sp > stack_start) {
                 double val = vm.stack[vm.sp];
@@ -215,6 +219,8 @@ void start_repl() {
         }
         // Else: Loop again to get next line (buffer is preserved)
     }
+
+    vm_cleanup(&vm);
 }
 
 // Start - Help formatting
@@ -255,8 +261,6 @@ void print_help() {
     SET_COLOUR(FG_YELLOW, BG_DEFAULT);
     printf("FLAGS:\n");
     SET_COLOUR(FG_DEFAULT, BG_DEFAULT);
-
-
 
     PRINT_ARG("--repl",       "Start the interactive Read-Eval-Print Loop.");
     PRINT_ARG("--version",    "Display the current version information.");
@@ -318,14 +322,15 @@ void print_help() {
 
 
 int main(int argc, char** argv) {
-
-    vm_init();
-
     if (argc < 2) {
         print_help();
-        vm_cleanup();
         return 1;
     }
+
+    // Instantiate Main VM
+    VM vm;
+    vm_init(&vm);
+    compiler_reset();
 
     bool build_mode = false;
     bool bind_mode = false;
@@ -345,12 +350,12 @@ int main(int argc, char** argv) {
         else if (strcmp(argv[i], "--dump") == 0) dump = true;
         else if (strcmp(argv[i], "--trace") == 0) trace = true;
         else if (strcmp(argv[i], "--dap") == 0) debug_mode = true;
-        else if (strcmp(argv[i], "--db") == 0) cli_debug_mode = true; // Set local flag
+        else if (strcmp(argv[i], "--db") == 0) cli_debug_mode = true;
         else if (strcmp(argv[i], "--version") == 0) version = true;
         else if (strcmp(argv[i], "--repl") == 0) repl_mode = true;
         else if (strcmp(argv[i], "--help") == 0) {
             print_help();
-            vm_cleanup();
+            vm_cleanup(&vm);
             return 0;
         }
         else fn = argv[i];
@@ -358,60 +363,60 @@ int main(int argc, char** argv) {
 
     if (version) {
         printf("Mylo version %s\n", VERSION_INFO);
-        vm_cleanup();
+        vm_cleanup(&vm);
         return 0;
     }
 
     if (repl_mode) {
+        // start_repl manages its own VM cycle usually, but since we have one, we could pass it or just cleanup and call start_repl
+        vm_cleanup(&vm);
         start_repl();
-        vm_cleanup();
         return 0;
     }
 
     MyloConfig.build_mode = build_mode;
     if(!fn) {
         printf("No input file provided.\n");
-        vm_cleanup();
+        vm_cleanup(&vm);
         return 1;
     }
 
     char* content = read_file(fn);
     if (!content) {
         printf("Error: Cannot read file %s\n", fn);
-        vm_cleanup();
+        vm_cleanup(&vm);
         return 1;
     }
 
     // 1. If Debugging, Hand off control immediately (Do NOT parse yet)
+    // The Debug Adapter manages its own parsing/execution loop via stdin/out commands
     if (debug_mode) {
-        start_debug_adapter(fn, content);
+        start_debug_adapter(&vm, fn, content);
         free(content);
-        vm_cleanup();
+        vm_cleanup(&vm);
         return 0;
     }
 
-    // Reset the VM before parsing (this clears VM struct, so we must set flags AFTER this)
-    mylo_reset();
-
-    // Apply TUI Debugger settings
+    // Apply TUI Debugger settings to VM instance
     vm.source_code = content;
     vm.cli_debug_mode = cli_debug_mode;
 
-    parse(content);
+    // Parse source into the VM
+    parse(&vm, content);
 
     if (bind_mode) {
         char out_name[1024];
         snprintf(out_name, 1024, "%s_bind.c", fn);
-        generate_binding_c_source(out_name);
+        generate_binding_c_source(&vm, out_name);
         free(content);
-        vm_cleanup();
+        vm_cleanup(&vm);
         return 0;
     }
 
     if (build_mode) {
-        compile_to_c_source("out.c");
+        compile_to_c_source(&vm, "out.c");
         free(content);
-        vm_cleanup();
+        vm_cleanup(&vm);
         return 0;
     }
 
@@ -423,20 +428,20 @@ int main(int argc, char** argv) {
         printf("Please compile it to bytecode using: mylo --build %s\n", fn);
         setTerminalColor(MyloFgDefault, MyloBgColorDefault);
         free(content);
-        vm_cleanup();
+        vm_cleanup(&vm);
         return 1;
     }
 
-    if (dump) disassemble();
+    if (dump) disassemble(&vm);
 
     // Start debugger immediately if flag is set
     if (vm.cli_debug_mode) {
-        enter_debugger();
+        enter_debugger(&vm);
     }
 
-    run_vm(trace);
+    run_vm(&vm, trace);
 
     free(content);
-    vm_cleanup();
+    vm_cleanup(&vm);
     return 0;
 }

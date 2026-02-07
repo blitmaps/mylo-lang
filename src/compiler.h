@@ -3,6 +3,7 @@
 
 #include "defines.h"
 #include <stdbool.h>
+#include "vm.h" // Needed for VM* definition
 
 // Symbol Table Entry
 typedef struct {
@@ -47,9 +48,9 @@ extern LocalSymbol locals[MAX_GLOBALS];
 extern int local_count;
 
 // Compiler entry point
-void parse(char *source);
-void compile_to_c_source(const char *output_filename);
-void generate_binding_c_source(const char *output_filename);
-void compile_repl(char* source, int* out_start_ip);
-
+void parse(VM* vm, char *source);
+void compile_to_c_source(VM* vm, const char *output_filename);
+void generate_binding_c_source(VM* vm, const char *output_filename);
+void compile_repl(VM* vm, char* source, int* out_start_ip);
+void compiler_reset();
 #endif

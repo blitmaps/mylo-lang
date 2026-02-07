@@ -30,29 +30,29 @@ void trim_newline(char *str) {
 
 // --- Standard Library Functions ---
 
-void std_sqrt(VM *vm) { vm_push(sqrt(vm_pop()), T_NUM); }
-void std_sin(VM *vm) { vm_push(sin(vm_pop()), T_NUM); }
-void std_cos(VM *vm) { vm_push(cos(vm_pop()), T_NUM); }
-void std_tan(VM *vm) { vm_push(tan(vm_pop()), T_NUM); }
-void std_floor(VM *vm) { vm_push(floor(vm_pop()), T_NUM); }
-void std_ceil(VM *vm) { vm_push(ceil(vm_pop()), T_NUM); }
+void std_sqrt(VM *vm) { vm_push(vm, sqrt(vm_pop(vm)), T_NUM); }
+void std_sin(VM *vm) { vm_push(vm, sin(vm_pop(vm)), T_NUM); }
+void std_cos(VM *vm) { vm_push(vm, cos(vm_pop(vm)), T_NUM); }
+void std_tan(VM *vm) { vm_push(vm, tan(vm_pop(vm)), T_NUM); }
+void std_floor(VM *vm) { vm_push(vm, floor(vm_pop(vm)), T_NUM); }
+void std_ceil(VM *vm) { vm_push(vm, ceil(vm_pop(vm)), T_NUM); }
 
 void std_len(VM *vm) {
-    double val = vm_pop();
+    double val = vm_pop(vm);
 
     if (vm->stack_types[vm->sp + 1] == T_OBJ) {
-        double* base = vm_resolve_ptr(val);
-        if(!base) { vm_push(0, T_NUM); return; }
+        double* base = vm_resolve_ptr(vm, val);
+        if(!base) { vm_push(vm, 0, T_NUM); return; }
 
         int type = (int)base[HEAP_OFFSET_TYPE];
 
         // Support Generic Arrays, Byte Arrays, and Typed Arrays (i32[], f32[], etc)
         if(type == TYPE_ARRAY || type == TYPE_BYTES || (type <= TYPE_I16_ARRAY && type >= TYPE_BOOL_ARRAY)) {
-            vm_push(base[HEAP_OFFSET_LEN], T_NUM);
+            vm_push(vm, base[HEAP_OFFSET_LEN], T_NUM);
         }
         // Support Maps (Count is at offset 2)
         else if (type == TYPE_MAP) {
-            vm_push(base[HEAP_OFFSET_COUNT], T_NUM);
+            vm_push(vm, base[HEAP_OFFSET_COUNT], T_NUM);
         }
         else {
             printf("Runtime Error: len() expects array, string, map, or bytes.\n");
@@ -60,16 +60,16 @@ void std_len(VM *vm) {
         }
     } else if (vm->stack_types[vm->sp + 1] == T_STR) {
         const char *s = get_str(vm, val);
-        vm_push((double) strlen(s), T_NUM);
+        vm_push(vm, (double) strlen(s), T_NUM);
     } else {
         printf("Runtime Error: len() expects array or string.\n");
         exit(1);
     }
 }
 void std_contains(VM *vm) {
-    double needle_val = vm_pop();
+    double needle_val = vm_pop(vm);
     int needle_type = vm->stack_types[vm->sp + 1];
-    double haystack_val = vm_pop();
+    double haystack_val = vm_pop(vm);
     int haystack_type = vm->stack_types[vm->sp + 1];
 
     if (haystack_type == T_STR) {
@@ -77,15 +77,15 @@ void std_contains(VM *vm) {
             printf("Runtime Error: contains() string needle\n");
             exit(1);
         }
-        if (strstr(get_str(vm, haystack_val), get_str(vm, needle_val)) != NULL) vm_push(1.0, T_NUM);
-        else vm_push(0.0, T_NUM);
+        if (strstr(get_str(vm, haystack_val), get_str(vm, needle_val)) != NULL) vm_push(vm, 1.0, T_NUM);
+        else vm_push(vm, 0.0, T_NUM);
         return;
     }
 
     if (haystack_type == T_OBJ) {
-        double* base = vm_resolve_ptr(haystack_val);
-        int* types = vm_resolve_type(haystack_val);
-        if (!base) { vm_push(0.0, T_NUM); return; }
+        double* base = vm_resolve_ptr(vm, haystack_val);
+        int* types = vm_resolve_type(vm, haystack_val);
+        if (!base) { vm_push(vm, 0.0, T_NUM); return; }
 
         int objType = (int)base[HEAP_OFFSET_TYPE];
 
@@ -98,7 +98,7 @@ void std_contains(VM *vm) {
                     break;
                 }
             }
-            vm_push(found ? 1.0 : 0.0, T_NUM);
+            vm_push(vm, found ? 1.0 : 0.0, T_NUM);
             return;
         } else if (objType == TYPE_MAP) {
             if (needle_type != T_STR) {
@@ -107,7 +107,7 @@ void std_contains(VM *vm) {
             }
             int count = (int)base[HEAP_OFFSET_COUNT];
             double dataPtrVal = base[HEAP_OFFSET_DATA];
-            double* data = vm_resolve_ptr(dataPtrVal);
+            double* data = vm_resolve_ptr(vm, dataPtrVal);
 
             int found = 0;
             if(data) {
@@ -118,7 +118,7 @@ void std_contains(VM *vm) {
                     }
                 }
             }
-            vm_push(found ? 1.0 : 0.0, T_NUM);
+            vm_push(vm, found ? 1.0 : 0.0, T_NUM);
             return;
         }
     }
@@ -127,7 +127,7 @@ void std_contains(VM *vm) {
 }
 
 void std_to_string(VM *vm) {
-    double val = vm_pop();
+    double val = vm_pop(vm);
     int type = vm->stack_types[vm->sp + 1];
 
     if (type == T_NUM) {
@@ -135,49 +135,49 @@ void std_to_string(VM *vm) {
         if (val == (int) val) snprintf(buf, 64, "%d", (int) val);
         else snprintf(buf, 64, "%g", val);
 
-        int str_id = make_string(buf);
-        vm_push((double) str_id, T_STR);
+        int str_id = make_string(vm, buf);
+        vm_push(vm, (double) str_id, T_STR);
     } else if (type == T_STR) {
-        vm_push(val, T_STR);
+        vm_push(vm, val, T_STR);
     } else if (type == T_OBJ) {
         // Can't print address effectively with packed pointer, just print type indicator
         char buf[64];
         snprintf(buf, 64, "[Object]");
-        int str_id = make_string(buf);
-        vm_push((double) str_id, T_STR);
+        int str_id = make_string(vm, buf);
+        vm_push(vm, (double) str_id, T_STR);
     } else {
-        int str_id = make_string("");
-        vm_push((double) str_id, T_STR);
+        int str_id = make_string(vm, "");
+        vm_push(vm, (double) str_id, T_STR);
     }
 }
 
 void std_to_num(VM *vm) {
-    double val = vm_pop();
+    double val = vm_pop(vm);
     int type = vm->stack_types[vm->sp + 1];
 
     if (type == T_NUM) {
-        vm_push(val, T_NUM);
+        vm_push(vm, val, T_NUM);
     } else if (type == T_STR) {
         const char *s = get_str(vm, val);
         char *end;
         double d = strtod(s, &end);
-        vm_push(d, T_NUM);
+        vm_push(vm, d, T_NUM);
     } else {
-        vm_push(0.0, T_NUM);
+        vm_push(vm, 0.0, T_NUM);
     }
 }
 
 void std_read_lines(VM *vm) {
-    double path_id = vm_pop();
+    double path_id = vm_pop(vm);
     const char *path = get_str(vm, path_id);
 
     FILE *f = fopen(path, "r");
     if (!f) {
-        double addr = heap_alloc(HEAP_HEADER_ARRAY);
-        double* base = vm_resolve_ptr(addr);
+        double addr = heap_alloc(vm, HEAP_HEADER_ARRAY);
+        double* base = vm_resolve_ptr(vm, addr);
         base[HEAP_OFFSET_TYPE] = TYPE_ARRAY;
         base[HEAP_OFFSET_LEN] = 0;
-        vm_push(addr, T_OBJ);
+        vm_push(vm, addr, T_OBJ);
         return;
     }
 
@@ -191,9 +191,9 @@ void std_read_lines(VM *vm) {
     }
     if (last_char != '\n' && ftell(f) > 0) lines++;
 
-    double arr_addr = heap_alloc(lines + HEAP_HEADER_ARRAY);
-    double* base = vm_resolve_ptr(arr_addr);
-    int* types = vm_resolve_type(arr_addr);
+    double arr_addr = heap_alloc(vm, lines + HEAP_HEADER_ARRAY);
+    double* base = vm_resolve_ptr(vm, arr_addr);
+    int* types = vm_resolve_type(vm, arr_addr);
 
     base[HEAP_OFFSET_TYPE] = TYPE_ARRAY;
     base[HEAP_OFFSET_LEN] = (double) lines;
@@ -203,20 +203,20 @@ void std_read_lines(VM *vm) {
     int i = 0;
     while (i < lines && fgets(buffer, sizeof(buffer), f)) {
         trim_newline(buffer);
-        int str_id = make_string(buffer);
+        int str_id = make_string(vm, buffer);
         base[HEAP_HEADER_ARRAY + i] = (double) str_id;
         types[HEAP_HEADER_ARRAY + i] = T_STR;
         i++;
     }
     fclose(f);
 
-    vm_push(arr_addr, T_OBJ);
+    vm_push(vm, arr_addr, T_OBJ);
 }
 
 void std_write_file(VM *vm) {
-    double mode_id = vm_pop();
-    double content_id = vm_pop();
-    double path_id = vm_pop();
+    double mode_id = vm_pop(vm);
+    double content_id = vm_pop(vm);
+    double path_id = vm_pop(vm);
 
     const char *mode = get_str(vm, mode_id);
     const char *content = get_str(vm, content_id);
@@ -229,18 +229,18 @@ void std_write_file(VM *vm) {
 
     FILE *f = fopen(path, mode);
     if (!f) {
-        vm_push(0.0, T_NUM);
+        vm_push(vm, 0.0, T_NUM);
         return;
     }
 
     fprintf(f, "%s", content);
     fclose(f);
-    vm_push(1.0, T_NUM);
+    vm_push(vm, 1.0, T_NUM);
 }
 
 void std_read_bytes(VM *vm) {
-    double stride_val = vm_pop();
-    double path_id = vm_pop();
+    double stride_val = vm_pop(vm);
+    double path_id = vm_pop(vm);
     const char *path = get_str(vm, path_id);
     int stride = (int) stride_val;
 
@@ -251,11 +251,11 @@ void std_read_bytes(VM *vm) {
 
     FILE *f = fopen(path, "rb");
     if (!f) {
-        double addr = heap_alloc(HEAP_HEADER_ARRAY);
-        double* base = vm_resolve_ptr(addr);
+        double addr = heap_alloc(vm, HEAP_HEADER_ARRAY);
+        double* base = vm_resolve_ptr(vm, addr);
         base[HEAP_OFFSET_TYPE] = TYPE_ARRAY;
         base[HEAP_OFFSET_LEN] = 0;
-        vm_push(addr, T_OBJ);
+        vm_push(vm, addr, T_OBJ);
         return;
     }
 
@@ -269,8 +269,8 @@ void std_read_bytes(VM *vm) {
 
     int element_count = file_len;
     int doubles_needed = (element_count + 7) / 8;
-    double addr = heap_alloc(doubles_needed + HEAP_HEADER_ARRAY);
-    double* base = vm_resolve_ptr(addr);
+    double addr = heap_alloc(vm, doubles_needed + HEAP_HEADER_ARRAY);
+    double* base = vm_resolve_ptr(vm, addr);
 
     base[HEAP_OFFSET_TYPE] = TYPE_BYTES;
     base[HEAP_OFFSET_LEN] = (double) element_count;
@@ -279,14 +279,14 @@ void std_read_bytes(VM *vm) {
     memcpy(heap_bytes, buf, element_count);
 
     free(buf);
-    vm_push(addr, T_OBJ);
+    vm_push(vm, addr, T_OBJ);
 }
 
 void std_write_bytes(VM *vm) {
-    double arr_ref = vm_pop();
-    double path_id = vm_pop();
+    double arr_ref = vm_pop(vm);
+    double path_id = vm_pop(vm);
 
-    double* base = vm_resolve_ptr(arr_ref);
+    double* base = vm_resolve_ptr(vm, arr_ref);
     if (!base || (int) base[HEAP_OFFSET_TYPE] != TYPE_ARRAY) {
         printf("Runtime Error: write_bytes expects array\n");
         exit(1);
@@ -297,7 +297,7 @@ void std_write_bytes(VM *vm) {
 
     FILE *f = fopen(path, "wb");
     if (!f) {
-        vm_push(0.0, T_NUM);
+        vm_push(vm, 0.0, T_NUM);
         return;
     }
 
@@ -307,12 +307,12 @@ void std_write_bytes(VM *vm) {
     }
 
     fclose(f);
-    vm_push(1.0, T_NUM);
+    vm_push(vm, 1.0, T_NUM);
 }
 
 // Usage: var x = list(100)
 void std_list(VM *vm) {
-    double size_val = vm_pop();
+    double size_val = vm_pop(vm);
     int size = (int)size_val;
 
     if (size < 0) {
@@ -320,9 +320,9 @@ void std_list(VM *vm) {
         exit(1);
     }
 
-    double ptr = heap_alloc(size + HEAP_HEADER_ARRAY);
-    double* base = vm_resolve_ptr(ptr);
-    int* types = vm_resolve_type(ptr);
+    double ptr = heap_alloc(vm, size + HEAP_HEADER_ARRAY);
+    double* base = vm_resolve_ptr(vm, ptr);
+    int* types = vm_resolve_type(vm, ptr);
 
     base[HEAP_OFFSET_TYPE] = TYPE_ARRAY;
     base[HEAP_OFFSET_LEN] = (double)size;
@@ -332,21 +332,21 @@ void std_list(VM *vm) {
         types[HEAP_HEADER_ARRAY + i] = T_NUM;
     }
 
-    vm_push(ptr, T_OBJ);
+    vm_push(vm, ptr, T_OBJ);
 }
 
 void std_remove(VM *vm) {
-    double key_val = vm_pop();
+    double key_val = vm_pop(vm);
     int key_type = vm->stack_types[vm->sp + 1];
-    double obj_val = vm_pop();
+    double obj_val = vm_pop(vm);
 
     if (vm->stack_types[vm->sp + 1] != T_OBJ) {
         printf("Runtime Error: remove() expects an object\n");
         exit(1);
     }
 
-    double* base = vm_resolve_ptr(obj_val);
-    int* types = vm_resolve_type(obj_val);
+    double* base = vm_resolve_ptr(vm, obj_val);
+    int* types = vm_resolve_type(vm, obj_val);
     int type = (int)base[HEAP_OFFSET_TYPE];
 
     if (type == TYPE_ARRAY) {
@@ -366,8 +366,8 @@ void std_remove(VM *vm) {
     else if (type == TYPE_MAP) {
         int count = (int)base[HEAP_OFFSET_COUNT];
         double data_ptr_val = base[HEAP_OFFSET_DATA];
-        double* data = vm_resolve_ptr(data_ptr_val);
-        int* data_types = vm_resolve_type(data_ptr_val);
+        double* data = vm_resolve_ptr(vm, data_ptr_val);
+        int* data_types = vm_resolve_type(vm, data_ptr_val);
 
         if(data) {
             for (int i = 0; i < count; i++) {
@@ -388,20 +388,20 @@ void std_remove(VM *vm) {
             }
         }
     }
-    vm_push(obj_val, T_OBJ);
+    vm_push(vm, obj_val, T_OBJ);
 }
 
 void std_add(VM *vm) {
-    double val = vm_pop();
+    double val = vm_pop(vm);
     int val_type = vm->stack_types[vm->sp + 1];
 
-    double idx_val = vm_pop();
+    double idx_val = vm_pop(vm);
     int idx = (int)idx_val;
 
-    double arr_val = vm_pop();
+    double arr_val = vm_pop(vm);
 
-    double* base = vm_resolve_ptr(arr_val);
-    int* types = vm_resolve_type(arr_val);
+    double* base = vm_resolve_ptr(vm, arr_val);
+    int* types = vm_resolve_type(vm, arr_val);
 
     if (vm->stack_types[vm->sp + 1] != T_OBJ || (int)base[0] != TYPE_ARRAY) {
         printf("Runtime Error: add() expects an array\n");
@@ -414,9 +414,9 @@ void std_add(VM *vm) {
     if (idx < 0) idx = 0;
     if (idx > len) idx = len;
 
-    double new_ptr = heap_alloc(len + 1 + HEAP_HEADER_ARRAY);
-    double* new_base = vm_resolve_ptr(new_ptr);
-    int* new_types = vm_resolve_type(new_ptr);
+    double new_ptr = heap_alloc(vm, len + 1 + HEAP_HEADER_ARRAY);
+    double* new_base = vm_resolve_ptr(vm, new_ptr);
+    int* new_types = vm_resolve_type(vm, new_ptr);
 
     new_base[HEAP_OFFSET_TYPE] = TYPE_ARRAY;
     new_base[HEAP_OFFSET_LEN] = (double)(len + 1);
@@ -437,12 +437,12 @@ void std_add(VM *vm) {
         new_types[dst_base_idx + i + 1] = types[src_base_idx + i];
     }
 
-    vm_push(new_ptr, T_OBJ);
+    vm_push(vm, new_ptr, T_OBJ);
 }
 
 void std_split(VM* vm) {
-    double del_val = vm_pop();
-    double str_val = vm_pop();
+    double del_val = vm_pop(vm);
+    double str_val = vm_pop(vm);
 
     const char* str = get_str(vm, str_val);
     const char* del = get_str(vm, del_val);
@@ -450,20 +450,20 @@ void std_split(VM* vm) {
 
     if (del_len == 0) {
         int len = strlen(str);
-        double ptr = heap_alloc(len + HEAP_HEADER_ARRAY);
-        double* base = vm_resolve_ptr(ptr);
-        int* types = vm_resolve_type(ptr);
+        double ptr = heap_alloc(vm, len + HEAP_HEADER_ARRAY);
+        double* base = vm_resolve_ptr(vm, ptr);
+        int* types = vm_resolve_type(vm, ptr);
 
         base[0] = TYPE_ARRAY;
         base[1] = (double)len;
 
         for (int i = 0; i < len; i++) {
             char tmp[2] = { str[i], '\0' };
-            int id = make_string(tmp);
+            int id = make_string(vm, tmp);
             base[2 + i] = (double)id;
             types[2 + i] = T_STR;
         }
-        vm_push(ptr, T_OBJ);
+        vm_push(vm, ptr, T_OBJ);
         return;
     }
 
@@ -474,9 +474,9 @@ void std_split(VM* vm) {
         p += del_len;
     }
 
-    double ptr = heap_alloc(count + HEAP_HEADER_ARRAY);
-    double* base = vm_resolve_ptr(ptr);
-    int* types = vm_resolve_type(ptr);
+    double ptr = heap_alloc(vm, count + HEAP_HEADER_ARRAY);
+    double* base = vm_resolve_ptr(vm, ptr);
+    int* types = vm_resolve_type(vm, ptr);
 
     base[0] = TYPE_ARRAY;
     base[1] = (double)count;
@@ -490,7 +490,7 @@ void std_split(VM* vm) {
         strncpy(buf, p, token_len);
         buf[token_len] = '\0';
 
-        int id = make_string(buf);
+        int id = make_string(vm, buf);
         free(buf);
 
         base[2 + idx] = (double)id;
@@ -499,31 +499,31 @@ void std_split(VM* vm) {
         p = next + del_len;
     }
 
-    int id = make_string(p);
+    int id = make_string(vm, p);
     base[2 + idx] = (double)id;
     types[2 + idx] = T_STR;
 
-    vm_push(ptr, T_OBJ);
+    vm_push(vm, ptr, T_OBJ);
 }
 
 void std_where(VM* vm) {
-    double item_val = vm_pop();
+    double item_val = vm_pop(vm);
     int item_type = vm->stack_types[vm->sp + 1];
-    double col_val = vm_pop();
+    double col_val = vm_pop(vm);
     int col_type = vm->stack_types[vm->sp + 1];
 
     if (col_type == T_STR) {
-        if (item_type != T_STR) { vm_push(-1.0, T_NUM); return; }
+        if (item_type != T_STR) { vm_push(vm, -1.0, T_NUM); return; }
         const char* haystack = get_str(vm, col_val);
         const char* needle = get_str(vm, item_val);
         char* found = strstr(haystack, needle);
-        if (found) vm_push((double)(found - haystack), T_NUM);
-        else vm_push(-1.0, T_NUM);
+        if (found) vm_push(vm, (double)(found - haystack), T_NUM);
+        else vm_push(vm, -1.0, T_NUM);
     }
     else if (col_type == T_OBJ) {
-        double* base = vm_resolve_ptr(col_val);
-        int* types = vm_resolve_type(col_val);
-        if(!base) { vm_push(-1.0, T_NUM); return; }
+        double* base = vm_resolve_ptr(vm, col_val);
+        int* types = vm_resolve_type(vm, col_val);
+        if(!base) { vm_push(vm, -1.0, T_NUM); return; }
 
         int type = (int)base[0];
 
@@ -533,7 +533,7 @@ void std_where(VM* vm) {
                 double el = base[2 + i];
                 int et = types[2 + i];
                 if (el == item_val && et == item_type) {
-                    vm_push((double)i, T_NUM);
+                    vm_push(vm, (double)i, T_NUM);
                     return;
                 }
             }
@@ -543,22 +543,22 @@ void std_where(VM* vm) {
             unsigned char* b = (unsigned char*)&base[HEAP_HEADER_ARRAY];
             for (int i = 0; i < len; i++) {
                 if ((double)b[i] == item_val) {
-                    vm_push((double)i, T_NUM);
+                    vm_push(vm, (double)i, T_NUM);
                     return;
                 }
             }
         }
-        vm_push(-1.0, T_NUM);
+        vm_push(vm, -1.0, T_NUM);
     }
     else {
-        vm_push(-1.0, T_NUM);
+        vm_push(vm, -1.0, T_NUM);
     }
 }
 
 void std_range(VM *vm) {
-    double stop_val = vm_pop();
-    double step_val = vm_pop();
-    double start_val = vm_pop();
+    double stop_val = vm_pop(vm);
+    double step_val = vm_pop(vm);
+    double start_val = vm_pop(vm);
 
     if (step_val == 0) {
         printf("Runtime Error: range() step cannot be 0\n");
@@ -572,9 +572,9 @@ void std_range(VM *vm) {
     int count = (int)((diff / abs_step) + 1.00000001);
     if (count < 0) count = 0;
 
-    double ptr = heap_alloc(count + HEAP_HEADER_ARRAY);
-    double* base = vm_resolve_ptr(ptr);
-    int* types = vm_resolve_type(ptr);
+    double ptr = heap_alloc(vm, count + HEAP_HEADER_ARRAY);
+    double* base = vm_resolve_ptr(vm, ptr);
+    int* types = vm_resolve_type(vm, ptr);
 
     base[HEAP_OFFSET_TYPE] = TYPE_ARRAY;
     base[HEAP_OFFSET_LEN] = (double)count;
@@ -589,15 +589,15 @@ void std_range(VM *vm) {
         else current -= abs_step;
     }
 
-    vm_push(ptr, T_OBJ);
+    vm_push(vm, ptr, T_OBJ);
 }
 
 void std_for_list(VM *vm) {
-    double list_ref = vm_pop();
-    double func_val = vm_pop();
+    double list_ref = vm_pop(vm);
+    double func_val = vm_pop(vm);
 
-    double* base = vm_resolve_ptr(list_ref);
-    int* types = vm_resolve_type(list_ref);
+    double* base = vm_resolve_ptr(vm, list_ref);
+    int* types = vm_resolve_type(vm, list_ref);
 
     if (vm->stack_types[vm->sp + 2] != T_OBJ || (int)base[0] != TYPE_ARRAY) {
         printf("Runtime Error: for_list expects an array.\n");
@@ -631,9 +631,9 @@ void std_for_list(VM *vm) {
 
     int saved_ip = vm->ip;
 
-    double res_ptr = heap_alloc(len + HEAP_HEADER_ARRAY);
-    double* res_base = vm_resolve_ptr(res_ptr);
-    int* res_types = vm_resolve_type(res_ptr);
+    double res_ptr = heap_alloc(vm, len + HEAP_HEADER_ARRAY);
+    double* res_base = vm_resolve_ptr(vm, res_ptr);
+    int* res_types = vm_resolve_type(vm, res_ptr);
 
     res_base[0] = TYPE_ARRAY;
     res_base[1] = (double)len;
@@ -645,18 +645,18 @@ void std_for_list(VM *vm) {
          int type = types[HEAP_HEADER_ARRAY + i];
 
          if (native_target) {
-             vm_push(val, type);
+             vm_push(vm, val, type);
              native_target(vm);
          } else {
-             vm_push((double)vm->code_size, T_NUM);
-             vm_push((double)vm->fp, T_NUM);
-             vm_push(val, type);
+             vm_push(vm, (double)vm->code_size, T_NUM);
+             vm_push(vm, (double)vm->fp, T_NUM);
+             vm_push(vm, val, type);
              vm->fp = vm->sp;
 
-             run_vm_from(user_func_addr, false);
+             run_vm_from(vm, user_func_addr, false);
          }
 
-         double res = vm_pop();
+         double res = vm_pop(vm);
          int res_type = vm->stack_types[vm->sp + 1];
 
          res_base[HEAP_HEADER_ARRAY + i] = res;
@@ -664,18 +664,18 @@ void std_for_list(VM *vm) {
     }
 
     vm->ip = saved_ip;
-    vm_push(res_ptr, T_OBJ);
+    vm_push(vm, res_ptr, T_OBJ);
 }
 
 void std_seed(VM *vm) {
-    double val = vm_pop();
+    double val = vm_pop(vm);
     srand((unsigned int)val);
-    vm_push(0.0, T_NUM);
+    vm_push(vm, 0.0, T_NUM);
 }
 
 void std_rand(VM *vm) {
     double r = (double)rand() / (double)RAND_MAX;
-    vm_push(r, T_NUM);
+    vm_push(vm, r, T_NUM);
 }
 
 void std_rand_normal(VM *vm) {
@@ -683,45 +683,45 @@ void std_rand_normal(VM *vm) {
     double u2 = (double)rand() / (double)RAND_MAX;
     if (u1 < 1e-9) u1 = 1e-9;
     double z0 = sqrt(-2.0 * log(u1)) * cos(2.0 * 3.14159265358979323846 * u2);
-    vm_push(z0, T_NUM);
+    vm_push(vm, z0, T_NUM);
 }
 
 void std_mix(VM *vm) {
-    double a = vm_pop();
-    double y = vm_pop();
-    double x = vm_pop();
+    double a = vm_pop(vm);
+    double y = vm_pop(vm);
+    double x = vm_pop(vm);
     double result = x + (y - x) * a;
-    vm_push(result, T_NUM);
+    vm_push(vm, result, T_NUM);
 }
 
 void std_min(VM *vm) {
-    double b = vm_pop();
-    double a = vm_pop();
-    if (a < b) vm_push(a, T_NUM);
-    else vm_push(b, T_NUM);
+    double b = vm_pop(vm);
+    double a = vm_pop(vm);
+    if (a < b) vm_push(vm, a, T_NUM);
+    else vm_push(vm, b, T_NUM);
 }
 
 void std_max(VM *vm) {
-    double b = vm_pop();
-    double a = vm_pop();
-    if (a > b) vm_push(a, T_NUM);
-    else vm_push(b, T_NUM);
+    double b = vm_pop(vm);
+    double a = vm_pop(vm);
+    if (a > b) vm_push(vm, a, T_NUM);
+    else vm_push(vm, b, T_NUM);
 }
 
 void std_dist(VM *vm) {
-    double y2 = vm_pop();
-    double x2 = vm_pop();
-    double y1 = vm_pop();
-    double x1 = vm_pop();
+    double y2 = vm_pop(vm);
+    double x2 = vm_pop(vm);
+    double y1 = vm_pop(vm);
+    double x1 = vm_pop(vm);
     double dx = x2 - x1;
     double dy = y2 - y1;
     double dist = sqrt(dx*dx + dy*dy);
-    vm_push(dist, T_NUM);
+    vm_push(vm, dist, T_NUM);
 }
 
 void std_list_min(VM *vm) {
-    double list_ref = vm_pop();
-    double* base = vm_resolve_ptr(list_ref);
+    double list_ref = vm_pop(vm);
+    double* base = vm_resolve_ptr(vm, list_ref);
 
     if (vm->stack_types[vm->sp + 1] != T_OBJ || (int)base[0] != TYPE_ARRAY) {
         printf("Runtime Error: list_min() expects an array.\n");
@@ -739,12 +739,12 @@ void std_list_min(VM *vm) {
         double val = base[HEAP_HEADER_ARRAY + i];
         if (val < min_val) min_val = val;
     }
-    vm_push(min_val, T_NUM);
+    vm_push(vm, min_val, T_NUM);
 }
 
 void std_list_max(VM *vm) {
-    double list_ref = vm_pop();
-    double* base = vm_resolve_ptr(list_ref);
+    double list_ref = vm_pop(vm);
+    double* base = vm_resolve_ptr(vm, list_ref);
 
     if (vm->stack_types[vm->sp + 1] != T_OBJ || (int)base[0] != TYPE_ARRAY) {
         printf("Runtime Error: list_max() expects an array.\n");
@@ -762,7 +762,7 @@ void std_list_max(VM *vm) {
         double val = base[HEAP_HEADER_ARRAY + i];
         if (val > max_val) max_val = val;
     }
-    vm_push(max_val, T_NUM);
+    vm_push(vm, max_val, T_NUM);
 }
 
 // --- Perlin Noise Internals ---
@@ -800,9 +800,9 @@ static double perlin_grad(int hash, double x, double y, double z) {
 }
 
 void std_noise(VM *vm) {
-    double z = vm_pop();
-    double y = vm_pop();
-    double x = vm_pop();
+    double z = vm_pop(vm);
+    double y = vm_pop(vm);
+    double x = vm_pop(vm);
 
     int X = (int)floor(x) & 255;
     int Y = (int)floor(y) & 255;
@@ -828,7 +828,7 @@ void std_noise(VM *vm) {
                                  perlin_lerp(u, perlin_grad(perlin_p[AB + 1], x, y - 1, z - 1),
                                          perlin_grad(perlin_p[BB + 1], x - 1, y - 1, z - 1))));
 
-    vm_push(res, T_NUM);
+    vm_push(vm, res, T_NUM);
 }
 
 
@@ -843,12 +843,12 @@ static int ends_with(const char *str, const char *suffix) {
 
 void std_list_dir(VM *vm) {
     // Mylo pops arguments in reverse order of how they are passed
-    double filter_id = vm_pop();
+    double filter_id = vm_pop(vm);
     const char *filter = get_str(vm, filter_id);
-    
-    double path_id = vm_pop();
+
+    double path_id = vm_pop(vm);
     const char *path = get_str(vm, path_id);
-    
+
     int count = 0;
     int capacity = 16;
     char **filenames = malloc(sizeof(char*) * capacity);
@@ -863,7 +863,7 @@ void std_list_dir(VM *vm) {
     if (hFind != INVALID_HANDLE_VALUE) {
         do {
             if (strcmp(fFD.cFileName, ".") == 0 || strcmp(fFD.cFileName, "..") == 0) continue;
-            
+
             // Apply filter logic
             if (strlen(filter) > 0 && !ends_with(fFD.cFileName, filter)) continue;
 
@@ -896,22 +896,22 @@ void std_list_dir(VM *vm) {
 #endif
 
     // Push the results to the Mylo Heap
-    double arr_addr = heap_alloc(count + HEAP_HEADER_ARRAY);
-    double* base = vm_resolve_ptr(arr_addr);
-    int* types = vm_resolve_type(arr_addr);
+    double arr_addr = heap_alloc(vm, count + HEAP_HEADER_ARRAY);
+    double* base = vm_resolve_ptr(vm, arr_addr);
+    int* types = vm_resolve_type(vm, arr_addr);
 
     base[HEAP_OFFSET_TYPE] = TYPE_ARRAY;
     base[HEAP_OFFSET_LEN] = (double)count;
 
     for (int i = 0; i < count; i++) {
-        int id = make_string(filenames[i]);
+        int id = make_string(vm, filenames[i]);
         base[HEAP_HEADER_ARRAY + i] = (double)id;
         types[HEAP_HEADER_ARRAY + i] = T_STR;
         free(filenames[i]);
     }
     free(filenames);
 
-    vm_push(arr_addr, T_OBJ);
+    vm_push(vm, arr_addr, T_OBJ);
 }
 
 
@@ -1007,7 +1007,7 @@ void* job_worker(void* arg) {
 
 // --- 1. System (Blocking) ---
 void std_system(VM *vm) {
-    double cmd_id = vm_pop();
+    double cmd_id = vm_pop(vm);
     const char *cmd = get_str(vm, cmd_id);
 
     char *out_str = NULL;
@@ -1016,15 +1016,15 @@ void std_system(VM *vm) {
     internal_exec_command(cmd, &out_str, &err_str);
 
     // Create Mylo Array [stdout, stderr]
-    double arr_ptr = heap_alloc(2 + HEAP_HEADER_ARRAY);
-    double* base = vm_resolve_ptr(arr_ptr);
-    int* types = vm_resolve_type(arr_ptr);
+    double arr_ptr = heap_alloc(vm, 2 + HEAP_HEADER_ARRAY);
+    double* base = vm_resolve_ptr(vm, arr_ptr);
+    int* types = vm_resolve_type(vm, arr_ptr);
 
     base[HEAP_OFFSET_TYPE] = TYPE_ARRAY;
     base[HEAP_OFFSET_LEN] = 2.0;
 
-    int id_out = make_string(out_str ? out_str : "");
-    int id_err = make_string(err_str ? err_str : "");
+    int id_out = make_string(vm, out_str ? out_str : "");
+    int id_err = make_string(vm, err_str ? err_str : "");
 
     base[HEAP_HEADER_ARRAY + 0] = (double)id_out;
     types[HEAP_HEADER_ARRAY + 0] = T_STR;
@@ -1035,13 +1035,13 @@ void std_system(VM *vm) {
     if(out_str) free(out_str);
     if(err_str) free(err_str);
 
-    vm_push(arr_ptr, T_OBJ);
+    vm_push(vm, arr_ptr, T_OBJ);
 }
 
 // --- 2. System Thread (Non-Blocking) ---
 void std_system_thread(VM *vm) {
-    double name_id = vm_pop();
-    double cmd_id = vm_pop();
+    double name_id = vm_pop(vm);
+    double cmd_id = vm_pop(vm);
     const char *name = get_str(vm, name_id);
     const char *cmd = get_str(vm, cmd_id);
 
@@ -1056,7 +1056,7 @@ void std_system_thread(VM *vm) {
 
     if(slot == -1) {
         UNLOCK_JOBS;
-        vm_push(0.0, T_NUM); // Failed (No slots)
+        vm_push(vm, 0.0, T_NUM); // Failed (No slots)
         return;
     }
 
@@ -1078,12 +1078,12 @@ void std_system_thread(VM *vm) {
 #endif
 
     UNLOCK_JOBS;
-    vm_push(1.0, T_NUM); // Success
+    vm_push(vm, 1.0, T_NUM); // Success
 }
 
 // --- 3. Get Job (Poll Status) ---
 void std_get_job(VM *vm) {
-    double name_id = vm_pop();
+    double name_id = vm_pop(vm);
     const char *name = get_str(vm, name_id);
 
     LOCK_JOBS;
@@ -1098,14 +1098,14 @@ void std_get_job(VM *vm) {
     // Case 1: Job not found
     if(slot == -1) {
         UNLOCK_JOBS;
-        vm_push(-1.0, T_NUM);
+        vm_push(vm, -1.0, T_NUM);
         return;
     }
 
     // Case 2: Still Running
     if(job_registry[slot].status == 0) {
         UNLOCK_JOBS;
-        vm_push(1.0, T_NUM);
+        vm_push(vm, 1.0, T_NUM);
         return;
     }
 
@@ -1129,15 +1129,15 @@ void std_get_job(VM *vm) {
     UNLOCK_JOBS;
 
     // Now safe to alloc on VM Heap
-    double arr_ptr = heap_alloc(2 + HEAP_HEADER_ARRAY);
-    double* base = vm_resolve_ptr(arr_ptr);
-    int* types = vm_resolve_type(arr_ptr);
+    double arr_ptr = heap_alloc(vm, 2 + HEAP_HEADER_ARRAY);
+    double* base = vm_resolve_ptr(vm, arr_ptr);
+    int* types = vm_resolve_type(vm, arr_ptr);
 
     base[HEAP_OFFSET_TYPE] = TYPE_ARRAY;
     base[HEAP_OFFSET_LEN] = 2.0;
 
-    int id_out = make_string(safe_o);
-    int id_err = make_string(safe_e);
+    int id_out = make_string(vm, safe_o);
+    int id_err = make_string(vm, safe_e);
 
     base[HEAP_HEADER_ARRAY + 0] = (double)id_out;
     types[HEAP_HEADER_ARRAY + 0] = T_STR;
@@ -1148,7 +1148,7 @@ void std_get_job(VM *vm) {
     free(safe_o);
     free(safe_e);
 
-    vm_push(arr_ptr, T_OBJ);
+    vm_push(vm, arr_ptr, T_OBJ);
 }
 
 
