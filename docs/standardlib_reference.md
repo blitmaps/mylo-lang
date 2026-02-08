@@ -41,13 +41,17 @@ The Mylo Standard Library provides essential functions for file I/O, math, and d
     + [`read_bytes(path: str, stride: num) -> arr`](#read_bytespath-str-stride-num-arr)
     + [`write_bytes(path: str, data: arr) -> num`](#write_bytespath-str-data-arr-num)
   * [OS System & Process Management](#systemcommand-str---arr)
+  * [Terminal Input](#terminal-input)
+    + [`get_keys() -> arr`](#get_keys---arr)
+    + [`kbhit() -> num`](#kbhit---num)
+    + [`cget(blocking: num) -> str`](#cgetblocking-num---str)
   * [Multithreading](#multithreading)
-    * [`create_worker(region: region, function_name: str) -> num`](#create_workerregion-region-function_name-str---num)
-    * [`check_worker(worker_id: num) -> num`](#check_workerworker_id-num---num)
-    * [`dock_worker(worker_id: num) -> void`](#dock_workerworker_id-num---void)
+    + [`create_worker(region: region, function_name: str) -> num`](#create_workerregion-region-function_name-str---num)
+    + [`check_worker(worker_id: num) -> num`](#check_workerworker_id-num---num)
+    + [`dock_worker(worker_id: num) -> void`](#dock_workerworker_id-num---void)
   * [Universal Bus](#universal-bus)
-    * [`bus_get(key: str) -> any`](#bus_getkey-str---any)
-    * [`bus_set(key: str, value: any) -> any`](#bus_setkey-str-value-any---num)
+    + [`bus_get(key: str) -> any`](#bus_getkey-str---any)
+    + [`bus_set(key: str, value: any) -> any`](#bus_setkey-str-value-any---num)
 
 <!-- TOC end -->
 
@@ -687,6 +691,75 @@ forever {
     } else {
         print(f"Result: {res[0]}")
         break
+    }
+}
+```
+
+<a name="terminal-input"></a>
+## Terminal Input
+
+These functions allow for real-time interaction with the terminal, enabling TUI applications, games, and interactive tools.
+
+<a name="cgetblocking-num-str"></a>
+### `cget(blocking: num) -> str`
+
+Reads a single character from the standard input.
+
+**Arguments:**
+* `blocking`:
+  * `1`: Blocks execution until a key is pressed.
+  * `0`: Non-blocking. Returns an empty string `""` immediately if no key is pressed.
+
+**Returns:**
+* A string containing the character code (e.g., "a", "1").
+* Returns `""` if non-blocking and no input is available.
+
+**Example:**
+```javascript
+// Wait for user to press a key
+var key = cget(1)
+print("You pressed: " + key)
+```
+
+<a name="kbhit-num"></a>
+### `kbhit() -> num`
+
+Checks if a key has been pressed and is waiting in the buffer.
+
+**Returns:**
+* `1`: A key is waiting to be read.
+* `0`: No keys are pressed.
+
+**Example:**
+```javascript
+if (kbhit()) {
+    print("Key pressed!")
+}
+```
+
+<a name="get_keys-arr"></a>
+### `get_keys() -> arr`
+
+Reads and clears the entire input buffer, returning a list of all key events that occurred since the last check.
+
+**Returns:**
+* An array of strings representing the keys pressed.
+* Special keys are returned as tags: `[UP]`, `[DOWN]`, `[LEFT]`, `[RIGHT]`, `[ESC]`, `[ENTER]`, `[BACKSPACE]`, `[TAB]`, `[HOME]`, `[END]`, `[INS]`, `[DEL]`.
+* Function keys are returned as `[F1]` to `[F10]`.
+* Control combinations are returned as `[CTRL+A]` ... `[CTRL+Z]`.
+* Alt combinations (Linux only) are returned as `[ALT+X]`.
+
+**Example:**
+```javascript
+var inputs = get_keys()
+
+// Process all inputs for this frame
+for (k in inputs) {
+    if (k == "[UP]") {
+        player_y = player_y - 1
+    }
+    if (k == "q") {
+        running = 0
     }
 }
 ```

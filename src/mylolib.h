@@ -59,6 +59,11 @@ void std_check_worker(VM *vm);
 void std_bus_set(VM *vm);
 void std_bus_get(VM *vm);
 
+// Terminal
+void std_cget(VM *vm);
+void std_kbhit(VM *vm);
+void std_get_keys(VM *vm);
+
 // Registry Declaration (Extern)
 // We do NOT define it here, only say it exists.
 extern const StdLibDef std_library[];

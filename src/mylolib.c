@@ -12,10 +12,13 @@
     #include <io.h>
     #include <windows.h>
     #include <process.h>
+    #include <conio.h>
 #else
     #include <dirent.h>
     #include <pthread.h>
     #include <unistd.h>
+    #include <termios.h>
+    #include <fcntl.h>
 #endif
 
 
@@ -1534,6 +1537,227 @@ void std_bus_get(VM *vm) {
     vm_push(vm, 0.0, T_NUM);
 }
 
+// Terminal control
+#ifndef _WIN32
+// Helper for non-blocking check on POSIX systems
+int mylo_linux_kbhit() {
+    struct termios oldt, newt;
+    int ch;
+    int oldf;
+
+    tcgetattr(STDIN_FILENO, &oldt);
+    newt = oldt;
+    newt.c_lflag &= ~(ICANON | ECHO);
+    tcsetattr(STDIN_FILENO, TCSANOW, &newt);
+    
+    oldf = fcntl(STDIN_FILENO, F_GETFL, 0);
+    fcntl(STDIN_FILENO, F_SETFL, oldf | O_NONBLOCK);
+
+    ch = getchar();
+
+    tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+    fcntl(STDIN_FILENO, F_SETFL, oldf);
+
+    if(ch != EOF) {
+        ungetc(ch, stdin);
+        return 1;
+    }
+    return 0;
+}
+
+// Helper for unbuffered char read on POSIX systems
+int mylo_linux_getch() {
+    struct termios oldt, newt;
+    int ch;
+    tcgetattr(STDIN_FILENO, &oldt);
+    newt = oldt;
+    newt.c_lflag &= ~(ICANON | ECHO);
+    tcsetattr(STDIN_FILENO, TCSANOW, &newt);
+    ch = getchar();
+    tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+    return ch;
+}
+#endif
+
+// --- [INSERT] Implementation Functions ---
+
+// std_cget(blocking) -> string_char
+void std_cget(VM *vm) {
+    double mode_val = vm_pop(vm);
+    int blocking = (int)mode_val; // 1 = Blocking, 0 = Non-Blocking
+    int ch = -1;
+
+#ifdef _WIN32
+    if (blocking) {
+        ch = _getch();
+    } else {
+        if (_kbhit()) ch = _getch();
+    }
+#else
+    if (blocking) {
+        ch = mylo_linux_getch();
+    } else {
+        if (mylo_linux_kbhit()) ch = mylo_linux_getch();
+    }
+#endif
+
+    if (ch != -1) {
+        char buf[2] = { (char)ch, '\0' };
+        int id = make_string(vm, buf);
+        vm_push(vm, (double)id, T_STR);
+    } else {
+        int id = make_string(vm, "");
+        vm_push(vm, (double)id, T_STR);
+    }
+}
+
+// std_kbhit() -> num (1 or 0)
+void std_kbhit(VM *vm) {
+    int hit = 0;
+#ifdef _WIN32
+    hit = _kbhit();
+#else
+    hit = mylo_linux_kbhit();
+#endif
+    vm_push(vm, hit ? 1.0 : 0.0, T_NUM);
+}
+
+// Helper to decode special keys (Platform Agnostic Logic Wrapper)
+// Returns a heap-allocated string for the key name, or NULL
+char* decode_key_event(int c, bool* is_special) {
+    *is_special = false;
+    
+    // 1. Control Codes (ASCII 1-31, excluding formatters)
+    if (c > 0 && c <= 26) {
+        // Special mapping for common controls
+        if (c == 8) return _strdup("[BACKSPACE]");
+        if (c == 9) return _strdup("[TAB]");
+        if (c == 13) return _strdup("[ENTER]");
+        if (c == 27) return _strdup("[ESC]");
+        
+        // Standard Ctrl+A to Ctrl+Z
+        char buf[16];
+        snprintf(buf, 16, "[CTRL+%c]", 'A' + c - 1);
+        *is_special = true;
+        return _strdup(buf);
+    }
+    
+    // 2. Printable Characters
+    if (c >= 32 && c <= 126) {
+        char buf[2] = { (char)c, '\0' };
+        return _strdup(buf);
+    }
+    
+    return NULL; // Unknown/Binary
+}
+
+// Helper: Windows Special Key Mapper
+#ifdef _WIN32
+char* win_map_extended(int c) {
+    switch (c) {
+        case 72: return _strdup("[UP]");
+        case 80: return _strdup("[DOWN]");
+        case 75: return _strdup("[LEFT]");
+        case 77: return _strdup("[RIGHT]");
+        case 71: return _strdup("[HOME]");
+        case 79: return _strdup("[END]");
+        case 82: return _strdup("[INS]");
+        case 83: return _strdup("[DEL]");
+        case 59: return _strdup("[F1]");
+        case 60: return _strdup("[F2]");
+        case 61: return _strdup("[F3]");
+        case 62: return _strdup("[F4]");
+        case 63: return _strdup("[F5]");
+        case 64: return _strdup("[F6]");
+        case 65: return _strdup("[F7]");
+        case 66: return _strdup("[F8]");
+        case 67: return _strdup("[F9]");
+        case 68: return _strdup("[F10]");
+        default: return NULL;
+    }
+}
+#endif
+
+// std_get_keys() -> arr
+// Returns a list of all key events currently in the buffer
+void std_get_keys(VM *vm) {
+    char* collected_keys[128]; // Max buffer per frame
+    int count = 0;
+
+#ifdef _WIN32
+    while (_kbhit() && count < 128) {
+        int ch = _getch();
+        if (ch == 0 || ch == 0xE0) {
+            // Extended key sequence (read next byte)
+            int ext = _getch();
+            char* spec = win_map_extended(ext);
+            if (spec) collected_keys[count++] = spec;
+        } else {
+            bool special = false;
+            char* s = decode_key_event(ch, &special);
+            if (s) collected_keys[count++] = s;
+        }
+    }
+#else
+    // Linux/POSIX Sequence parsing
+    while (mylo_linux_kbhit() && count < 128) {
+        int ch = mylo_linux_getch();
+        
+        if (ch == 27) { // ESC sequence start?
+            // Peek next chars non-blocking to see if it's a sequence
+            if (mylo_linux_kbhit()) {
+                int next = mylo_linux_getch();
+                if (next == '[') {
+                    int dir = mylo_linux_getch(); // A, B, C, D...
+                    switch(dir) {
+                        case 'A': collected_keys[count++] = strdup("[UP]"); break;
+                        case 'B': collected_keys[count++] = strdup("[DOWN]"); break;
+                        case 'C': collected_keys[count++] = strdup("[RIGHT]"); break;
+                        case 'D': collected_keys[count++] = strdup("[LEFT]"); break;
+                        case 'H': collected_keys[count++] = strdup("[HOME]"); break;
+                        case 'F': collected_keys[count++] = strdup("[END]"); break;
+                        default:  collected_keys[count++] = strdup("[UNKNOWN_SEQ]"); break;
+                    }
+                } else {
+                    // Alt+Key pattern (ESC followed by char)
+                    if (next >= 32 && next <= 126) {
+                        char buf[16];
+                        snprintf(buf, 16, "[ALT+%c]", (char)next);
+                        collected_keys[count++] = strdup(buf);
+                    } else {
+                        collected_keys[count++] = strdup("[ESC]");
+                        // We consumed 'next' but couldn't parse it well, ignore or map raw?
+                    }
+                }
+            } else {
+                collected_keys[count++] = strdup("[ESC]");
+            }
+        } else {
+            bool special = false;
+            char* s = decode_key_event(ch, &special);
+            if (s) collected_keys[count++] = s;
+        }
+    }
+#endif
+
+    // Construct Mylo Array
+    double ptr = heap_alloc(vm, count + HEAP_HEADER_ARRAY);
+    double* base = vm_resolve_ptr(vm, ptr);
+    int* types = vm_resolve_type(vm, ptr);
+
+    base[HEAP_OFFSET_TYPE] = TYPE_ARRAY;
+    base[HEAP_OFFSET_LEN] = (double)count;
+
+    for (int i = 0; i < count; i++) {
+        int id = make_string(vm, collected_keys[i]);
+        base[HEAP_HEADER_ARRAY + i] = (double)id;
+        types[HEAP_HEADER_ARRAY + i] = T_STR;
+        free(collected_keys[i]); // Free the C-string temp copy
+    }
+
+    vm_push(vm, ptr, T_OBJ);
+}
+
 const StdLibDef std_library[] = {
     {"len", std_len, "num", 1, {"any"}},
     {"contains", std_contains, "num", 2, {"any", "any"}},
@@ -1575,5 +1799,8 @@ const StdLibDef std_library[] = {
     {"check_worker", std_check_worker, "num", 1, {"num"}},
     {"bus_set", std_bus_set, "num", 2, {"str", "any"}},
     {"bus_get", std_bus_get, "any", 1, {"str"}},
+    {"cget", std_cget, "str", 1, {"num"}},
+    {"kbhit", std_kbhit, "num", 0, {NULL}},
+    {"get_keys", std_get_keys, "str", 0, {NULL}},
     {NULL, NULL, NULL, 0, {NULL}}
 };
