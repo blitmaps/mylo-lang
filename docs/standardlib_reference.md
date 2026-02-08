@@ -41,7 +41,10 @@ The Mylo Standard Library provides essential functions for file I/O, math, and d
     + [`read_bytes(path: str, stride: num) -> arr`](#read_bytespath-str-stride-num-arr)
     + [`write_bytes(path: str, data: arr) -> num`](#write_bytespath-str-data-arr-num)
   * [OS System & Process Management](#systemcommand-str---arr)
-  * [Multithreading](#)
+  * [Multithreading](#multithreading)
+    * [`create_worker(region: region, function_name: str) -> num`](#create_workerregion-region-function_name-str---num)
+    * [`check_worker(worker_id: num) -> num`](#check_workerworker_id-num---num)
+    * [`dock_worker(worker_id: num) -> void`](#dock_workerworker_id-num---void)
 
 
 <!-- TOC end -->
