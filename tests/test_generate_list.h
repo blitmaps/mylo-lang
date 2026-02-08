@@ -1110,6 +1110,24 @@ inline TestOutput test_thread() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_bus() {
+    std::string src = """"
+    "region foo\n"
+    "var foo::x = [0]\n"
+    "fn foo_1() {foo::x[0] = 100\n bus_set(\"test\", 42)}\n"
+    "var worker_id = create_worker(foo, \"foo_1\")\n"
+    "if (worker_id < 0) {print(1)}\n"
+    "var running = 1\n forever { if (running != 1) { break } \n  var status = check_worker(worker_id) \n"
+    "if (status == 1) { running = 0} }\n"
+    "dock_worker(worker_id)\n"
+    "var t = bus_get(\"test\")\n"
+    "print(foo::x + t)";
+    std::string expected = """"
+        "[142]\n"; // As it is an array, it is promoted to num array :')
+    return run_source_test(src, expected);
+}
+
+
 inline void test_generate_list() {
     ADD_TEST("Test Test", test_test);
     ADD_TEST("Test Print", test_hello_world);
@@ -1184,6 +1202,8 @@ inline void test_generate_list() {
     ADD_TEST("Test String Types Promotion byte -> num", test_type_promototion_bool);
     ADD_TEST("Test Vector(byte) (add())", test_vector_byte_add);
     ADD_TEST("Test Threading...", test_thread);
+    ADD_TEST("Test Bus...", test_bus);
+
 }
 
 #endif //MYLO_TEST_GENERATE_LIST_H

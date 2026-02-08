@@ -61,6 +61,9 @@
 
 #define MAP_INITIAL_CAP 16
 #define MAX_VM_FUNCTIONS 1024
+#define MAX_BUS_ENTRIES 256
+#define MAX_WORKERS 128
+
 
 // --- POINTER PACKING (Safe Generational) ---
 // We restrict the total used bits to 48 to ensure absolute safety
