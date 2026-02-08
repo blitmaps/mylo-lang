@@ -1203,7 +1203,6 @@ inline void test_generate_list() {
     ADD_TEST("Test Vector(byte) (add())", test_vector_byte_add);
     ADD_TEST("Test Threading...", test_thread);
     ADD_TEST("Test Bus...", test_bus);
-
 }
 
 #endif //MYLO_TEST_GENERATE_LIST_H

@@ -45,7 +45,9 @@ The Mylo Standard Library provides essential functions for file I/O, math, and d
     * [`create_worker(region: region, function_name: str) -> num`](#create_workerregion-region-function_name-str---num)
     * [`check_worker(worker_id: num) -> num`](#check_workerworker_id-num---num)
     * [`dock_worker(worker_id: num) -> void`](#dock_workerworker_id-num---void)
-
+  * [Universal Bus](#universal-bus)
+    * [`bus_get(key: str) -> any`](#bus_getkey-str---any)
+    * [`bus_set(key: str, value: any) -> any`](#bus_setkey-str-value-any---num)
 
 <!-- TOC end -->
 
@@ -820,4 +822,55 @@ if (worker_id < 0) {
     }
     
     clear(job_mem)
+```
+
+<a name="universal-bus"></a>
+## Universal Bus
+
+The Universal Bus is a thread-safe, global key-value store that allows all VM instances (threads) to communicate and share simple data. It uses a global lock, making it safe for concurrent access but potentially slower than region-based memory sharing.
+
+It is ideal for signaling state changes, broadcasting status updates, or sharing configuration strings between workers.
+
+<a name="bus_setkey-str-value-any-num"></a>
+### `bus_set(key: str, value: any) -> num`
+
+Stores a value in the global bus under the specified key. If the key already exists, its value is overwritten.
+
+**Arguments:**
+* `key`: A unique string identifier for the data.
+* `value`: The data to store.
+  * Supported types: Numbers (`num`) and Strings (`str`).
+  * **Note:** Passing Objects (Arrays/Maps) is not fully supported; they may be converted to a placeholder string.
+
+**Returns:**
+* `1` if the operation was successful.
+* `0` if the bus is full or an error occurred.
+
+**Example:**
+```javascript
+// Main thread sets a config
+bus_set("difficulty", 2)
+bus_set("server_msg", "Ready")
+```
+
+<a name="bus_getkey-str-any"></a>
+### `bus_get(key: str) -> any`
+
+Retrieves a value from the global bus.
+
+**Arguments:**
+* `key`: The identifier of the data to retrieve.
+
+**Returns:**
+* The stored value (Number or String).
+* Returns `0` if the key is not found.
+
+**Example:**
+```javascript
+// Worker thread reads the config
+var diff = bus_get("difficulty")
+
+if (diff > 1) {
+    print("Hard Mode Active")
+}
 ```
