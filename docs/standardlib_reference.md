@@ -41,6 +41,8 @@ The Mylo Standard Library provides essential functions for file I/O, math, and d
     + [`read_bytes(path: str, stride: num) -> arr`](#read_bytespath-str-stride-num-arr)
     + [`write_bytes(path: str, data: arr) -> num`](#write_bytespath-str-data-arr-num)
   * [OS System & Process Management](#systemcommand-str---arr)
+  * [Multithreading](#)
+
 
 <!-- TOC end -->
 
@@ -682,4 +684,137 @@ forever {
         break
     }
 }
+```
+
+<a name="multithreading"></a>
+## Multithreading
+
+Mylo implements a **Move Semantics** concurrency model. This allows for safe threading without locks or mutexes.
+
+**How it works:**
+1. You create a `region` of memory.
+2. You call `create_worker`, passing that region to a new thread.
+3. **Important:** The main thread **loses access** to that region. It effectively "gives" the memory to the worker.
+4. The worker runs, modifying data inside that region.
+5. You call `dock_worker` to join the thread.
+6. The main thread **regains access** to the region and sees the updated data.
+
+<a name="create_workerregion-num-function-str-num"></a>
+### `create_worker(region: region, function_name: str) -> num`
+
+Spawns a new thread to execute a specific function. Ownership of the provided memory region is transferred to the worker thread.
+
+**Arguments:**
+* `region`: The memory region identifier (e.g., created via `region my_mem`).
+* `function_name`: The name of the function to execute in the new thread.
+
+**Returns:**
+* A numeric `worker_id` (0 or greater) if successful.
+* `-1` if the worker could not be created (e.g., max threads reached).
+
+**Runtime Safety:**
+* Attempting to access variables within the passed `region` from the main thread *after* calling this function (but *before* docking) will result in a Runtime Error.
+
+<a name="check_workerworker_id-num-num"></a>
+### `check_worker(worker_id: num) -> num`
+
+Non-blocking check of a worker's execution status.
+
+**Arguments:**
+* `worker_id`: The ID returned by `create_worker`.
+
+**Returns:**
+* `0`: The worker is still running.
+* `1`: The worker has completed execution.
+* `-1`: Invalid worker ID or the worker is not active.
+
+
+<a name="dock_workerworker_id-num-void"></a>
+### `dock_worker(worker_id: num) -> void`
+
+Blocks the calling thread until the specified worker has finished execution. Once the worker joins, ownership of its memory region is returned to the main thread.
+
+**Arguments:**
+* `worker_id`: The ID returned by `create_worker`.
+
+**Behavior:**
+* If the worker is still running, this function waits (blocks).
+* Once returned, variables in the region passed to `create_worker` become accessible again in the main thread.
+
+#### Example
+```javascript
+// --- Threading Test Program ---
+
+// Create a region for the job
+region job_mem
+
+// 1. Declare 'result' globally so Main can see it.
+// 2. Use an Array '[0]' so the data lives in the Region (Heap), not just the stack.
+var job_mem::result = [0]
+
+// 1. Define the function that will run in the thread
+fn worker_task() {
+    print("  [Worker] Thread started. Processing...")
+    
+    // Simulate heavy work
+    var total = 0
+    for (var i in 0...5000) {
+        total = total + 1
+    }
+    
+    // [FIX] 3. Update the value inside the array
+    job_mem::result[0] = total
+    
+    print("  [Worker] Done! Result stored.")
+}
+
+// 2. Main Program
+print("[Main] Initializing...")
+
+// Initialize some data in that region
+// (Primitives like '100' are fine for read-only input because they are copied)
+var job_mem::input = 100
+
+print("[Main] Spawning worker...")
+var worker_id = create_worker(job_mem, "worker_task")
+
+if (worker_id < 0) {
+    print("[Main] Failed to create worker!")
+} else {
+    print(f"[Main] Worker running (ID: {to_string(worker_id)})")
+    
+    var running = 1
+    forever {
+        if (running != 1) {
+            break 
+        }
+        var status = check_worker(worker_id)
+        
+        // !!! WARNING !!!
+        // If we try to check job_mem here, we will get an 
+        // access violation!
+        // print(job_mem::result[0]) 
+        
+        if (status == 1) {
+            print("[Main] Worker reported complete.")
+            running = 0
+        }
+    }
+    
+    print("[Main] Docking worker...")
+    dock_worker(worker_id)
+    
+    print("[Main] Retrieving result from worker memory...")
+    
+    // 4. Read the value from the array
+    var res = job_mem::result[0]
+    print(f"[Main] Calculation Result: {to_string(res)}")
+    
+    if (res == 5000) {
+        print("[Main] SUCCESS: Threading working correctly.")
+    } else {
+        print("[Main] FAILURE: Result incorrect.")
+    }
+    
+    clear(job_mem)
 ```
