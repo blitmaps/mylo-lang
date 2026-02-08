@@ -18,7 +18,6 @@
     #include <unistd.h>
 #endif
 
-#define MAX_WORKERS 128
 
 // --- Worker Structure ---
 typedef struct {
@@ -41,8 +40,44 @@ typedef struct {
 static MyloWorker workers[MAX_WORKERS];
 static bool workers_initialized = false;
 
-// --- Helpers ---
+// A simple global key-value store protected by a mutex
+typedef struct {
+    char* key;
+    int type;
+    double num_val;
+    char* str_val;
+} BusEntry;
 
+static BusEntry global_bus[MAX_BUS_ENTRIES];
+static int bus_count = 0;
+static bool bus_initialized = false;
+
+#ifdef _WIN32
+static CRITICAL_SECTION bus_lock;
+#define LOCK_BUS EnterCriticalSection(&bus_lock)
+#define UNLOCK_BUS LeaveCriticalSection(&bus_lock)
+#define INIT_BUS_LOCK InitializeCriticalSection(&bus_lock)
+#else
+static pthread_mutex_t bus_lock = PTHREAD_MUTEX_INITIALIZER;
+#define LOCK_BUS pthread_mutex_lock(&bus_lock)
+#define UNLOCK_BUS pthread_mutex_unlock(&bus_lock)
+#define INIT_BUS_LOCK // Static init is enough for pthreads
+#endif
+
+// Helper to init the lock lazily
+static void init_bus() {
+    if (!bus_initialized) {
+#ifdef _WIN32
+        INIT_BUS_LOCK;
+#endif
+        memset(global_bus, 0, sizeof(global_bus));
+        bus_initialized = true;
+    }
+}
+
+
+
+// Workers - Threading
 static void init_workers() {
     if (!workers_initialized) {
         memset(workers, 0, sizeof(workers));
@@ -1399,6 +1434,105 @@ void std_get_job(VM *vm) {
     vm_push(vm, arr_ptr, T_OBJ);
 }
 
+// Bus commands
+// bus_set(key, value)
+void std_bus_set(VM *vm) {
+    init_bus();
+
+    // 1. Pop arguments
+    double val = vm_pop(vm);
+    int val_type = vm->stack_types[vm->sp + 1];
+
+    double key_val = vm_pop(vm);
+    // Ensure key is a string
+    if (vm->stack_types[vm->sp + 1] != T_STR) {
+        printf("Bus Error: Key must be a string.\n");
+        vm_push(vm, 0.0, T_NUM);
+        return;
+    }
+    const char* key = get_str(vm, key_val);
+
+    LOCK_BUS;
+
+    // 2. Find existing entry
+    int idx = -1;
+    for(int i = 0; i < bus_count; i++) {
+        if (global_bus[i].key && strcmp(global_bus[i].key, key) == 0) {
+            idx = i;
+            break;
+        }
+    }
+
+    // 3. Create new entry if needed
+    if (idx == -1) {
+        if (bus_count >= MAX_BUS_ENTRIES) {
+            UNLOCK_BUS;
+            // Bus full
+            vm_push(vm, 0.0, T_NUM);
+            return;
+        }
+        idx = bus_count++;
+        global_bus[idx].key = strdup(key);
+    } else {
+        // Free old string value if overwriting
+        if (global_bus[idx].type == T_STR && global_bus[idx].str_val) {
+            free(global_bus[idx].str_val);
+            global_bus[idx].str_val = NULL;
+        }
+    }
+
+    // 4. Store Value
+    // NOTE: We only support Primitives and Strings.
+    // Objects cannot be safely shared across VMs without deep serialization.
+    if (val_type == T_OBJ) {
+        // Fallback for objects: store as string representation
+        global_bus[idx].type = T_STR;
+        global_bus[idx].str_val = strdup("[Shared Object]");
+    } else if (val_type == T_STR) {
+        global_bus[idx].type = T_STR;
+        // Must copy string because the source VM might GC the original
+        global_bus[idx].str_val = strdup(get_str(vm, val));
+    } else {
+        global_bus[idx].type = T_NUM;
+        global_bus[idx].num_val = val;
+    }
+
+    UNLOCK_BUS;
+    vm_push(vm, 1.0, T_NUM); // Success
+}
+
+// bus_get(key) -> value
+void std_bus_get(VM *vm) {
+    init_bus();
+
+    double key_val = vm_pop(vm);
+    const char* key = get_str(vm, key_val);
+
+    LOCK_BUS;
+
+    for(int i = 0; i < bus_count; i++) {
+        if (global_bus[i].key && strcmp(global_bus[i].key, key) == 0) {
+            int type = global_bus[i].type;
+
+            if (type == T_NUM) {
+                vm_push(vm, global_bus[i].num_val, T_NUM);
+            } else if (type == T_STR) {
+                // Create a new string in the CALLING VM's heap
+                int id = make_string(vm, global_bus[i].str_val);
+                vm_push(vm, (double)id, T_STR);
+            } else {
+                vm_push(vm, 0.0, T_NUM);
+            }
+
+            UNLOCK_BUS;
+            return;
+        }
+    }
+
+    UNLOCK_BUS;
+    // Not found return 0 (or null equivalent)
+    vm_push(vm, 0.0, T_NUM);
+}
 
 const StdLibDef std_library[] = {
     {"len", std_len, "num", 1, {"any"}},
@@ -1439,5 +1573,7 @@ const StdLibDef std_library[] = {
     {"create_worker", std_create_worker, "num", 2, {"num", "str"}},
     {"dock_worker", std_dock_worker, "void", 1, {"num"}},
     {"check_worker", std_check_worker, "num", 1, {"num"}},
+    {"bus_set", std_bus_set, "num", 2, {"str", "any"}},
+    {"bus_get", std_bus_get, "any", 1, {"str"}},
     {NULL, NULL, NULL, 0, {NULL}}
 };

@@ -44,14 +44,20 @@ void std_for_list(VM *vm);
 void std_list_min(VM *vm);
 void std_list_max(VM *vm);
 
+// Rand
 void std_seed(VM *vm);
 void std_rand(VM *vm);
 void std_rand_normal(VM *vm);
 void std_noise(VM *vm);
 
+// Threads
 void std_create_worker(VM *vm);
 void std_dock_worker(VM *vm);
 void std_check_worker(VM *vm);
+
+// Bus Functions
+void std_bus_set(VM *vm);
+void std_bus_get(VM *vm);
 
 // Registry Declaration (Extern)
 // We do NOT define it here, only say it exists.
