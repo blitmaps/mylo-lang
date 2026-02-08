@@ -11,10 +11,44 @@
 #ifdef _WIN32
     #include <io.h>
     #include <windows.h>
+    #include <process.h>
 #else
     #include <dirent.h>
+    #include <pthread.h>
+    #include <unistd.h>
 #endif
+
+#define MAX_WORKERS 128
+
+// --- Worker Structure ---
+typedef struct {
+    bool active;
+    bool complete;
+    bool error;
+    char error_msg[256];
+#ifdef _WIN32
+    HANDLE thread;
+    unsigned threadID;
+#else
+    pthread_t thread;
+#endif
+    VM vm;              // The Worker's Isolated VM
+    int region_id;      // The Region ID this worker owns
+    MemoryArena arena;  // The actual memory of that region
+    char entry_func[64];
+} MyloWorker;
+
+static MyloWorker workers[MAX_WORKERS];
+static bool workers_initialized = false;
+
 // --- Helpers ---
+
+static void init_workers() {
+    if (!workers_initialized) {
+        memset(workers, 0, sizeof(workers));
+        workers_initialized = true;
+    }
+}
 
 static const char *get_str(VM *vm, double val) {
     int id = (int) val;
@@ -28,7 +62,227 @@ void trim_newline(char *str) {
     if (len > 1 && str[len - 2] == '\r') str[len - 2] = '\0';
 }
 
+// --- Thread Worker Function ---
+
+#ifdef _WIN32
+unsigned __stdcall mylo_worker_entry(void* arg) {
+#else
+void* mylo_worker_entry(void* arg) {
+#endif
+    MyloWorker* worker = (MyloWorker*)arg;
+    VM* vm = &worker->vm;
+
+    // 1. Inject the Region
+    // We place the arena into the SAME slot ID it had in the parent.
+    // This ensures pointers (which encode the Arena ID) remain valid.
+    vm->arenas[worker->region_id] = worker->arena;
+    vm->current_arena = worker->region_id;
+
+    // 2. Locate Entry Point
+    int func_addr = vm_find_function(vm, worker->entry_func);
+    if (func_addr == -1) {
+        worker->error = true;
+        snprintf(worker->error_msg, 256, "Function '%s' not found in worker.", worker->entry_func);
+    } else {
+        // [FIX] 3. Setup Dummy Stack Frame
+        // The worker function is compiled as a standard function, so it ends with OP_RET.
+        // OP_RET expects [Return IP, Old FP] on the stack.
+        
+        // Push "Exit" Address. 
+        // When the function returns, it will try to jump to this address. 
+        // We use code_size so the run_vm loop sees (ip < code_size) as false and terminates naturally.
+        vm_push(vm, (double)vm->code_size, T_NUM); 
+
+        // Push "Old FP". 0 is fine.
+        vm_push(vm, 0.0, T_NUM);
+
+        // Set Frame Pointer to just after these two (where locals would start)
+        vm->fp = vm->sp + 1;
+
+        // 4. Run
+        run_vm_from(vm, func_addr, false);
+    }
+
+    // 5. Extract Region State (Move Semantics: Take it back)
+    // The VM state might have updated the head/generation of the arena.
+    worker->arena = vm->arenas[worker->region_id];
+
+    // 6. Protect Memory from Cleanup
+    // We nullify the pointer in the VM so vm_cleanup doesn't free the memory
+    // we want to return to the main thread.
+    vm->arenas[worker->region_id].memory = NULL;
+    vm->arenas[worker->region_id].types = NULL;
+
+    // 7. Cleanup Worker VM (Frees code, stack, constants, etc.)
+    vm_cleanup(vm);
+
+    worker->complete = true;
+
+#ifdef _WIN32
+    return 0;
+#else
+    return NULL;
+#endif
+}
+
 // --- Standard Library Functions ---
+
+// std_create_worker(region, "function_name") -> worker_id
+void std_create_worker(VM *vm) {
+    init_workers();
+
+    double func_id = vm_pop(vm);
+    double region_val = vm_pop(vm); // This is the region ID (num)
+
+    int region_id = (int)region_val;
+    const char* func_name = get_str(vm, func_id);
+
+    // 1. Validation
+    if (region_id <= 0 || region_id >= MAX_ARENAS) {
+        printf("Runtime Error: Invalid Region ID %d for worker.\n", region_id);
+        exit(1);
+    }
+    if (!vm->arenas[region_id].active) {
+        printf("Runtime Error: Region %d is not active.\n", region_id);
+        exit(1);
+    }
+
+    // 2. Find Slot
+    int slot = -1;
+    for (int i = 0; i < MAX_WORKERS; i++) {
+        if (!workers[i].active) {
+            slot = i;
+            break;
+        }
+    }
+
+    if (slot == -1) {
+        vm_push(vm, -1.0, T_NUM); // No free workers
+        return;
+    }
+
+    MyloWorker* w = &workers[slot];
+    w->active = true;
+    w->complete = false;
+    w->error = false;
+    w->region_id = region_id;
+    strncpy(w->entry_func, func_name, 63);
+
+    // 3. Move Semantics: Steal Arena from Main VM
+    w->arena = vm->arenas[region_id];
+
+    // Disable in Main VM (It is now owned by the worker)
+    vm->arenas[region_id].active = false;
+    vm->arenas[region_id].memory = NULL; // Prevent main VM from freeing it if it crashes
+    vm->arenas[region_id].types = NULL;
+
+    // 4. Initialize Worker VM
+    // We must clone the "Read-Only" parts of the VM (Code, Constants, Strings)
+    // so the worker has the same program definition.
+    VM* child = &w->vm;
+    vm_init(child);
+
+    // Copy Code
+    child->code_size = vm->code_size;
+    memcpy(child->bytecode, vm->bytecode, vm->code_size * sizeof(int));
+    memcpy(child->lines, vm->lines, vm->code_size * sizeof(int));
+
+    // Copy Constants
+    child->const_count = vm->const_count;
+    memcpy(child->constants, vm->constants, vm->const_count * sizeof(double));
+
+    // Copy Strings
+    child->str_count = vm->str_count;
+    memcpy(child->string_pool, vm->string_pool, vm->str_count * MAX_STRING_LENGTH);
+
+    // Copy Function Table
+    child->function_count = vm->function_count;
+    memcpy(child->functions, vm->functions, vm->function_count * sizeof(VMFunction));
+
+    // Copy Globals (Optional, but often needed for constants/config)
+    // NOTE: Globals are copied by value. Workers do NOT share global state updates.
+    child->global_symbol_count = vm->global_symbol_count;
+    // We don't have direct access to symbol names here easily without re-parsing,
+    // but the VM struct has global_symbols if debug info was generated.
+    // For runtime execution, we just need the values.
+    memcpy(child->globals, vm->globals, MAX_GLOBALS * sizeof(double));
+    memcpy(child->global_types, vm->global_types, MAX_GLOBALS * sizeof(int));
+
+    // Register Native Functions (Standard Library)
+    // We iterate the std_library array to re-bind pointers
+    int li = 0;
+    while (std_library[li].name != NULL) {
+        child->natives[li] = std_library[li].func;
+        li++;
+    }
+
+    // 5. Spawn Thread
+#ifdef _WIN32
+    w->thread = (HANDLE)_beginthreadex(NULL, 0, &mylo_worker_entry, w, 0, &w->threadID);
+#else
+    pthread_create(&w->thread, NULL, &mylo_worker_entry, w);
+#endif
+
+    vm_push(vm, (double)slot, T_NUM);
+}
+
+// std_dock_worker(worker_id) -> void
+// Blocks until worker is done, then returns the region to the main VM.
+void std_dock_worker(VM *vm) {
+    double id_val = vm_pop(vm);
+    int slot = (int)id_val;
+
+    if (slot < 0 || slot >= MAX_WORKERS || !workers[slot].active) {
+        printf("Runtime Error: Invalid or inactive worker ID %d\n", slot);
+        exit(1);
+    }
+
+    MyloWorker* w = &workers[slot];
+
+    // 1. Join Thread (Block)
+#ifdef _WIN32
+    WaitForSingleObject(w->thread, INFINITE);
+    CloseHandle(w->thread);
+#else
+    pthread_join(w->thread, NULL);
+#endif
+
+    if (w->error) {
+        printf("Worker Error: %s\n", w->error_msg);
+    }
+
+    // 2. Restore Arena to Main VM
+    // We put it back in the exact same slot.
+    int rid = w->region_id;
+    vm->arenas[rid] = w->arena;
+    // Ensure it is marked active in Main
+    vm->arenas[rid].active = true;
+
+    // 3. Free Worker Slot
+    w->active = false;
+
+    vm_push(vm, 0.0, T_NUM);
+}
+
+// std_check_worker(worker_id) -> status code
+// 0: Running, 1: Complete, -1: Error/Invalid
+void std_check_worker(VM *vm) {
+    double id_val = vm_pop(vm);
+    int slot = (int)id_val;
+
+    if (slot < 0 || slot >= MAX_WORKERS || !workers[slot].active) {
+        vm_push(vm, -1.0, T_NUM);
+        return;
+    }
+
+    if (workers[slot].complete) {
+        vm_push(vm, 1.0, T_NUM);
+    } else {
+        vm_push(vm, 0.0, T_NUM);
+    }
+}
+
+// --- Previous Standard Lib Functions (unchanged) ---
 
 void std_sqrt(VM *vm) { vm_push(vm, sqrt(vm_pop(vm)), T_NUM); }
 void std_sin(VM *vm) { vm_push(vm, sin(vm_pop(vm)), T_NUM); }
@@ -46,11 +300,9 @@ void std_len(VM *vm) {
 
         int type = (int)base[HEAP_OFFSET_TYPE];
 
-        // Support Generic Arrays, Byte Arrays, and Typed Arrays (i32[], f32[], etc)
         if(type == TYPE_ARRAY || type == TYPE_BYTES || (type <= TYPE_I16_ARRAY && type >= TYPE_BOOL_ARRAY)) {
             vm_push(vm, base[HEAP_OFFSET_LEN], T_NUM);
         }
-        // Support Maps (Count is at offset 2)
         else if (type == TYPE_MAP) {
             vm_push(vm, base[HEAP_OFFSET_COUNT], T_NUM);
         }
@@ -140,7 +392,6 @@ void std_to_string(VM *vm) {
     } else if (type == T_STR) {
         vm_push(vm, val, T_STR);
     } else if (type == T_OBJ) {
-        // Can't print address effectively with packed pointer, just print type indicator
         char buf[64];
         snprintf(buf, 64, "[Object]");
         int str_id = make_string(vm, buf);
@@ -310,7 +561,6 @@ void std_write_bytes(VM *vm) {
     vm_push(vm, 1.0, T_NUM);
 }
 
-// Usage: var x = list(100)
 void std_list(VM *vm) {
     double size_val = vm_pop(vm);
     int size = (int)size_val;
@@ -639,8 +889,6 @@ void std_for_list(VM *vm) {
     res_base[1] = (double)len;
 
     for(int i=0; i<len; i++) {
-         // Reload base/types inside loop in case allocation moved things (if using realloc, but we aren't yet)
-         // But context switch might happen? No, stdlib is atomic.
          double val = base[HEAP_HEADER_ARRAY + i];
          int type = types[HEAP_HEADER_ARRAY + i];
 
@@ -1188,5 +1436,8 @@ const StdLibDef std_library[] = {
     {"system", std_system, "arr", 1, {"str"}},
     {"system_thread", std_system_thread, "num", 2, {"str", "str"}},
     {"get_job", std_get_job, "any", 1, {"str"}},
+    {"create_worker", std_create_worker, "num", 2, {"num", "str"}},
+    {"dock_worker", std_dock_worker, "void", 1, {"num"}},
+    {"check_worker", std_check_worker, "num", 1, {"num"}},
     {NULL, NULL, NULL, 0, {NULL}}
 };

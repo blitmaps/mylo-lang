@@ -49,6 +49,10 @@ void std_rand(VM *vm);
 void std_rand_normal(VM *vm);
 void std_noise(VM *vm);
 
+void std_create_worker(VM *vm);
+void std_dock_worker(VM *vm);
+void std_check_worker(VM *vm);
+
 // Registry Declaration (Extern)
 // We do NOT define it here, only say it exists.
 extern const StdLibDef std_library[];
