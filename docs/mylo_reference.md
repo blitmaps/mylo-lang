@@ -398,7 +398,7 @@ For loops can be range based, checked or iterated. See here:
 <a name="range-based"></a>
 #### Range Based
 ```javascript
-// This is a loop to count from 0 to 4
+// This is a loop to count from 0 to 5, and is the same as range(0,1,5) => [0,1,2,3,4,5]
 for (var x in 0...5) {
     print(x)
 }
@@ -411,6 +411,7 @@ output:
 2
 3
 4
+5
 ```
 
 <a name="checked"></a>

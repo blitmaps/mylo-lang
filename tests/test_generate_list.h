@@ -176,7 +176,7 @@ inline TestOutput test_literal_loop() {
     "}";
 
     std::string expected = """"
-    "0\n1\n2\n3\n4\n";
+    "0\n1\n2\n3\n4\n5\n";
 
     return run_source_test(src, expected);
 }
@@ -188,7 +188,7 @@ inline TestOutput test_literal_reverse() {
     "}";
 
     std::string expected = """"
-    "5\n4\n3\n2\n1\n";
+    "5\n4\n3\n2\n1\n0\n";
 
     return run_source_test(src, expected);
 }
@@ -204,7 +204,7 @@ inline TestOutput test_variable_loop() {
     "}";
 
     std::string expected = """"
-    "3\n4\n4\n3\n";
+    "3\n4\n5\n5\n4\n3\n";
 
     return run_source_test(src, expected);
 }
@@ -564,7 +564,7 @@ inline TestOutput test_for_continue() {
     "}\n";
 
     std::string expected = """"
-    "2\n3\n4\n";
+    "2\n3\n4\n5\n";
 
     return run_source_test(src, expected);
 }
