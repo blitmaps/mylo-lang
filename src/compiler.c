@@ -155,6 +155,7 @@ void parse_struct_literal(int struct_idx);
 void parse_map_literal();
 void expression();
 void statement();
+void range_expr();
 
 void print_line_slice(char *start, char *end) {
     while (start < end) { fputc(*start, stderr); start++; }
@@ -1012,11 +1013,11 @@ void additive_expr() {
 }
 
 void relation_expr() {
-    additive_expr();
+    range_expr();
     while (curr.type >= TK_LT && curr.type <= TK_NEQ) {
         MyloTokenType op = curr.type;
         next_token();
-        additive_expr();
+        range_expr();
         switch (op) {
             case TK_LT: emit(OP_LT);
                 break;
@@ -1035,6 +1036,14 @@ void relation_expr() {
     }
 }
 
+void range_expr() {
+    additive_expr();
+    if (curr.type == TK_RANGE) {
+        match(TK_RANGE);
+        additive_expr();
+        emit(OP_RANGE);
+    }
+}
 void logic_or_expr() {
     relation_expr(); // Lower precedence (comparisons)
     while (curr.type == TK_OR) {
@@ -1736,74 +1745,6 @@ void for_statement() {
         match(TK_IN);
         expression();
 
-        if (curr.type == TK_RANGE) {
-            if (is_pair) error("Cannot unpack key/value from range loop");
-            EMIT_SET(is_local, var1_addr);
-            match(TK_RANGE);
-            int t = make_const(compiling_vm, curr.val_float);
-            match(TK_NUM);
-            int s = alloc_var(is_local, "_step", TYPE_ANY, false);
-            EMIT_GET(is_local, var1_addr);
-            emit(OP_PSH_NUM);
-            emit(t);
-            emit(OP_LT);
-            emit(OP_JZ);
-            int p1 = compiling_vm->code_size;
-            emit(0);
-            emit(OP_PSH_NUM);
-            emit(make_const(compiling_vm, 1.0));
-            emit(OP_JMP);
-            int p2 = compiling_vm->code_size;
-            emit(0);
-            compiling_vm->bytecode[p1] = compiling_vm->code_size;
-            EMIT_GET(is_local, var1_addr);
-            emit(OP_PSH_NUM);
-            emit(t);
-            emit(OP_GT);
-            emit(OP_JZ);
-            int p3 = compiling_vm->code_size;
-            emit(0);
-            emit(OP_PSH_NUM);
-            emit(make_const(compiling_vm, -1.0));
-            emit(OP_JMP);
-            int p4 = compiling_vm->code_size;
-            emit(0);
-            compiling_vm->bytecode[p3] = compiling_vm->code_size;
-            emit(OP_PSH_NUM);
-            emit(make_const(compiling_vm, 0.0));
-            compiling_vm->bytecode[p2] = compiling_vm->code_size;
-            compiling_vm->bytecode[p4] = compiling_vm->code_size;
-            if (!is_local) {
-                emit(OP_SET);
-                emit(s);
-            }
-            int loop = compiling_vm->code_size;
-            match(TK_RPAREN);
-            match(TK_LBRACE);
-            while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
-
-            // FIX: Ensure jump back is associated with the brace line
-            int brace_line = curr.line;
-            match(TK_RBRACE);
-
-            int continue_dest = compiling_vm->code_size;
-            EMIT_GET(is_local, var1_addr);
-            EMIT_GET(is_local, s);
-            emit(OP_ADD);
-            EMIT_SET(is_local, var1_addr);
-            emit(OP_PSH_NUM);
-            emit(t);
-            EMIT_GET(is_local, var1_addr);
-            emit(OP_SUB);
-            emit(OP_JNZ);
-
-            // PATCH: Set the line number of the JMP to the brace line
-            emit(loop);
-            compiling_vm->lines[compiling_vm->code_size - 1] = brace_line;
-
-            pop_loop(continue_dest, compiling_vm->code_size);
-            return;
-        } else {
             int a = alloc_var(is_local, "_arr", TYPE_ANY, true);
             if (!is_local) {
                 emit(OP_SET);
@@ -1862,7 +1803,7 @@ void for_statement() {
             compiling_vm->bytecode[exit] = compiling_vm->code_size;
             pop_loop(continue_dest, compiling_vm->code_size);
         }
-    } else {
+     else {
         push_loop();
         int loop = compiling_vm->code_size;
         expression();

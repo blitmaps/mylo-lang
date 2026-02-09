@@ -39,6 +39,7 @@ const char *OP_NAMES[] = {
     "CAST",
     "CHECK_TYPE",
     "OR",
+    "RANGE",
     "DEBUGGER"
 };
 
@@ -1609,6 +1610,33 @@ int vm_step(VM* vm, bool debug_trace) {
             // Logic: result is 1.0 if either a or b is non-zero, else 0.0
             vm->stack[vm->sp] = (a != 0.0 || b != 0.0) ? 1.0 : 0.0;
             vm->stack_types[vm->sp] = T_NUM;
+            break;
+        }
+        case OP_RANGE: {
+            CHECK_STACK(2);
+            double stop = vm_pop(vm);
+            double start = vm_pop(vm); // Pop but we need to push array back, so just pop both.
+
+            // Auto-direction: 0...5 (step 1), 5...0 (step -1)
+            double step = (stop >= start) ? 1.0 : -1.0;
+            int count = (int)(fabs(stop - start)) + 1;
+            if (count < 0) count = 0; // Safety
+
+            double ptr = heap_alloc(vm, count + HEAP_HEADER_ARRAY);
+            double* base = vm_resolve_ptr(vm, ptr);
+            int* types = vm_resolve_type(vm, ptr);
+
+            base[HEAP_OFFSET_TYPE] = TYPE_ARRAY;
+            base[HEAP_OFFSET_LEN] = (double)count;
+
+            double val = start;
+            for(int i=0; i<count; i++) {
+                base[HEAP_HEADER_ARRAY + i] = val;
+                types[HEAP_HEADER_ARRAY + i] = T_NUM;
+                val += step;
+            }
+
+            vm_push(vm, ptr, T_OBJ);
             break;
         }
         // 2. TUI Manual Breakpoint

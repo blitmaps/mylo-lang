@@ -198,10 +198,13 @@ inline TestOutput test_variable_loop() {
     "var x = 3\n"
     "for (var i in x...5) {\n"
     "print(i)"
+    "}"
+    "for (var i in 5...x) {\n"
+    "print(i)"
     "}";
 
     std::string expected = """"
-    "3\n4\n";
+    "3\n4\n4\n3\n";
 
     return run_source_test(src, expected);
 }

@@ -61,11 +61,13 @@ typedef enum {
     OP_CAST,
     OP_CHECK_TYPE,
     OP_OR,
+    OP_RANGE, // [INSERT] New Opcode
     OP_DEBUGGER
 } OpCode;
 
 extern const char *OP_NAMES[];
 
+// ... [Rest of file unchanged] ...
 typedef struct {
     char name[64];
     int addr;
