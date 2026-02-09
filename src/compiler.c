@@ -1735,54 +1735,55 @@ void for_statement() {
         }
     }
 
+    // [FIX] Snapshot local count to implement scope cleanup
+    int saved_local_count = local_count;
+    bool is_local_scope = inside_function;
+
     if (is_iter) {
         push_loop();
         int var1_addr = -1;
         int var2_addr = -1;
-        bool is_local = inside_function;
-        var1_addr = get_var_addr(name1, is_local, explicit_type);
-        if (is_pair) var2_addr = get_var_addr(name2, is_local, explicit_type);
+
+        var1_addr = get_var_addr(name1, is_local_scope, explicit_type);
+        if (is_pair) var2_addr = get_var_addr(name2, is_local_scope, explicit_type);
         match(TK_IN);
-        expression(); // Pushes Array onto stack
+        expression(); // Pushes Array
 
-        // [FIXED] Iterator Array Storage
-        int a = alloc_var(is_local, "_arr", TYPE_ANY, true);
-        if (!is_local) {
-            emit(OP_SET); emit(a); // Global: Pop stack -> Global memory
-        }
-        // Local: Value is already on stack at the correct slot. Do nothing.
+        // Iterator Array
+        int a = alloc_var(is_local_scope, "_arr", TYPE_ANY, true);
+        if (!is_local_scope) { emit(OP_SET); emit(a); }
+        // Local: Implicitly on stack
 
-        // [FIXED] Iterator Index Storage
-        int i = alloc_var(is_local, "_idx", TYPE_NUM, false);
+        // Iterator Index
+        int i = alloc_var(is_local_scope, "_idx", TYPE_NUM, false);
         emit(OP_PSH_NUM);
-        emit(make_const(compiling_vm, 0.0)); // Push 0
-        if (!is_local) {
-            emit(OP_SET); emit(i); // Global: Pop 0 -> Global memory
-        }
-        // Local: 0 is now on stack at correct slot. Do nothing.
+        emit(make_const(compiling_vm, 0.0));
+        if (!is_local_scope) { emit(OP_SET); emit(i); }
+        // Local: Implicitly on stack
 
         int loop = compiling_vm->code_size;
-        EMIT_GET(is_local, i);
-        EMIT_GET(is_local, a);
+        EMIT_GET(is_local_scope, i);
+        EMIT_GET(is_local_scope, a);
         emit(OP_ALEN);
         emit(OP_LT);
         emit(OP_JZ);
         int exit = compiling_vm->code_size;
         emit(0);
+
         if (is_pair) {
-            EMIT_GET(is_local, a);
-            EMIT_GET(is_local, i);
+            EMIT_GET(is_local_scope, a);
+            EMIT_GET(is_local_scope, i);
             emit(OP_IT_KEY);
-            EMIT_SET(is_local, var1_addr);
-            EMIT_GET(is_local, a);
-            EMIT_GET(is_local, i);
+            EMIT_SET(is_local_scope, var1_addr);
+            EMIT_GET(is_local_scope, a);
+            EMIT_GET(is_local_scope, i);
             emit(OP_IT_VAL);
-            EMIT_SET(is_local, var2_addr);
+            EMIT_SET(is_local_scope, var2_addr);
         } else {
-            EMIT_GET(is_local, a);
-            EMIT_GET(is_local, i);
+            EMIT_GET(is_local_scope, a);
+            EMIT_GET(is_local_scope, i);
             emit(OP_IT_DEF);
-            EMIT_SET(is_local, var1_addr);
+            EMIT_SET(is_local_scope, var1_addr);
         }
         match(TK_RPAREN);
         match(TK_LBRACE);
@@ -1792,20 +1793,31 @@ void for_statement() {
         match(TK_RBRACE);
 
         int continue_dest = compiling_vm->code_size;
-        EMIT_GET(is_local, i);
+        EMIT_GET(is_local_scope, i);
         emit(OP_PSH_NUM);
         emit(make_const(compiling_vm, 1.0));
         emit(OP_ADD);
-        EMIT_SET(is_local, i);
+        EMIT_SET(is_local_scope, i);
         emit(OP_JMP);
 
         emit(loop);
         compiling_vm->lines[compiling_vm->code_size - 1] = brace_line;
 
         compiling_vm->bytecode[exit] = compiling_vm->code_size;
+
+        // [FIX] Runtime Cleanup
+        if (is_local_scope) {
+            // We need to pop everything allocated since the start of the loop
+            // This includes _arr, _idx, loop vars (name1), and any vars declared inside body
+            int vars_to_pop = local_count - saved_local_count;
+            for(int k=0; k<vars_to_pop; k++) emit(OP_POP);
+
+            // Compiler cleanup: reset counter so slots are reused
+            local_count = saved_local_count;
+        }
+
         pop_loop(continue_dest, compiling_vm->code_size);
     } else {
-        // Standard C-style loop (condition check only)
         push_loop();
         int loop = compiling_vm->code_size;
         expression();
@@ -1825,6 +1837,14 @@ void for_statement() {
         compiling_vm->lines[compiling_vm->code_size - 2] = brace_line;
 
         compiling_vm->bytecode[exit] = compiling_vm->code_size;
+
+        // [FIX] Runtime Cleanup for C-style loops too (if they declare vars inside)
+        if (is_local_scope) {
+            int vars_to_pop = local_count - saved_local_count;
+            for(int k=0; k<vars_to_pop; k++) emit(OP_POP);
+            local_count = saved_local_count;
+        }
+
         pop_loop(loop, compiling_vm->code_size);
     }
 }
