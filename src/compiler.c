@@ -39,6 +39,7 @@ typedef enum {
     TK_CLEAR,
     TK_MONITOR,
     TK_DEBUGGER,
+    TK_OR
 } MyloTokenType;
 
 // Token Names for pretty printing
@@ -54,7 +55,7 @@ const char *TOKEN_NAMES[] = {
     "break", "continue", "enum", "module_path",
     "true", "false", "*", "/", "%",
     "embed", "Type Definition", "region", "clear", "monitor",
-    "debugger"
+    "debugger","||",
 };
 
 const char *get_token_name(MyloTokenType t) {
@@ -529,6 +530,7 @@ void next_token() {
         case '>': if (*src == '=') { src++; curr.type = TK_GE; } else curr.type = TK_GT; break;
         case '!': if (*src == '=') { src++; curr.type = TK_NEQ; } else error("Unexpected char '!'"); break;
         case '=': if (*src == '=') { src++; curr.type = TK_EQ; } else curr.type = TK_EQ_ASSIGN; break;
+        case '|': if (*src == '|') { src++; curr.type = TK_OR; } else error("Unexpected char '|'"); break;
         default: error("Unknown char '%c'", *(src - 1));
     }
     curr.length = (int) (src - curr.start);
@@ -1033,8 +1035,17 @@ void relation_expr() {
     }
 }
 
+void logic_or_expr() {
+    relation_expr(); // Lower precedence (comparisons)
+    while (curr.type == TK_OR) {
+        match(TK_OR);
+        relation_expr();
+        emit(OP_OR);
+    }
+}
+
 void expression() {
-    relation_expr();
+    logic_or_expr();
     if (curr.type == TK_QUESTION) {
         match(TK_QUESTION);
         emit(OP_JZ);

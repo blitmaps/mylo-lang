@@ -81,6 +81,20 @@ inline TestOutput test_math_simple() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_logic() {
+    std::string src = """"
+    "if (0 < 1) {print(1)} else {print(0)}\n"
+    "if (1 > 1) {print(0)} else {print(1)}\n"
+    "if (1 >= 1) {print(1)} else {print(0)}\n"
+    "if (1 == 1) {print(1)} else {print(0)}\n"
+    "if (1 || 0) {print(1)} else {print(0)}\n"
+    "if (1 != 0) {print(1)} else {print(0)}\n"
+    "if (0 <= 1) {print(1)} else {print(0)}\n";
+    std::string expected = """"
+        "1\n1\n1\n1\n1\n1\n1\n"; // As it is an array, it is promoted to num array :')
+    return run_source_test(src, expected);
+}
+
 
 inline TestOutput test_change_types() {
 
@@ -1132,6 +1146,7 @@ inline void test_generate_list() {
     ADD_TEST("Test Test", test_test);
     ADD_TEST("Test Print", test_hello_world);
     ADD_TEST("Test Simple Math", test_math_simple);
+    ADD_TEST("Test Logic", test_logic);
     ADD_TEST("Test Change Types", test_change_types);
     ADD_TEST("Test Fib(10)", test_fib);
     ADD_TEST("Test If Statements", test_ifs);

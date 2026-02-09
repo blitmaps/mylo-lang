@@ -38,6 +38,7 @@ const char *OP_NAMES[] = {
     "MONITOR",
     "CAST",
     "CHECK_TYPE",
+    "OR",
     "DEBUGGER"
 };
 
@@ -1599,6 +1600,15 @@ int vm_step(VM* vm, bool debug_trace) {
         case OP_CHECK_TYPE: {
             int target = vm->bytecode[vm->ip++];
             exec_cast_op(vm, target, true);
+            break;
+        }
+        case OP_OR: {
+            CHECK_STACK(2);
+            double b = vm_pop(vm);
+            double a = vm->stack[vm->sp]; // Peek 'a' to overwrite it
+            // Logic: result is 1.0 if either a or b is non-zero, else 0.0
+            vm->stack[vm->sp] = (a != 0.0 || b != 0.0) ? 1.0 : 0.0;
+            vm->stack_types[vm->sp] = T_NUM;
             break;
         }
         // 2. TUI Manual Breakpoint

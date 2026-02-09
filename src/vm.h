@@ -60,6 +60,7 @@ typedef enum {
     OP_MONITOR,
     OP_CAST,
     OP_CHECK_TYPE,
+    OP_OR,
     OP_DEBUGGER
 } OpCode;
 
