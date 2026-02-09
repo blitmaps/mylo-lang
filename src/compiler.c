@@ -1743,67 +1743,69 @@ void for_statement() {
         var1_addr = get_var_addr(name1, is_local, explicit_type);
         if (is_pair) var2_addr = get_var_addr(name2, is_local, explicit_type);
         match(TK_IN);
-        expression();
+        expression(); // Pushes Array onto stack
 
-            int a = alloc_var(is_local, "_arr", TYPE_ANY, true);
-            if (!is_local) {
-                emit(OP_SET);
-                emit(a);
-            }
-            int i = alloc_var(is_local, "_idx", TYPE_NUM, false);
-            emit(OP_PSH_NUM);
-            emit(make_const(compiling_vm, 0.0));
-            if (!is_local) {
-                emit(OP_SET);
-                emit(i);
-            }
-            int loop = compiling_vm->code_size;
-            EMIT_GET(is_local, i);
-            EMIT_GET(is_local, a);
-            emit(OP_ALEN);
-            emit(OP_LT);
-            emit(OP_JZ);
-            int exit = compiling_vm->code_size;
-            emit(0);
-            if (is_pair) {
-                EMIT_GET(is_local, a);
-                EMIT_GET(is_local, i);
-                emit(OP_IT_KEY);
-                EMIT_SET(is_local, var1_addr);
-                EMIT_GET(is_local, a);
-                EMIT_GET(is_local, i);
-                emit(OP_IT_VAL);
-                EMIT_SET(is_local, var2_addr);
-            } else {
-                EMIT_GET(is_local, a);
-                EMIT_GET(is_local, i);
-                emit(OP_IT_DEF);
-                EMIT_SET(is_local, var1_addr);
-            }
-            match(TK_RPAREN);
-            match(TK_LBRACE);
-            while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
-
-            // FIX: Ensure jump back is associated with the brace line
-            int brace_line = curr.line;
-            match(TK_RBRACE);
-
-            int continue_dest = compiling_vm->code_size;
-            EMIT_GET(is_local, i);
-            emit(OP_PSH_NUM);
-            emit(make_const(compiling_vm, 1.0));
-            emit(OP_ADD);
-            EMIT_SET(is_local, i);
-            emit(OP_JMP);
-
-            // PATCH: Set the line number of the JMP to the brace line
-            emit(loop);
-            compiling_vm->lines[compiling_vm->code_size - 1] = brace_line;
-
-            compiling_vm->bytecode[exit] = compiling_vm->code_size;
-            pop_loop(continue_dest, compiling_vm->code_size);
+        // [FIXED] Iterator Array Storage
+        int a = alloc_var(is_local, "_arr", TYPE_ANY, true);
+        if (!is_local) {
+            emit(OP_SET); emit(a); // Global: Pop stack -> Global memory
         }
-     else {
+        // Local: Value is already on stack at the correct slot. Do nothing.
+
+        // [FIXED] Iterator Index Storage
+        int i = alloc_var(is_local, "_idx", TYPE_NUM, false);
+        emit(OP_PSH_NUM);
+        emit(make_const(compiling_vm, 0.0)); // Push 0
+        if (!is_local) {
+            emit(OP_SET); emit(i); // Global: Pop 0 -> Global memory
+        }
+        // Local: 0 is now on stack at correct slot. Do nothing.
+
+        int loop = compiling_vm->code_size;
+        EMIT_GET(is_local, i);
+        EMIT_GET(is_local, a);
+        emit(OP_ALEN);
+        emit(OP_LT);
+        emit(OP_JZ);
+        int exit = compiling_vm->code_size;
+        emit(0);
+        if (is_pair) {
+            EMIT_GET(is_local, a);
+            EMIT_GET(is_local, i);
+            emit(OP_IT_KEY);
+            EMIT_SET(is_local, var1_addr);
+            EMIT_GET(is_local, a);
+            EMIT_GET(is_local, i);
+            emit(OP_IT_VAL);
+            EMIT_SET(is_local, var2_addr);
+        } else {
+            EMIT_GET(is_local, a);
+            EMIT_GET(is_local, i);
+            emit(OP_IT_DEF);
+            EMIT_SET(is_local, var1_addr);
+        }
+        match(TK_RPAREN);
+        match(TK_LBRACE);
+        while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
+
+        int brace_line = curr.line;
+        match(TK_RBRACE);
+
+        int continue_dest = compiling_vm->code_size;
+        EMIT_GET(is_local, i);
+        emit(OP_PSH_NUM);
+        emit(make_const(compiling_vm, 1.0));
+        emit(OP_ADD);
+        EMIT_SET(is_local, i);
+        emit(OP_JMP);
+
+        emit(loop);
+        compiling_vm->lines[compiling_vm->code_size - 1] = brace_line;
+
+        compiling_vm->bytecode[exit] = compiling_vm->code_size;
+        pop_loop(continue_dest, compiling_vm->code_size);
+    } else {
+        // Standard C-style loop (condition check only)
         push_loop();
         int loop = compiling_vm->code_size;
         expression();
@@ -1814,16 +1816,13 @@ void for_statement() {
         match(TK_LBRACE);
         while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
 
-        // FIX: Ensure jump back is associated with the brace line
         int brace_line = curr.line;
         match(TK_RBRACE);
 
         emit(OP_JMP);
         emit(loop);
-
-        // PATCH: Set the line number of the JMP to the brace line
         compiling_vm->lines[compiling_vm->code_size - 1] = brace_line;
-        compiling_vm->lines[compiling_vm->code_size - 2] = brace_line; // Patch both operand and opcode
+        compiling_vm->lines[compiling_vm->code_size - 2] = brace_line;
 
         compiling_vm->bytecode[exit] = compiling_vm->code_size;
         pop_loop(loop, compiling_vm->code_size);

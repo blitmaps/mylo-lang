@@ -1144,6 +1144,42 @@ inline TestOutput test_bus() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_iterator_from_region_in_func() {
+
+    std::string src = """"
+    "region foo\n"
+    "var foo::dim = 3\n"
+    "fn bar() {\n"
+    "for (var x in 0...foo::dim) {\n"
+        "print(x)\n"
+    "}\n"
+    "}"
+    "bar()";
+
+    std::string expected = """"
+    "0\n1\n2\n3\n";
+
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_nested_iterator_from_region_in_func() {
+
+    std::string src = """"
+    "region foo\n"
+    "var foo::dim = 3\n"
+    "fn bar() {\n"
+    "for (var x in 0...foo::dim) {\n"
+        "print(x)\n"
+    "}\n"
+    "}"
+    "fn goo() { bar()}\n goo()";
+
+    std::string expected = """"
+    "0\n1\n2\n3\n";
+
+    return run_source_test(src, expected);
+}
+
 
 inline void test_generate_list() {
     ADD_TEST("Test Test", test_test);
@@ -1221,6 +1257,9 @@ inline void test_generate_list() {
     ADD_TEST("Test Vector(byte) (add())", test_vector_byte_add);
     ADD_TEST("Test Threading...", test_thread);
     ADD_TEST("Test Bus...", test_bus);
+    ADD_TEST("Test Iterator in Func from Region", test_iterator_from_region_in_func);
+    ADD_TEST("Test Iterator in Func from Region Nest", test_nested_iterator_from_region_in_func);
+
 }
 
 #endif //MYLO_TEST_GENERATE_LIST_H
