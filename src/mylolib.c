@@ -13,12 +13,15 @@
     #include <windows.h>
     #include <process.h>
     #include <conio.h>
+    #define STRDUP _strdup
 #else
     #include <dirent.h>
     #include <pthread.h>
     #include <unistd.h>
     #include <termios.h>
     #include <fcntl.h>
+    #define STRDUP strdup
+
 #endif
 
 
@@ -1630,22 +1633,22 @@ char* decode_key_event(int c, bool* is_special) {
     // 1. Control Codes (ASCII 1-31, excluding formatters)
     if (c > 0 && c <= 26) {
         // Special mapping for common controls
-        if (c == 8) return _strdup("[BACKSPACE]");
-        if (c == 9) return _strdup("[TAB]");
-        if (c == 13) return _strdup("[ENTER]");
-        if (c == 27) return _strdup("[ESC]");
+        if (c == 8) return STRDUP("[BACKSPACE]");
+        if (c == 9) return STRDUP("[TAB]");
+        if (c == 13) return STRDUP("[ENTER]");
+        if (c == 27) return STRDUP("[ESC]");
         
         // Standard Ctrl+A to Ctrl+Z
         char buf[16];
         snprintf(buf, 16, "[CTRL+%c]", 'A' + c - 1);
         *is_special = true;
-        return _strdup(buf);
+        return STRDUP(buf);
     }
     
     // 2. Printable Characters
     if (c >= 32 && c <= 126) {
         char buf[2] = { (char)c, '\0' };
-        return _strdup(buf);
+        return STRDUP(buf);
     }
     
     return NULL; // Unknown/Binary
