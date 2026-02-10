@@ -3,7 +3,7 @@
 
 #include <stdbool.h>
 #include "defines.h"
-
+#include "stddef.h"
 
 // --- Types ---
 #define T_NUM 0
