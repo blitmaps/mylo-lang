@@ -1114,6 +1114,24 @@ inline TestOutput test_region_scoping() {
     return x;
 }
 
+inline TestOutput test_loop_scoping() {
+    std::string src = """"
+    "var x = 0\n"
+    "forever {var f = range(0,1,1000)\n x = x + 1 \n if (x > 2) {break}}\n"
+    "x = 0 \n for (f in range(0,1,1000)){\n x = x + 1 \n if (x > 2) {break}}\n"
+    "print(1)";
+    std::string expected = """"
+        "1\n";
+    auto x = run_source_test(src, expected, false);
+    if (test_vm.arenas[0].head != 0) {
+        x.result = false;
+        x.result_string = "Expected main region scoping to clear memory from bar, and got " + std::to_string(test_vm.arenas[0].head);
+    }
+    // Cleanup after ourselves
+    vm_cleanup(&test_vm);
+    return x;
+}
+
 
 inline TestOutput test_region_same_name() {
     std::string src = """"
@@ -1286,6 +1304,7 @@ inline void test_generate_list() {
     ADD_TEST("Test Region", test_region);
     ADD_TEST("Test Region Same Name", test_region_same_name);
     ADD_TEST("Test Region Scoping", test_region_scoping);
+    ADD_TEST("Test Loop Scoping", test_loop_scoping);
     ADD_TEST("Test Strong Types i32", test_strong_types_i32);
     ADD_TEST("Test String Types Promotion byte -> num", test_type_promototion_bool);
     ADD_TEST("Test Vector(byte) (add())", test_vector_byte_add);

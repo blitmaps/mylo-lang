@@ -39,7 +39,7 @@ const char *OP_NAMES[] = {
     "CAST",
     "CHECK_TYPE",
     "OR",
-    "RANGE",
+    "RANGE","SCOPE_ENTER", "SCOPE_EXIT",
     "DEBUGGER"
 };
 
@@ -101,58 +101,45 @@ double vm_evacuate_object(VM* vm, double ptr_val, int target_head) {
     if (ptr_val == 0) return 0;
 
     double* old_base = vm_resolve_ptr_safe(vm, ptr_val);
-    if (!old_base) return ptr_val; // Not a heap pointer (e.g., tagged pointer or invalid)
+    if (!old_base) return ptr_val;
 
     int arena_id = UNPACK_ARENA(ptr_val);
     int offset = UNPACK_OFFSET(ptr_val);
 
-    // If object is already older than this scope, it's safe.
+    // If object is older than this scope, it is safe.
     if (offset < target_head) return ptr_val;
 
     int type = (int)old_base[0];
     int size = 0;
 
-    // Determine size based on Unified Header Layout (Index 1 is always length/size)
-    // Arrays, Bytes, and now Structs (via modified OP_ALLOC) follow this.
-    // Maps are fixed header size.
-
+    // Calculate Size (Unified Header Layout)
     if (type == TYPE_MAP) {
-        size = 4;
-        // NOTE: This is a shallow copy. If the Map's data array is also in the
-        // doomed scope, it will be lost. Full deep copy is required for robust Map return.
+        size = 4; // Shallow copy only
     } else if (type == TYPE_BYTES) {
-        // [TYPE, LEN, data...]
         int len = (int)old_base[1];
         size = ((len + 7) / 8) + 2;
     } else if (type == TYPE_ARRAY || (type >= TYPE_BOOL_ARRAY && type <= TYPE_I64_ARRAY)) {
-        // [TYPE, LEN, data...]
         int len = (int)old_base[1];
         if (type == TYPE_ARRAY) size = len + 2;
         else {
-             int elem_size = get_type_size(type);
-             size = ((len * elem_size + 7) / 8) + 2;
+            int elem_size = get_type_size(type);
+            size = ((len * elem_size + 7) / 8) + 2;
         }
     } else {
-        // Structs (Modified OP_ALLOC stores size at index 1)
+        // Structs (Size stored at index 1)
         size = (int)old_base[1] + 2;
     }
 
-    if (size <= 0) return ptr_val; // Safety
+    if (size <= 0) return ptr_val;
 
-    // Check if we are compacting into the same arena
-    // We are effectively moving memory from 'offset' down to 'target_head'
     double* new_loc = &vm->arenas[arena_id].memory[target_head];
     int* new_types = &vm->arenas[arena_id].types[target_head];
     int* old_types = vm->arenas[arena_id].types + offset;
 
-    // Use memmove to handle potential overlap (though target is usually strictly lower)
     memmove(new_loc, old_base, size * sizeof(double));
     memmove(new_types, old_types, size * sizeof(int));
 
-    // Create new pointer
     double new_ptr = PACK_PTR(vm->arenas[arena_id].generation, arena_id, target_head);
-
-    // Bump the target head so this object is preserved
     vm->arenas[arena_id].head = target_head + size;
 
     return new_ptr;
@@ -1101,46 +1088,21 @@ static void exec_flow_op(VM* vm, int op) {
         double rv = vm->stack[vm->sp];
         int rt = vm->stack_types[vm->sp];
 
-        // --- SCOPE REWIND LOGIC ---
-        // Check if we are inside a temporary scope that needs clearing
+        // Scope Cleanup / Heap Rewind
         if (vm->scope_sp > 0) {
             VMScope* scope = &vm->scope_stack[vm->scope_sp - 1];
-
-            // Ensure this scope belongs to the current function frame
             if (scope->fp == vm->fp) {
-                vm->scope_sp--; // Pop Scope
-
-                // If we are currently in the arena that was scoped (usually Main/0)
+                vm->scope_sp--;
                 if (vm->current_arena == scope->arena_id) {
-
-                    // 1. Evacuate Return Value if it's an object in the doomed region
                     if (rt == T_OBJ) {
-                        // Pass the scope head (watermark) as the target.
-                        // The function will move the object there and increment the arena's head.
                         rv = vm_evacuate_object(vm, rv, scope->head);
-
-                        // Note: vm_evacuate_object updates vm->arenas[id].head inside it
-                        // if evacuation happens. If not, we must manually reset below.
                     }
-
-                    // 2. Reset Heap (Rewind)
-                    // If evacuation happened, head is now scope->head + obj_size.
-                    // If evacuation didn't happen (primitive or old object), we reset to scope->head.
-                    // However, vm_evacuate_object sets head to (target + size) only if it moves.
-                    // We need to ensure we don't accidentally free the evacuated object.
-
-                    // Simplified Logic:
-                    // vm_evacuate sets the head to the *end* of the evacuated object.
-                    // If no evacuation (e.g. number), we must force reset to scope->head.
-
                     if (rt != T_OBJ || UNPACK_OFFSET(rv) < scope->head) {
-                        // No new object saved, hard reset to watermark
-                         vm->arenas[scope->arena_id].head = scope->head;
+                        vm->arenas[scope->arena_id].head = scope->head;
                     }
                 }
             }
         }
-        // --------------------------
 
         vm->sp = vm->fp - 3;
         int fp = (int)vm->fp;
@@ -1150,18 +1112,16 @@ static void exec_flow_op(VM* vm, int op) {
     }
 }
 
+
 static void exec_alloc_op(VM* vm, int op) {
     if (op == OP_ALLOC) {
         int size = vm->bytecode[vm->ip++];
         int struct_id = vm->bytecode[vm->ip++];
-
-        // MODIFICATION: Allocate size + 2 to store (ID, SIZE, Fields...)
+        // Alloc size + 2 to store (ID, SIZE, Fields...)
         double ptr = heap_alloc(vm, size + 2);
         double* base = vm_resolve_ptr(vm, ptr);
-
         base[0] = (double)struct_id;
-        base[1] = (double)size; // Store size for GC/Evacuation
-
+        base[1] = (double)size; // Store size!
         vm_push(vm, ptr, T_OBJ);
     } else if (op == OP_HSET) {
         int off = vm->bytecode[vm->ip++];
@@ -1172,9 +1132,7 @@ static void exec_alloc_op(VM* vm, int op) {
         double* base = vm_resolve_ptr(vm, p);
         int* types = vm_resolve_type(vm, p);
         if((int)base[0] != expected_id) RUNTIME_ERROR("HSET Type mismatch");
-
-        // MODIFICATION: Offset by 2 (Skip ID and SIZE)
-        base[2+off] = v;
+        base[2+off] = v; // Offset by 2
         types[2+off] = t;
     } else if (op == OP_HGET) {
         int off = vm->bytecode[vm->ip++];
@@ -1184,12 +1142,11 @@ static void exec_alloc_op(VM* vm, int op) {
         double* base = vm_resolve_ptr(vm, p);
         int* types = vm_resolve_type(vm, p);
         if((int)base[0] != expected_id) RUNTIME_ERROR("HGET Type mismatch");
-
-        // MODIFICATION: Offset by 2 (Skip ID and SIZE)
-        vm->stack[vm->sp] = base[2+off];
+        vm->stack[vm->sp] = base[2+off]; // Offset by 2
         vm->stack_types[vm->sp] = types[2+off];
     }
 }
+
 
 static void exec_array_op(VM* vm, int op) {
     if (op == OP_ARR) {
@@ -1658,7 +1615,16 @@ int vm_step(VM* vm, bool debug_trace) {
             vm->scope_sp++;
             break;
         }
-
+        case OP_SCOPE_EXIT: {
+            if (vm->scope_sp > 0) {
+                vm->scope_sp--;
+                VMScope* scope = &vm->scope_stack[vm->scope_sp];
+                if (vm->current_arena == scope->arena_id) {
+                    vm->arenas[vm->current_arena].head = scope->head;
+                }
+            }
+            break;
+        }
         // Iterators
         case OP_IT_KEY:
         case OP_IT_VAL:
