@@ -62,6 +62,7 @@ typedef enum {
     OP_CHECK_TYPE,
     OP_OR,
     OP_RANGE, // [INSERT] New Opcode
+    OP_SCOPE_ENTER,
     OP_DEBUGGER
 } OpCode;
 
@@ -96,6 +97,12 @@ typedef struct {
     int end_ip;
 } VMLocalInfo;
 
+typedef struct {
+    int arena_id;
+    int head;     // The offset in the arena where memory started for this scope
+    int fp;       // Frame pointer (safety check)
+} VMScope;
+
 // Forward declaration
 struct VM;
 typedef void (*NativeFunc)(struct VM *);
@@ -125,6 +132,8 @@ typedef struct VM {
     int global_symbol_count;
     VMLocalInfo* local_symbols;
     int local_symbol_count;
+    VMScope scope_stack[MAX_LOOP_NESTING]; // Reuse loop constant or define MAX_SCOPES 64
+    int scope_sp;
     // --- Debugger Fields ---
     char* source_code;
     bool cli_debug_mode;

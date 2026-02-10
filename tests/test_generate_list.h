@@ -1096,9 +1096,10 @@ inline TestOutput test_region_scoping() {
     "for (y in 0...10000) {}\n"
     "}}\n"
     "bar()\n"
-    "clear(foo)";
+    "clear(foo)\n"
+    "print(1)";
     std::string expected = """"
-        "\n";
+        "1\n";
     auto x = run_source_test(src, expected, false);
     if (test_vm.arenas[1].head != 0) {
         x.result = false;

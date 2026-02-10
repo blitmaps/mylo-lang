@@ -2078,6 +2078,9 @@ void function() {
     match(TK_RPAREN);
     match(TK_LBRACE);
 
+    // [MODIFICATION] Start a new heap scope for this function
+    emit(OP_SCOPE_ENTER);
+
     for(int i=0; i<typed_arg_count; i++) {
         if (!typed_args[i].is_arr) {
             emit(OP_LVAR); emit(typed_args[i].offset);
@@ -2100,7 +2103,6 @@ void function() {
     inside_function = ps;
     local_count = pl;
 }
-
 void parse_internal(char *source, bool is_import) {
     char *os = src;
     Token oc = curr;
