@@ -1144,12 +1144,16 @@ inline TestOutput test_region_same_name() {
     return run_source_test(src, expected);
 }
 
-inline TestOutput test_strong_types_i32() {
+inline TestOutput test_strong_types_i() {
     std::string src = """"
+            "var z : i64 = 67.2 + 33.7\n"
             "var x : i32 = 67.2 + 33.7\n"
-            "print(x)\n";
+            "var y : i16 = 67.2 + 33.7\n"
+            "print(z)\n"
+            "print(x)\n"
+            "print(y)\n";
     std::string expected = """"
-            "100\n";
+            "100\n100\n100\n";
     return run_source_test(src, expected);
 }
 
@@ -1159,6 +1163,19 @@ inline TestOutput test_type_promototion_bool() {
     "print(x + 2)\n";
     std::string expected = """"
         "[256]\n"; // As it is an array, it is promoted to num array :')
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_typed_struct() {
+    std::string src = """"
+    "struct A {\n"
+    "var a : i16\n"
+    "var b : i32\n"
+    "}\n"
+    "var x : A = {a=88.2, b=11.33}\n"
+    "print(f\"{x.a},{x.b}\")\n";
+    std::string expected = """"
+        "88,11\n"; // As it is an array, it is promoted to num array :')
     return run_source_test(src, expected);
 }
 
@@ -1245,6 +1262,7 @@ inline void test_generate_list() {
     ADD_TEST("Test Variable Loop", test_variable_loop);
     ADD_TEST("Test While For Loop", test_while_for);
     ADD_TEST("Test Struct", test_struct);
+    ADD_TEST("Test Type Struct", test_typed_struct);
     ADD_TEST("Test String Interpolation", test_string_interp);
     ADD_TEST("Test Scope", test_scope);
     ADD_TEST("Test Variable Access", test_var_access);
@@ -1305,7 +1323,7 @@ inline void test_generate_list() {
     ADD_TEST("Test Region Same Name", test_region_same_name);
     ADD_TEST("Test Region Scoping", test_region_scoping);
     ADD_TEST("Test Loop Scoping", test_loop_scoping);
-    ADD_TEST("Test Strong Types i32", test_strong_types_i32);
+    ADD_TEST("Test Strong Types ints", test_strong_types_i);
     ADD_TEST("Test String Types Promotion byte -> num", test_type_promototion_bool);
     ADD_TEST("Test Vector(byte) (add())", test_vector_byte_add);
     ADD_TEST("Test Threading...", test_thread);

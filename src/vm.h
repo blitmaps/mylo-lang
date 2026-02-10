@@ -1,12 +1,9 @@
 #ifndef MYLO_VM_H
 #define MYLO_VM_H
 
-#ifndef VM_H
-#define VM_H
-
 #include <stdbool.h>
 #include "defines.h"
-#include <stddef.h>
+
 
 // --- Types ---
 #define T_NUM 0
@@ -180,6 +177,7 @@ void vm_register_function(VM* vm, const char* name, int addr);
 void print_recursive(VM* vm, double val, int type, int depth, int max_elem);
 void enter_debugger(VM* vm);
 
+// Pointer storage and retrieval
 #define MYLO_STORE(val, type_name) vm_store_copy(vm, &(val), sizeof(val), type_name)
 #define MYLO_RETRIEVE(id, c_type, type_name) (c_type*)vm_get_ref(vm, (int)(id), type_name)
 #define MYLO_REGISTER(ptr, type_name) vm_store_ptr(vm, (void*)(ptr), type_name)
@@ -189,5 +187,4 @@ void enter_debugger(VM* vm);
 #define MYLO_REGISTER_IN_VM(vm, ptr, type_name) vm_store_ptr(vm, (void*)(ptr), type_name)
 
 
-#endif
 #endif

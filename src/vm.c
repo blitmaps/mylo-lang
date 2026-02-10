@@ -44,7 +44,12 @@ const char *OP_NAMES[] = {
 };
 
 
-// --- Error Handling ---
+void mylo_exit(int code) {
+    if (MyloConfig.error_callback) {
+        MyloConfig.error_callback("Mylo called `Exit()`");
+    }
+    exit(1);
+}
 
 void mylo_runtime_error(VM* vm, const char* fmt, ...) {
     char buffer[1024];
@@ -58,15 +63,16 @@ void mylo_runtime_error(VM* vm, const char* fmt, ...) {
     va_end(args);
     if (MyloConfig.debug_mode && MyloConfig.error_callback) {
         MyloConfig.error_callback(buffer);
-        exit(1);
+        mylo_exit(1);
     }
 
     if (MyloConfig.repl_jmp_buf) {
         longjmp(*(jmp_buf*)MyloConfig.repl_jmp_buf, 1);
     } else {
-        exit(1);
+        mylo_exit(1);
     }
 }
+
 
 #define RUNTIME_ERROR(fmt, ...) mylo_runtime_error(vm, fmt, ##__VA_ARGS__)
 #define CHECK_STACK(count) if (vm->sp < (count) - 1) RUNTIME_ERROR("Stack Underflow")
@@ -228,7 +234,7 @@ void init_arena(VM* vm, int id) {
 
     if (!vm->arenas[id].memory || !vm->arenas[id].types) {
         fprintf(stderr, "Critical: Failed to allocate Arena %d\n", id);
-        exit(1);
+        mylo_exit(1);
     }
 }
 
@@ -361,7 +367,8 @@ void vm_init(VM* vm) {
 
     if (!vm->bytecode || !vm->stack) {
         fprintf(stderr, "Critical Error: Failed to allocate VM memory\n");
-        exit(1);
+        mylo_exit(1);
+
     }
 
     vm->sp = -1;
@@ -424,7 +431,8 @@ double heap_alloc(VM* vm, int size) {
 
     if (vm->arenas[id].head + size >= vm->arenas[id].capacity) {
         printf("Error: Heap Overflow in Region %d!\n", id);
-        exit(1);
+        mylo_exit(1);
+
     }
     int offset = vm->arenas[id].head;
     vm->arenas[id].head += size;
@@ -432,7 +440,7 @@ double heap_alloc(VM* vm, int size) {
 }
 
 void vm_push(VM* vm, double val, int type) {
-    if (vm->sp >= STACK_SIZE - 1) { printf("Error: Stack Overflow\n"); exit(1); }
+    if (vm->sp >= STACK_SIZE - 1) { printf("Error: Stack Overflow\n"); mylo_exit(1);}
     vm->sp++;
     vm->stack[vm->sp] = val;
     vm->stack_types[vm->sp] = type;
@@ -447,7 +455,7 @@ int make_string(VM* vm, const char *s) {
     for (int j = 0; j < vm->str_count; j++) {
         if (strcmp(vm->string_pool[j], s) == 0) return j;
     }
-    if (vm->str_count >= MAX_STRINGS) { printf("Error: String Pool Overflow\n"); exit(1); }
+    if (vm->str_count >= MAX_STRINGS) { printf("Error: String Pool Overflow\n"); mylo_exit(1);}
     strncpy(vm->string_pool[vm->str_count], s, MAX_STRING_LENGTH - 1);
     return vm->str_count++;
 }
@@ -461,7 +469,7 @@ int make_const(VM* vm, double val) {
 }
 
 void vm_register_function(VM* vm, const char* name, int addr) {
-    if (vm->function_count >= MAX_VM_FUNCTIONS) { printf("VM Limit: Too many functions.\n"); exit(1); }
+    if (vm->function_count >= MAX_VM_FUNCTIONS) { printf("VM Limit: Too many functions.\n"); mylo_exit(1); }
     VMFunction* f = &vm->functions[vm->function_count++];
     strncpy(f->name, name, 63);
     f->name[63] = '\0';

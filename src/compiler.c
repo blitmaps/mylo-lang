@@ -58,6 +58,9 @@ const char *TOKEN_NAMES[] = {
     "debugger","||",
 };
 
+// Mylo Exit Function
+extern void mylo_exit(int code);
+
 const char *get_token_name(MyloTokenType t) {
     if (t < 0 || t > TK_DEBUGGER) return "Unknown";
     return TOKEN_NAMES[t];
@@ -240,7 +243,7 @@ void error(const char *fmt, ...) {
     if (MyloConfig.debug_mode && MyloConfig.error_callback) {
         MyloConfig.error_callback(buffer);
         if (MyloConfig.repl_jmp_buf) longjmp(*(jmp_buf *) MyloConfig.repl_jmp_buf, 1);
-        exit(1);
+        mylo_exit(1);
     }
 
     fsetTerminalColor(stderr, MyloFgRed, MyloBgColorDefault);
@@ -250,13 +253,13 @@ void error(const char *fmt, ...) {
     if (MyloConfig.repl_jmp_buf) {
         longjmp(*(jmp_buf *) MyloConfig.repl_jmp_buf, 1);
     }
-    exit(1);
+    mylo_exit(1);
 }
 
 void emit(int op) {
     if (compiling_vm->code_size >= MAX_CODE) {
         fprintf(stderr, "Error: Code overflow\n");
-        exit(1);
+        mylo_exit(1);
     }
     compiling_vm->bytecode[compiling_vm->code_size] = op;
     compiling_vm->lines[compiling_vm->code_size] = curr.line > 0 ? curr.line : line;
@@ -825,7 +828,7 @@ void factor() {
         if (curr.type == TK_LPAREN) {
             match(TK_LPAREN);
             while (curr.type != TK_RPAREN) {
-                if (ffi_blocks[ffi_idx].arg_count >= MAX_FFI_ARGS) exit(1);
+                if (ffi_blocks[ffi_idx].arg_count >= MAX_FFI_ARGS) mylo_exit(1);
                 strcpy(ffi_blocks[ffi_idx].args[ffi_blocks[ffi_idx].arg_count].name, curr.text);
                 match(TK_ID);
                 if (curr.type == TK_COLON) {
@@ -865,7 +868,7 @@ void factor() {
             strcat(ffi_blocks[ffi_idx].return_type, "[]");
         }
 
-        if (curr.type != TK_LBRACE) exit(1);
+        if (curr.type != TK_LBRACE) mylo_exit(1);
         char *start = src + 1;
         int braces = 1;
         char *end = start;
@@ -1165,7 +1168,7 @@ static void parse_c_block_stmt() {
     if (curr.type == TK_LPAREN) {
         match(TK_LPAREN);
         while (curr.type != TK_RPAREN) {
-            if (ffi_blocks[ffi_idx].arg_count >= MAX_FFI_ARGS) exit(1);
+            if (ffi_blocks[ffi_idx].arg_count >= MAX_FFI_ARGS) mylo_exit(1);
             strcpy(ffi_blocks[ffi_idx].args[ffi_blocks[ffi_idx].arg_count].name, curr.text);
             match(TK_ID);
             if (curr.type == TK_COLON) {
@@ -1293,7 +1296,7 @@ static void parse_import() {
         if (curr.type == TK_LPAREN) {
             match(TK_LPAREN);
             while (curr.type != TK_RPAREN) {
-                if (ffi_blocks[ffi_idx].arg_count >= MAX_FFI_ARGS) exit(1);
+                if (ffi_blocks[ffi_idx].arg_count >= MAX_FFI_ARGS) mylo_exit(1);
                 strcpy(ffi_blocks[ffi_idx].args[ffi_blocks[ffi_idx].arg_count].name, curr.text);
                 match(TK_ID);
                 if (curr.type == TK_COLON) {
@@ -2144,7 +2147,7 @@ void generate_binding_c_source(VM* vm, const char *output_filename) {
     FILE *fp = fopen(output_filename, "w");
     if (!fp) {
         printf("Failed to open output file\n");
-        exit(1);
+        mylo_exit(1);
     }
 
     fprintf(fp, "#define MYLO_BINDING_MODE\n");
@@ -2244,7 +2247,7 @@ void compile_to_c_source(VM* vm, const char *output_filename) {
     FILE *fp = fopen(output_filename, "w");
     if (!fp) {
         printf("Failed to open output file\n");
-        exit(1);
+        mylo_exit(1);
     }
 
     c_gen_headers(fp);

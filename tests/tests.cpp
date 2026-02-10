@@ -11,19 +11,23 @@ extern "C" {
 #include "test_include.h"
 #include "test_generate_list.h"
 
+
+void error_handler(const char *error) {
+    std::cout << error << std::endl;
+    // We will use C++ exceptions to gracefully unwind the stack, which we will catch
+    throw std::runtime_error(error);
+}
+
 int main()
 {
     // tests
     test_generate_list();
-
+    MyloConfig.error_callback = &error_handler;
     // test the tests
     int passed = 0;
     int total = 0;
     for (auto &test : tests)
     {
-        //setTerminalColor(Color::Blue, BgMyloFgDefault);
-        //std::cout << "========================================================" << std::endl;
-        //setTerminalColor(MyloFgDefault, BgMyloFgDefault);
         std::cout << "Running..." << test.first << std::endl;
         try {
             if (test.second().result) {
