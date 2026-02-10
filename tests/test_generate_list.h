@@ -48,9 +48,11 @@ inline TestOutput test_hello_world() {
     return output;
 }
 
-inline TestOutput run_source_test(const std::string& src, const std::string& expected) {
-    VM vm;
-    vm_init(&vm);
+// The test VM, exposed here for post test hooks
+VM test_vm;
+
+inline TestOutput run_source_test(const std::string& src, const std::string& expected, bool clean_up = true) {
+    vm_init(&test_vm);
     compiler_reset();
     MyloConfig.print_to_memory = true;
 
@@ -58,8 +60,8 @@ inline TestOutput run_source_test(const std::string& src, const std::string& exp
     std::cout << std::endl;
     std::cout << src << std::endl;
 #endif
-    parse(&vm, const_cast<char *>(src.c_str()));
-    run_vm(&vm, false);
+    parse(&test_vm, const_cast<char *>(src.c_str()));
+    run_vm(&test_vm, false);
 
     // Reset config so other tests don't break
     MyloConfig.print_to_memory = false;
@@ -67,9 +69,10 @@ inline TestOutput run_source_test(const std::string& src, const std::string& exp
     // Check if the output buffer actually contains the output
     // Note: OP_PRN adds a newline "\n"
     TestOutput output;
-    output.result = (strcmp(vm.output_char_buffer, expected.c_str()) == 0);
-    output.result_string = output.result ? "" : "Expected '" + expected + "'" + "and got '" + std::string(vm.output_char_buffer) + "'";
-    vm_cleanup(&vm);
+    output.result = (strcmp(test_vm.output_char_buffer, expected.c_str()) == 0);
+    output.result_string = output.result ? "" : "Expected '" + expected + "'" + "and got '" + std::string(test_vm.output_char_buffer) + "'";
+    if (clean_up)
+        vm_cleanup(&test_vm);
     return output;
 }
 
@@ -1075,12 +1078,41 @@ inline TestOutput test_strong_types_list() {
 inline TestOutput test_region() {
     std::string src = """"
     "region foo\n"
+    "var x = 99\n"
     "var foo::x = 2\n"
     "print(foo::x)\n";
     std::string expected = """"
         "2\n";
     return run_source_test(src, expected);
 }
+
+
+inline TestOutput test_region_scoping() {
+    std::string src = """"
+    "region foo\n"
+    "var foo::x = range(0,5,99999)\n"
+    "fn bar() {\n"
+    "for (x in 0...1000) {\n"
+    "for (y in 0...10000) {}\n"
+    "}}\n"
+    "bar()\n"
+    "clear(foo)";
+    std::string expected = """"
+        "\n";
+    auto x = run_source_test(src, expected, false);
+    if (test_vm.arenas[1].head != 0) {
+        x.result = false;
+        x.result_string = "Expected region Foo to be cleared.";
+    };
+    if (test_vm.arenas[0].head != 0) {
+        x.result = false;
+        x.result_string = "Expected main region scoping to clear memory from bar";
+    }
+    // Cleanup after ourselves
+    vm_cleanup(&test_vm);
+    return x;
+}
+
 
 inline TestOutput test_region_same_name() {
     std::string src = """"
@@ -1252,6 +1284,7 @@ inline void test_generate_list() {
     ADD_TEST("Test Strongly Types Arrays", test_strong_types_list);
     ADD_TEST("Test Region", test_region);
     ADD_TEST("Test Region Same Name", test_region_same_name);
+    ADD_TEST("Test Region Scoping", test_region_scoping);
     ADD_TEST("Test Strong Types i32", test_strong_types_i32);
     ADD_TEST("Test String Types Promotion byte -> num", test_type_promototion_bool);
     ADD_TEST("Test Vector(byte) (add())", test_vector_byte_add);
