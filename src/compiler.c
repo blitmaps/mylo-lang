@@ -2029,11 +2029,23 @@ void statement() {
     } else if (curr.type == TK_FOREVER) {
         match(TK_FOREVER);
         match(TK_LBRACE);
+        // [FIX] 1. Track local variables before entering loop
+        int saved_local_count = local_count;
+        bool is_local_scope = inside_function;
+
         push_loop();
         int loop_start = compiling_vm->code_size;
 
         emit(OP_SCOPE_ENTER); // Body Scope
         while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
+
+        // [FIX] 2. Pop locals declared inside the loop
+        if (is_local_scope) {
+            int vars_to_pop = local_count - saved_local_count;
+            for(int k=0; k<vars_to_pop; k++) emit(OP_POP);
+            local_count = saved_local_count;
+        }
+
         emit(OP_SCOPE_EXIT); // Body Scope
 
         int brace_line = curr.line;

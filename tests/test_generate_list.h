@@ -1248,6 +1248,52 @@ inline TestOutput test_nested_iterator_from_region_in_func() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_forever_stack_leak() {
+    std::string src =
+    "var i = 0\n"
+    "forever {\n"
+    "    // 1. Define a local variable (allocated on stack)\n"
+    "    var x = 10\n"
+    "    \n"
+    "    // 2. Define a local array (allocated on heap + ref on stack)\n"
+    "    var y = [1, 2]\n"
+    "    \n"
+    "    // 3. Loop causing inner scope allocations\n"
+    "    for (z in y) {\n"
+    "        var a = z + 1\n"
+    "    }\n"
+    "    \n"
+    "    // 4. Loop Condition\n"
+    "    i = i + 1\n"
+    "    if (i > 1000) { break }\n"
+    "}\n"
+    "print(i)";
+
+    // Reset VM
+    vm_init(&test_vm);
+    compiler_reset();
+    MyloConfig.print_to_memory = true;
+
+    parse(&test_vm, const_cast<char *>(src.c_str()));
+    run_vm(&test_vm, false);
+
+    MyloConfig.print_to_memory = false;
+
+    TestOutput output;
+
+    // VALIDATION:
+    // If sp (Stack Pointer) is not -1, items were left on the stack.
+    if (test_vm.sp != -1) {
+        output.result = false;
+        output.result_string = "Stack Leak Detected! SP is " + std::to_string(test_vm.sp) + " (Expected -1)";
+    } else {
+        output.result = true;
+    }
+
+    vm_cleanup(&test_vm);
+    return output;
+}
+
 
 inline void test_generate_list() {
     ADD_TEST("Test Test", test_test);
@@ -1330,7 +1376,7 @@ inline void test_generate_list() {
     ADD_TEST("Test Bus...", test_bus);
     ADD_TEST("Test Iterator in Func from Region", test_iterator_from_region_in_func);
     ADD_TEST("Test Iterator in Func from Region Nest", test_nested_iterator_from_region_in_func);
-
+    ADD_TEST("Test Forever Stack Leak", test_forever_stack_leak);
 }
 
 #endif //MYLO_TEST_GENERATE_LIST_H
