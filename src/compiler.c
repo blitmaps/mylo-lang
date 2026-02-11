@@ -141,6 +141,7 @@ int func_count = 0;
 struct StructDef {
     char name[MAX_IDENTIFIER];
     char fields[MAX_FIELDS][MAX_IDENTIFIER];
+    int field_types[MAX_FIELDS]; // Added to store type IDs
     int field_count;
 } struct_defs[MAX_STRUCTS];
 
@@ -641,7 +642,22 @@ static void c_gen_structs(FILE *fp) {
     fprintf(fp, "// --- GENERATED C STRUCTS ---\n");
     for (int i = 0; i < struct_count; i++) {
         fprintf(fp, "typedef struct { ");
-        for (int j = 0; j < struct_defs[i].field_count; j++) fprintf(fp, "double %s; ", struct_defs[i].fields[j]);
+        for (int j = 0; j < struct_defs[i].field_count; j++) {
+            int type_id = struct_defs[i].field_types[j];
+
+            // Map Type ID to C Type
+            if (type_id == TYPE_NUM) fprintf(fp, "double ");
+            else if (type_id == TYPE_I32_ARRAY) fprintf(fp, "int ");
+            else if (type_id == TYPE_I64_ARRAY) fprintf(fp, "long long ");
+            else if (type_id == TYPE_I16_ARRAY) fprintf(fp, "short ");
+            else if (type_id == TYPE_F32_ARRAY) fprintf(fp, "float ");
+            else if (type_id == TYPE_BYTES || type_id == TYPE_BOOL_ARRAY) fprintf(fp, "unsigned char ");
+            else if (type_id == TYPE_STR) fprintf(fp, "char* ");
+            else if (type_id >= 0) fprintf(fp, "c_%s ", struct_defs[type_id].name); // Nested Struct
+            else fprintf(fp, "double "); // Fallback
+
+            fprintf(fp, "%s; ", struct_defs[i].fields[j]);
+        }
         fprintf(fp, "} c_%s;\n", struct_defs[i].name);
     }
     fprintf(fp, "\n");
@@ -1584,9 +1600,19 @@ static void parse_id_statement(Token start_token, char *name) {
 
                 int offset = find_field(type_id, f);
                 if (offset == -1) error("Struct '%s' has no field '%s'", struct_defs[type_id].name, f);
+
                 if (curr.type == TK_EQ_ASSIGN) {
                     match(TK_EQ_ASSIGN);
                     expression();
+
+                    // --- CHANGED: Strong Typing for Assignments ---
+                    int field_type = struct_defs[type_id].field_types[offset];
+                    if (field_type != TYPE_ANY && field_type != TYPE_NUM) {
+                        emit(OP_CAST);
+                        emit(field_type);
+                    }
+                    // ----------------------------------------------
+
                     emit(OP_HSET);
                     emit(offset);
                     emit(type_id);
@@ -1631,7 +1657,6 @@ static void parse_id_statement(Token start_token, char *name) {
         }
     }
 }
-
 static void parse_if() {
     match(TK_IF);
     expression();
@@ -1833,7 +1858,6 @@ void for_statement() {
     }
 }
 
-
 void struct_decl() {
     match(TK_STRUCT);
     char name[MAX_IDENTIFIER];
@@ -1846,8 +1870,21 @@ void struct_decl() {
     struct_defs[idx].field_count = 0;
     while (curr.type == TK_VAR) {
         match(TK_VAR);
-        strcpy(struct_defs[idx].fields[struct_defs[idx].field_count++], curr.text);
+        strcpy(struct_defs[idx].fields[struct_defs[idx].field_count], curr.text);
+
+        // Default to NUM (double) if no type is provided, standard for Mylo structs
+        struct_defs[idx].field_types[struct_defs[idx].field_count] = TYPE_NUM;
+
         match(TK_ID);
+
+        // Check for Type Annotation : i16
+        if (curr.type == TK_COLON) {
+            match(TK_COLON);
+            TypeInfo ti = parse_type_spec();
+            struct_defs[idx].field_types[struct_defs[idx].field_count] = ti.id;
+        }
+
+        struct_defs[idx].field_count++;
     }
     match(TK_RBRACE);
 }
@@ -1881,10 +1918,25 @@ void parse_struct_literal(int struct_idx) {
         char field_name[MAX_IDENTIFIER];
         strcpy(field_name, curr.text);
         match(TK_ID);
+
         int offset = find_field(struct_idx, field_name);
+
         if (curr.type == TK_COLON) match(TK_COLON);
         else match(TK_EQ_ASSIGN);
-        expression();
+
+        expression(); // Pushes the value (e.g., 88.2)
+
+        // --- NEW CODE START ---
+        // Look up the definition of the field we are setting
+        int field_type = struct_defs[struct_idx].field_types[offset];
+
+        // If the field has a specific type (not 'any' and not generic 'num'), enforce it
+        if (field_type != TYPE_ANY && field_type != TYPE_NUM) {
+            emit(OP_CAST);
+            emit(field_type);
+        }
+        // --- NEW CODE END ---
+
         emit(OP_HSET);
         emit(offset);
         emit(struct_idx);

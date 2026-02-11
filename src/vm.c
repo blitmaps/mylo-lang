@@ -1456,14 +1456,24 @@ static void exec_cast_op(VM* vm, int target_type, bool is_check_only) {
     int current_type = vm->stack_types[vm->sp];
 
     if (target_type == TYPE_NUM || target_type == TYPE_I32_ARRAY || target_type == TYPE_I64_ARRAY ||
-        target_type == TYPE_I16_ARRAY || target_type == TYPE_F32_ARRAY || target_type == TYPE_BOOL_ARRAY) {
+        target_type == TYPE_I16_ARRAY || target_type == TYPE_F32_ARRAY || target_type == TYPE_BOOL_ARRAY ||
+        target_type == TYPE_BYTES) { // Added TYPE_BYTES check
+
         if (current_type != T_NUM) RUNTIME_ERROR("Type Mismatch: Expected Number");
+
         if (!is_check_only) {
-            if (target_type == TYPE_I32_ARRAY) {
+            // Strong Casting: Truncate floats to integers for integer types
+            if (target_type == TYPE_I32_ARRAY ||
+                target_type == TYPE_I64_ARRAY ||
+                target_type == TYPE_I16_ARRAY ||
+                target_type == TYPE_BOOL_ARRAY ||
+                target_type == TYPE_BYTES) {
+
                 vm->stack[vm->sp] = floor(val);
-            }
+                }
+            // f32 and num (f64) do not need truncation, they stay as floating point
         }
-    }
+        }
     else if (target_type == TYPE_STR) {
         if (current_type != T_STR) RUNTIME_ERROR("Type Mismatch: Expected String");
     }
