@@ -1132,8 +1132,6 @@ int get_var_addr(char *n, bool is_local, int explicit_type) {
         get_mangled_name(m, n);
         int glob = find_global(m);
         if (glob != -1) return glob;
-        emit(OP_PSH_NUM);
-        emit(make_const(compiling_vm, 0.0));
         return alloc_var(false, n, explicit_type, false);
     }
 }
@@ -1759,6 +1757,7 @@ void for_statement() {
         }
     }
 
+    // We track scope for the OUTER variables (like the iterator itself)
     int saved_local_count = local_count;
     bool is_local_scope = inside_function;
 
@@ -1783,7 +1782,7 @@ void for_statement() {
         int exit = compiling_vm->code_size;
         emit(0);
 
-        // Loop Body
+        // Loop Body Setup
         if (is_pair) {
             EMIT_GET(is_local_scope, a); EMIT_GET(is_local_scope, i); emit(OP_IT_KEY); EMIT_SET(is_local_scope, var1_addr);
             EMIT_GET(is_local_scope, a); EMIT_GET(is_local_scope, i); emit(OP_IT_VAL); EMIT_SET(is_local_scope, var2_addr);
@@ -1794,8 +1793,22 @@ void for_statement() {
         match(TK_RPAREN);
         match(TK_LBRACE);
 
+        // [FIX START] Track locals declared INSIDE the loop body
+        int body_saved_local_count = local_count;
+        bool body_is_local_scope = inside_function;
+        // [FIX END]
+
         emit(OP_SCOPE_ENTER); // Inner Body Scope
         while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
+
+        // [FIX START] Pop locals declared inside the loop body
+        if (body_is_local_scope) {
+            int vars_to_pop = local_count - body_saved_local_count;
+            for(int k=0; k<vars_to_pop; k++) emit(OP_POP);
+            local_count = body_saved_local_count;
+        }
+        // [FIX END]
+
         emit(OP_SCOPE_EXIT); // Inner Body Scope
 
         int brace_line = curr.line;
@@ -1808,6 +1821,7 @@ void for_statement() {
         compiling_vm->lines[compiling_vm->code_size - 1] = brace_line;
         compiling_vm->bytecode[exit] = compiling_vm->code_size; // Break jumps here
 
+        // Clean up the iterator variables (Outer Scope)
         if (is_local_scope) {
             int vars_to_pop = local_count - saved_local_count;
             for(int k=0; k<vars_to_pop; k++) emit(OP_POP);
@@ -1827,8 +1841,22 @@ void for_statement() {
         emit(0);
         match(TK_LBRACE);
 
+        // [FIX START] Track locals declared INSIDE the loop body
+        int body_saved_local_count = local_count;
+        bool body_is_local_scope = inside_function;
+        // [FIX END]
+
         emit(OP_SCOPE_ENTER); // Inner Body Scope
         while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
+
+        // [FIX START] Pop locals declared inside the loop body
+        if (body_is_local_scope) {
+            int vars_to_pop = local_count - body_saved_local_count;
+            for(int k=0; k<vars_to_pop; k++) emit(OP_POP);
+            local_count = body_saved_local_count;
+        }
+        // [FIX END]
+
         emit(OP_SCOPE_EXIT); // Inner Body Scope
 
         int brace_line = curr.line;
