@@ -632,8 +632,8 @@ static void c_gen_headers(FILE *fp) {
     fprintf(fp, "#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n#include <math.h>\n");
 
     // --- FIX: Define Heap Layout Constants used by Wrappers ---
-    fprintf(fp, "#define HEAP_HEADER_STRUCT 2\n");
-    fprintf(fp, "#define HEAP_HEADER_ARRAY 2\n");
+    //fprintf(fp, "#define HEAP_HEADER_STRUCT 2\n");
+    //fprintf(fp, "#define HEAP_HEADER_ARRAY 2\n");
     // ----------------------------------------------------------
 
     fprintf(fp, "\n// --- USER IMPORTS ---\n");
