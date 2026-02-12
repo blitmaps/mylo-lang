@@ -1248,6 +1248,22 @@ inline TestOutput test_nested_iterator_from_region_in_func() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_nested_scope_conditional_return() {
+
+    std::string src = """"
+    "fn bar(x) {\n"
+    "if (x > 5) {\n"
+        "ret 0...2\n"
+    "}ret 1\n"
+    "}\n"
+    "print(bar(10))";
+
+    std::string expected = """"
+    "[0, 1, 2]\n";
+
+    return run_source_test(src, expected);
+}
+
 inline TestOutput test_forever_stack_leak() {
     std::string src =
     "var i = 0\n"
@@ -1377,6 +1393,8 @@ inline void test_generate_list() {
     ADD_TEST("Test Iterator in Func from Region", test_iterator_from_region_in_func);
     ADD_TEST("Test Iterator in Func from Region Nest", test_nested_iterator_from_region_in_func);
     ADD_TEST("Test Forever Stack Leak", test_forever_stack_leak);
+    ADD_TEST("Test Nested Scope Conditional Return", test_nested_scope_conditional_return);
+
 }
 
 #endif //MYLO_TEST_GENERATE_LIST_H
