@@ -83,15 +83,6 @@ void std_copy(VM* vm) {
     int type = vm->stack_types[vm->sp];
     vm->sp--; // Pop argument
 
-    // Use vm_evacuate_object logic, but force it to run by passing a high target_head?
-    // Actually, we can just reuse the logic.
-    // If we want to copy to the CURRENT heap position, we effectively
-    // "evacuate" it from "anywhere" to "here".
-
-    // Using a huge target_head forces the check "offset < target_head" to be false?
-    // No, we want "offset < target_head" to be FALSE so it copies.
-    // If we pass target_head = 0, everything looks "newer" (offset >= 0) and gets copied!
-
     if (type == T_OBJ) {
         // Force a deep copy by pretending the object is in a "danger zone" (target_head = 0)
         // This copies it to the end of the current arena.
@@ -99,12 +90,6 @@ void std_copy(VM* vm) {
         // WAIT: vm_evacuate_object takes "target_head" as the SAFETY boundary.
         // If (offset < target_head) -> Safe.
         // We want (offset < target_head) to be FALSE.
-        // So we need target_head to be 0 (or small).
-        // BUT vm_evacuate_object ALSO uses target_head as the write destination?
-        // Ah, my modified version above uses 'vm->arenas[id].head' as write destination!
-        // So 'target_head' is ONLY used for the "Should I Copy?" check.
-        // So passing target_head = 0 forces a copy of everything.
-
         double res = vm_evacuate_object(vm, val, 0);
         vm_push(vm, res, T_OBJ);
     } else {
@@ -122,8 +107,6 @@ static void init_bus() {
         bus_initialized = true;
     }
 }
-
-
 
 // Workers - Threading
 static void init_workers() {
