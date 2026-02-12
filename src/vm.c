@@ -1096,22 +1096,29 @@ static void exec_flow_op(VM* vm, int op) {
         double rv = vm->stack[vm->sp];
         int rt = vm->stack_types[vm->sp];
 
-        // Scope Cleanup / Heap Rewind
-        if (vm->scope_sp > 0) {
+        // [FIX] Loop to pop ALL scopes for the current function (fp)
+        while (vm->scope_sp > 0) {
             VMScope* scope = &vm->scope_stack[vm->scope_sp - 1];
-            if (scope->fp == vm->fp) {
-                vm->scope_sp--;
-                if (vm->current_arena == scope->arena_id) {
-                    if (rt == T_OBJ) {
-                        rv = vm_evacuate_object(vm, rv, scope->head);
-                    }
-                    if (rt != T_OBJ || UNPACK_OFFSET(rv) < scope->head) {
-                        vm->arenas[scope->arena_id].head = scope->head;
-                    }
+
+            // Stop if we hit a scope from the Caller function
+            if (scope->fp != vm->fp) break;
+
+            vm->scope_sp--; // Pop the scope
+
+            // Handle Heap Rewind (Arena Memory)
+            if (vm->current_arena == scope->arena_id) {
+                if (rt == T_OBJ) {
+                    // Evacuate the return object to the parent scope/heap
+                    rv = vm_evacuate_object(vm, rv, scope->head);
+                }
+                // Reset the arena head to reclaim memory
+                if (rt != T_OBJ || UNPACK_OFFSET(rv) < scope->head) {
+                    vm->arenas[scope->arena_id].head = scope->head;
                 }
             }
         }
 
+        // Standard Return Logic
         vm->sp = vm->fp - 3;
         int fp = (int)vm->fp;
         vm->fp = (int)vm->stack[fp-1];
