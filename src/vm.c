@@ -103,24 +103,25 @@ unsigned long vm_hash_str(const char *str) {
 
 // --- Reference Management ---
 
+// [REPLACEMENT] Recursive Deep Evacuation
 double vm_evacuate_object(VM* vm, double ptr_val, int target_head) {
     if (ptr_val == 0) return 0;
 
     double* old_base = vm_resolve_ptr_safe(vm, ptr_val);
-    if (!old_base) return ptr_val;
+    if (!old_base) return ptr_val; // Invalid or already handled
 
     int arena_id = UNPACK_ARENA(ptr_val);
     int offset = UNPACK_OFFSET(ptr_val);
 
-    // If object is older than this scope, it is safe.
+    // 1. Safety Check: If object is already "older" than the rewind point, it's safe.
     if (offset < target_head) return ptr_val;
 
     int type = (int)old_base[0];
     int size = 0;
 
-    // Calculate Size (Unified Header Layout)
+    // 2. Calculate Size
     if (type == TYPE_MAP) {
-        size = 4; // Shallow copy only
+        size = 4; // Map Header Size
     } else if (type == TYPE_BYTES) {
         int len = (int)old_base[1];
         size = ((len + 7) / 8) + 2;
@@ -131,26 +132,87 @@ double vm_evacuate_object(VM* vm, double ptr_val, int target_head) {
             int elem_size = get_type_size(type);
             size = ((len * elem_size + 7) / 8) + 2;
         }
-    } else {
-        // Structs (Size stored at index 1)
+    } else if (type >= 0) {
+        // Structs
         size = (int)old_base[1] + 2;
     }
 
     if (size <= 0) return ptr_val;
 
-    double* new_loc = &vm->arenas[arena_id].memory[target_head];
-    int* new_types = &vm->arenas[arena_id].types[target_head];
+    // 3. Move the Object (Evacuate)
+    // IMPORTANT: We allocate at the CURRENT head of the arena, because
+    // recursive calls might have already advanced it.
+    int current_head = vm->arenas[arena_id].head;
+
+    // However, for the ROOT object (first call), we strictly want it at target_head?
+    // Actually, checking if (current_head < target_head) covers the rewind case.
+    // We just append to wherever 'head' currently is.
+    // NOTE: OP_RET sets head = target_head BEFORE calling this.
+    // So current_head IS target_head initially.
+
+    double* new_loc = &vm->arenas[arena_id].memory[current_head];
+    int* new_types = &vm->arenas[arena_id].types[current_head];
     int* old_types = vm->arenas[arena_id].types + offset;
 
     memmove(new_loc, old_base, size * sizeof(double));
     memmove(new_types, old_types, size * sizeof(int));
 
-    double new_ptr = PACK_PTR(vm->arenas[arena_id].generation, arena_id, target_head);
-    vm->arenas[arena_id].head = target_head + size;
+    double new_ptr = PACK_PTR(vm->arenas[arena_id].generation, arena_id, current_head);
+    vm->arenas[arena_id].head += size; // Advance head immediately
+
+    // 4. RECURSION: Deep Copy Children
+    // We pass 'target_head' (the boundary) to children so they know if THEY need moving.
+
+    if (type == TYPE_ARRAY) {
+        int len = (int)new_loc[1];
+        for (int i = 0; i < len; i++) {
+            if (new_types[HEAP_HEADER_ARRAY + i] == T_OBJ) {
+                // Recursively evacuate the child.
+                // Note: This will append the child to the end of the heap (moving head forward).
+                new_loc[HEAP_HEADER_ARRAY + i] = vm_evacuate_object(vm, new_loc[HEAP_HEADER_ARRAY + i], target_head);
+            }
+        }
+    } else if (type == TYPE_MAP) {
+        // Maps have a 'data' pointer at index 3 which is a raw array.
+        // We must evacuate that raw block manually as it has no header.
+        int cap = (int)new_loc[1];
+        double old_data_ptr = new_loc[3];
+        double* old_data_base = vm_resolve_ptr_safe(vm, old_data_ptr);
+
+        if (old_data_base && UNPACK_OFFSET(old_data_ptr) >= target_head) {
+            int data_size = cap * 2;
+            int data_head = vm->arenas[arena_id].head;
+
+            double* new_data_loc = &vm->arenas[arena_id].memory[data_head];
+            int* new_data_types = &vm->arenas[arena_id].types[data_head];
+            int* old_data_types = vm_resolve_type(vm, old_data_ptr);
+
+            memmove(new_data_loc, old_data_base, data_size * sizeof(double));
+            memmove(new_data_types, old_data_types, data_size * sizeof(int));
+
+            double new_data_ref = PACK_PTR(vm->arenas[arena_id].generation, arena_id, data_head);
+            vm->arenas[arena_id].head += data_size;
+            new_loc[3] = new_data_ref; // Update Map's data pointer
+
+            // Recurse on values inside the map
+            for(int i=0; i<data_size; i++) {
+                if (new_data_types[i] == T_OBJ) {
+                    new_data_loc[i] = vm_evacuate_object(vm, new_data_loc[i], target_head);
+                }
+            }
+        }
+    } else if (type >= 0) { // Struct
+        int struct_size = (int)new_loc[1];
+        for (int i = 0; i < struct_size; i++) {
+            // Struct fields start at index 2
+            if (new_types[2 + i] == T_OBJ) {
+                new_loc[2 + i] = vm_evacuate_object(vm, new_loc[2 + i], target_head);
+            }
+        }
+    }
 
     return new_ptr;
 }
-
 #define MAX_REFS 1024
 typedef struct {
     void* ptr;

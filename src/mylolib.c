@@ -70,6 +70,48 @@ static pthread_mutex_t bus_lock = PTHREAD_MUTEX_INITIALIZER;
 #define INIT_BUS_LOCK // Static init is enough for pthreads
 #endif
 
+
+// Implementation of std_copy (Deep Copy)
+void std_copy(VM* vm) {
+    if (vm->sp < 0) {
+        //mylo_runtime_error(vm, "Stack Underflow"); return;
+        printf("Runtime Error: Stack Overflow at copy");
+        exit(1);
+    }
+
+    double val = vm->stack[vm->sp];
+    int type = vm->stack_types[vm->sp];
+    vm->sp--; // Pop argument
+
+    // Use vm_evacuate_object logic, but force it to run by passing a high target_head?
+    // Actually, we can just reuse the logic.
+    // If we want to copy to the CURRENT heap position, we effectively
+    // "evacuate" it from "anywhere" to "here".
+
+    // Using a huge target_head forces the check "offset < target_head" to be false?
+    // No, we want "offset < target_head" to be FALSE so it copies.
+    // If we pass target_head = 0, everything looks "newer" (offset >= 0) and gets copied!
+
+    if (type == T_OBJ) {
+        // Force a deep copy by pretending the object is in a "danger zone" (target_head = 0)
+        // This copies it to the end of the current arena.
+        double new_val = vm_evacuate_object(vm, val, 99999999);
+        // WAIT: vm_evacuate_object takes "target_head" as the SAFETY boundary.
+        // If (offset < target_head) -> Safe.
+        // We want (offset < target_head) to be FALSE.
+        // So we need target_head to be 0 (or small).
+        // BUT vm_evacuate_object ALSO uses target_head as the write destination?
+        // Ah, my modified version above uses 'vm->arenas[id].head' as write destination!
+        // So 'target_head' is ONLY used for the "Should I Copy?" check.
+        // So passing target_head = 0 forces a copy of everything.
+
+        double res = vm_evacuate_object(vm, val, 0);
+        vm_push(vm, res, T_OBJ);
+    } else {
+        // Primitives copy by value
+        vm_push(vm, val, type);
+    }
+}
 // Helper to init the lock lazily
 static void init_bus() {
     if (!bus_initialized) {
@@ -1805,5 +1847,6 @@ const StdLibDef std_library[] = {
     {"cget", std_cget, "str", 1, {"num"}},
     {"kbhit", std_kbhit, "num", 0, {NULL}},
     {"get_keys", std_get_keys, "str", 0, {NULL}},
+    {"copy", std_copy, "any", 1, {"any"}},
     {NULL, NULL, NULL, 0, {NULL}}
 };

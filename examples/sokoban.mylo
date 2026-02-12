@@ -1,7 +1,5 @@
 // Variables that will survive specific scope changes
 // will live in this region.
-region LevelMem
-
 // --- Constants for Grid Objects ---
 var EMPTY = 0
 var WALL = 1
@@ -31,7 +29,7 @@ fn init_level() {
     
     // 2. Allocate 'data' into the LevelMem region using '::'
     // This ensures the array survives after this function returns.
-    var LevelMem::data = [
+    var data = [
         1, 1, 1, 1, 1, 1, 1, 1,
         1, 1, 1, 0, 0, 0, 1, 1,
         1, 3, 5, 2, 0, 0, 1, 1,
@@ -49,7 +47,7 @@ fn init_level() {
     ret {
         width = w
         height = h
-        grid = LevelMem::data
+        grid = data
         player_x = px
         player_y = py
         steps = 0
@@ -229,7 +227,6 @@ fn main() {
             if (k == "r") {
                 // Clear the LevelMem region to prevent memory leaks 
                 // before creating a new level.
-                clear(LevelMem)
                 game = init_level()
                 input_processed = 1
             }
@@ -245,3 +242,4 @@ fn main() {
 
 // Call main
 main()
+monitor()
