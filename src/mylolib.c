@@ -849,7 +849,7 @@ void std_where(VM* vm) {
         if (item_type != T_STR) { vm_push(vm, -1.0, T_NUM); return; }
         const char* haystack = get_str(vm, col_val);
         const char* needle = get_str(vm, item_val);
-        char* found = strstr(haystack, needle);
+        const char* found = strstr(haystack, needle);
         if (found) vm_push(vm, (double)(found - haystack), T_NUM);
         else vm_push(vm, -1.0, T_NUM);
     }
