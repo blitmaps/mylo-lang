@@ -1,0 +1,247 @@
+// Variables that will survive specific scope changes
+// will live in this region.
+region LevelMem
+
+// --- Constants for Grid Objects ---
+var EMPTY = 0
+var WALL = 1
+var BOX = 2
+var GOAL = 3
+var BOX_ON_GOAL = 4
+var PLAYER = 5
+var PLAYER_ON_GOAL = 6
+
+// --- Level Definition ---
+struct GameState {
+    var width
+    var height
+    var grid
+    var player_x
+    var player_y
+    var steps
+    var complete
+}
+
+// Initialize the game level
+fn init_level() {
+    // A simple 8x8 level
+    // 0: Empty, 1: Wall, 2: Box, 3: Goal, 5: Player
+    var w = 8
+    var h = 8
+    
+    // 2. Allocate 'data' into the LevelMem region using '::'
+    // This ensures the array survives after this function returns.
+    var LevelMem::data = [
+        1, 1, 1, 1, 1, 1, 1, 1,
+        1, 1, 1, 0, 0, 0, 1, 1,
+        1, 3, 5, 2, 0, 0, 1, 1,
+        1, 1, 1, 0, 2, 3, 1, 1,
+        1, 3, 1, 1, 0, 0, 1, 1,
+        1, 0, 0, 2, 0, 0, 1, 1,
+        1, 0, 0, 3, 0, 0, 1, 1,
+        1, 1, 1, 1, 1, 1, 1, 1
+    ]
+
+    // Find player start position
+    var px = 2
+    var py = 2
+
+    ret {
+        width = w
+        height = h
+        grid = LevelMem::data
+        player_x = px
+        player_y = py
+        steps = 0
+        complete = 0
+    }
+}
+
+// --- Helper Functions ---
+
+// Get value at (x, y)
+fn get_cell(state: GameState, x: num, y: num) {
+    if (x < 0 || x >= state.width || y < 0 || y >= state.height) {
+        ret WALL // Treat out of bounds as wall
+    }
+    var idx = (y * state.width) + x
+    ret state.grid[idx]
+}
+
+// Set value at (x, y)
+fn set_cell(state: GameState, x: num, y: num, val: num) {
+    var idx = (y * state.width) + x
+    state.grid[idx] = val
+}
+
+// Render the grid to the terminal
+fn render(state: GameState) {
+    print("--- MYLO SOKOBAN ---")
+    print("WASD or Arrows to Move. Q to Quit.")
+    print(f"Steps: {to_string(state.steps)}")
+    print("") // Spacer
+
+    for (var y in 0 ... state.height) {
+        var line = "  " // Left padding
+        for (var x in 0 ... state.width) {
+            var cell = get_cell(state, x, y)
+            var char = " "
+            
+            if (cell == WALL) { char = "H" }
+            if (cell == EMPTY) { char = " " }
+            if (cell == BOX) { char = "#" }
+            if (cell == GOAL) { char = "." }
+            if (cell == BOX_ON_GOAL) { char = "*" }
+            if (cell == PLAYER) { char = "@" }
+            if (cell == PLAYER_ON_GOAL) { char = "@" }
+            
+            line = line + char + " " // Add space for square aspect ratio
+        }
+        print(line)
+    }
+
+    if (state.complete == 1) {
+        print("\n  LEVEL COMPLETE! \n")
+    }
+}
+
+// Check if the level is solved
+fn check_win(state: GameState) {
+    var box_count = 0
+    for (val in state.grid) {
+        // If there is any loose box (2) left, we haven't won
+        if (val == BOX) { 
+            ret 0 
+        }
+    }
+    state.complete = 1
+    ret 1
+}
+
+// --- Movement Logic ---
+
+fn try_move(state: GameState, dx: num, dy: num) {
+    if (state.complete == 1) { ret }
+
+    var next_x = state.player_x + dx
+    var next_y = state.player_y + dy
+    
+    var current_cell = get_cell(state, state.player_x, state.player_y)
+    var next_cell = get_cell(state, next_x, next_y)
+
+    // 1. Check for Walls
+    if (next_cell == WALL) {
+        ret // Blocked
+    }
+
+    // 2. Check for Boxes
+    if (next_cell == BOX || next_cell == BOX_ON_GOAL) {
+        // Look one tile further
+        var far_x = next_x + dx
+        var far_y = next_y + dy
+        var far_cell = get_cell(state, far_x, far_y)
+
+        // Cannot push into Wall or another Box
+        if (far_cell == WALL || far_cell == BOX || far_cell == BOX_ON_GOAL) {
+            ret // Blocked
+        }
+
+        // Push Logic: Update the "Far" cell
+        if (far_cell == EMPTY) {
+            set_cell(state, far_x, far_y, BOX)
+        } else {
+            // Must be GOAL
+            set_cell(state, far_x, far_y, BOX_ON_GOAL)
+        }
+
+        // Update the "Next" cell (where the box was)
+        if (next_cell == BOX) {
+            next_cell = EMPTY
+        } else {
+            next_cell = GOAL
+        }
+    }
+
+    // 3. Move Player
+    // Update old player position (leave behind Empty or Goal)
+    if (current_cell == PLAYER) {
+        set_cell(state, state.player_x, state.player_y, EMPTY)
+    } else {
+        // PLAYER_ON_GOAL
+        set_cell(state, state.player_x, state.player_y, GOAL)
+    }
+
+    // Update new player position
+    if (next_cell == EMPTY) {
+        set_cell(state, next_x, next_y, PLAYER)
+    } else {
+        // Must be GOAL
+        set_cell(state, next_x, next_y, PLAYER_ON_GOAL)
+    }
+
+    // Update State coords
+    state.player_x = next_x
+    state.player_y = next_y
+    state.steps = state.steps + 1
+    
+    check_win(state)
+}
+
+// --- Main Game Loop ---
+
+fn main() {
+    var game = init_level()
+    var running = 1
+
+    render(game)
+
+    forever {
+        if (running == 0) { break }
+
+        var inputs = get_keys()
+        var input_processed = 0
+
+        for (k in inputs) {
+            if (k == "q" || k == "[ESC]") {
+                running = 0
+                break
+            }
+            
+            // Movement
+            if (k == "w" || k == "[UP]") { 
+                try_move(game, 0, -1) 
+                input_processed = 1
+            }
+            if (k == "s" || k == "[DOWN]") { 
+                try_move(game, 0, 1) 
+                input_processed = 1
+            }
+            if (k == "a" || k == "[LEFT]") { 
+                try_move(game, -1, 0) 
+                input_processed = 1
+            }
+            if (k == "d" || k == "[RIGHT]") { 
+                try_move(game, 1, 0) 
+                input_processed = 1
+            }
+            
+            // Reset
+            if (k == "r") {
+                // Clear the LevelMem region to prevent memory leaks 
+                // before creating a new level.
+                clear(LevelMem)
+                game = init_level()
+                input_processed = 1
+            }
+        }
+
+        if (input_processed == 1) {
+            render(game)
+        }
+    }
+
+    print("Thanks for playing!")
+}
+
+// Call main
+main()
