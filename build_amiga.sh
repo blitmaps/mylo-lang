@@ -1,0 +1,1 @@
+m68k-amigaos-gcc src/*.c -o mylo -lm -mcrt=nix13
