@@ -338,12 +338,12 @@ int main(int argc, char** argv) {
     bool trace = false;
     bool debug_mode = false;
     bool version = false;
-    bool repl_mode = false;
+    bool repl_mode = true;
     bool cli_debug_mode = false; // Capture flag locally
 
     char* fn = NULL;
 
-    for (int i = 1; i < argc; i++) {
+    for (int i = 0; i < argc; i++) {
         if (strcmp(argv[i], "--build") == 0) build_mode = true;
         else if (strcmp(argv[i], "--bind") == 0) bind_mode = true;
         else if (strcmp(argv[i], "--run") == 0) build_mode = false;

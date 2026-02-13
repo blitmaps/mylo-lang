@@ -3,8 +3,8 @@
 
 // VM Memory Limits
 #define STACK_SIZE 2048
-#define MAX_CODE 536870912
-#define MAX_HEAP 1000000000
+#define MAX_CODE 9048
+#define MAX_HEAP 100000
 #define MAX_GLOBALS 2048
 #define MAX_CONSTANTS 1024
 #define MAX_ARENAS 64         // 6 bits
