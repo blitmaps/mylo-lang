@@ -350,7 +350,6 @@ int main(int argc, char** argv) {
         else if (strcmp(argv[i], "--repl") == 0) repl_mode = true;
         else if (strcmp(argv[i], "--help") == 0) {
             print_help();
-            //vm_cleanup(&vm);
             return 0;
         }
         else fn = argv[i];

@@ -3,8 +3,8 @@
 
 // VM Memory Limits
 #define STACK_SIZE 2048
-#define MAX_CODE 9048
-#define MAX_HEAP 10000
+#define MAX_CODE 2048
+#define MAX_HEAP 2048
 #define MAX_GLOBALS 2048
 #define MAX_CONSTANTS 1024
 #define MAX_ARENAS 64         // 6 bits
@@ -27,7 +27,7 @@
 #define MAX_SEARCH_PATHS 16
 
 // Output
-#define OUTPUT_BUFFER_SIZE 128000
+#define OUTPUT_BUFFER_SIZE 512
 
 // Types
 #define TYPE_ANY -99
