@@ -3,7 +3,7 @@
 
 #include "vm.h"
 
-#define MAX_STD_ARGS 4
+#define MAX_STD_ARGS 8
 
 typedef struct {
     const char *name;
@@ -50,6 +50,14 @@ void std_rand(VM *vm);
 void std_rand_normal(VM *vm);
 void std_noise(VM *vm);
 
+void amiga_open_window(VM* vm);
+void amiga_close_window(VM* vm);
+void amiga_draw_line(VM* vm);
+void amiga_draw_rect(VM* vm);
+void amiga_draw_text(VM* vm);
+void amiga_set_color(VM* vm);
+void amiga_get_event(VM* vm);
+void amiga_wait(VM* vm);
 // Registry Declaration (Extern)
 // We do NOT define it here, only say it exists.
 extern const StdLibDef std_library[];

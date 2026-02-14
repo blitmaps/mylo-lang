@@ -10,6 +10,262 @@
 #include <fcntl.h>
 #define STRDUP strdup
 
+#include <stdio.h>
+#include <stdlib.h>
+
+// AMIGA
+/*#include <proto/intuition.h>
+#include <proto/dos.h>
+#include <intuition/intuition.h>
+#include <utility/tagitem.h>
+
+// For testing 1 window
+struct Window *myWindow;
+
+
+void std_amiga_window(VM* vm) {
+    double height = vm_pop(vm);
+    double width = vm_pop(vm);
+
+    struct NewWindow winlayout = {
+        20, 20,
+        200, 150,
+        0,1,
+        IDCMP_CLOSEWINDOW,
+        WFLG_SIZEGADGET | WFLG_DRAGBAR | WFLG_DEPTHGADGET |    WFLG_CLOSEGADGET | WFLG_ACTIVATE,
+        NULL, NULL,
+        "My Window",
+        NULL,NULL,
+        0,0,
+        600,400,
+        WBENCHSCREEN
+     };
+    myWindow = OpenWindow(&winlayout);
+
+}*/
+
+/* mylo_amiga.c */
+#include <proto/exec.h>
+#include <proto/intuition.h>
+#include <proto/graphics.h>
+#include <intuition/intuition.h>
+#include <graphics/gfx.h>
+#include <stdlib.h>
+#include <stdio.h>
+
+#include "vm.h"
+#include "mylolib.h"
+
+// Globals for Amiga Libraries
+struct Library *IntuitionBasePtr = NULL;
+struct Library *GfxBasePtr = NULL;
+
+// Helper to ensure libraries are open
+void ensure_amiga_libs() {
+    if (!IntuitionBasePtr) {
+        IntuitionBasePtr = OpenLibrary("intuition.library", 36);
+        if (!IntuitionBasePtr) {
+            printf("Error: Could not open intuition.library v36+\n");
+            exit(1);
+        }
+    }
+    if (!GfxBasePtr) {
+        GfxBasePtr = OpenLibrary("graphics.library", 36);
+        if (!GfxBasePtr) {
+            printf("Error: Could not open graphics.library v36+\n");
+            exit(1);
+        }
+    }
+}
+
+// --- Window Management ---
+
+// Amiga.OpenWindow(title, x, y, width, height) -> window_ptr (num)
+void amiga_open_window(VM* vm) {
+    ensure_amiga_libs();
+
+    double h = vm_pop(vm);
+    double w = vm_pop(vm);
+    double y = vm_pop(vm);
+    double x = vm_pop(vm);
+    double title_idx = vm_pop(vm);
+    const char* title = vm->string_pool[(int)title_idx];
+
+    struct NewWindow nw = {
+        (WORD)x, (WORD)y, (WORD)w, (WORD)h,
+        0, 1,
+        IDCMP_CLOSEWINDOW | IDCMP_MOUSEBUTTONS | IDCMP_VANILLAKEY,
+        WFLG_SIZEGADGET | WFLG_DRAGBAR | WFLG_DEPTHGADGET | WFLG_CLOSEGADGET | WFLG_ACTIVATE,
+        NULL, NULL, (STRPTR)title,
+        NULL, NULL, 0, 0, 0, 0, WBENCHSCREEN
+    };
+
+    struct Window* win = OpenWindow(&nw);
+
+    // Return pointer as a double (safe for 32-bit Amiga pointers)
+    vm_push(vm, (double)((unsigned long)win), T_NUM);
+}
+
+// Amiga.CloseWindow(window_ptr)
+void amiga_close_window(VM* vm) {
+    double win_ref = vm_pop(vm);
+    struct Window* win = (struct Window*)((unsigned long)win_ref);
+    if (win) CloseWindow(win);
+    vm_push(vm, 0, T_NUM);
+}
+
+// --- Graphics Primitives ---
+
+// Amiga.SetColor(window_ptr, pen, r, g, b)
+void amiga_set_color(VM* vm) {
+    double b = vm_pop(vm);
+    double g = vm_pop(vm);
+    double r = vm_pop(vm);
+    double pen = vm_pop(vm);
+    double win_ref = vm_pop(vm);
+
+    struct Window* win = (struct Window*)((unsigned long)win_ref);
+    if (!win) return;
+
+    // Set the RGB value for this pen (simple palette modification)
+    SetRGB4(win->WScreen->ViewPort.ColorMap, (long)pen, (long)r, (long)g, (long)b);
+    SetAPen(win->RPort, (long)pen);
+
+    vm_push(vm, 0, T_NUM);
+}
+
+// Amiga.DrawLine(window_ptr, x1, y1, x2, y2, color_pen)
+void amiga_draw_line(VM* vm) {
+    double pen = vm_pop(vm);
+    double y2 = vm_pop(vm);
+    double x2 = vm_pop(vm);
+    double y1 = vm_pop(vm);
+    double x1 = vm_pop(vm);
+    double win_ref = vm_pop(vm);
+
+    struct Window* win = (struct Window*)((unsigned long)win_ref);
+    if (win) {
+        SetAPen(win->RPort, (long)pen);
+        Move(win->RPort, (WORD)x1, (WORD)y1);
+        Draw(win->RPort, (WORD)x2, (WORD)y2);
+    }
+    vm_push(vm, 0, T_NUM);
+}
+
+// Amiga.DrawRect(window_ptr, x1, y1, x2, y2, color_pen)
+void amiga_draw_rect(VM* vm) {
+    double pen = vm_pop(vm);
+    double y2 = vm_pop(vm);
+    double x2 = vm_pop(vm);
+    double y1 = vm_pop(vm);
+    double x1 = vm_pop(vm);
+    double win_ref = vm_pop(vm);
+
+    struct Window* win = (struct Window*)((unsigned long)win_ref);
+    if (win) {
+        SetAPen(win->RPort, (long)pen);
+        RectFill(win->RPort, (WORD)x1, (WORD)y1, (WORD)x2, (WORD)y2);
+    }
+    vm_push(vm, 0, T_NUM);
+}
+
+// Amiga.DrawText(window_ptr, x, y, text, color_pen)
+void amiga_draw_text(VM* vm) {
+    double pen = vm_pop(vm);
+    double text_idx = vm_pop(vm);
+    double y = vm_pop(vm);
+    double x = vm_pop(vm);
+    double win_ref = vm_pop(vm);
+
+    struct Window* win = (struct Window*)((unsigned long)win_ref);
+    const char* str = vm->string_pool[(int)text_idx];
+
+    if (win) {
+        SetAPen(win->RPort, (long)pen);
+        Move(win->RPort, (WORD)x, (WORD)y);
+        Text(win->RPort, (STRPTR)str, strlen(str));
+    }
+    vm_push(vm, 0, T_NUM);
+}
+
+// --- Event Handling ---
+
+// Amiga.GetEvent(window_ptr) -> Map { type: "code", x: 0, y: 0, code: 0 }
+// Returns null if no event is waiting.
+void amiga_get_event(VM* vm) {
+    double win_ref = vm_pop(vm);
+    struct Window* win = (struct Window*)((unsigned long)win_ref);
+
+    if (!win) { vm_push(vm, 0, T_NUM); return; }
+
+    struct IntuiMessage* msg = (struct IntuiMessage*)GetMsg(win->UserPort);
+    if (!msg) {
+        vm_push(vm, 0, T_NUM); // Return 0 (null) if empty
+        return;
+    }
+
+    ULONG class = msg->Class;
+    UWORD code = msg->Code;
+    WORD mouseX = msg->MouseX;
+    WORD mouseY = msg->MouseY;
+
+    // We must reply before pushing new objects to VM to avoid GC issues or lag
+    ReplyMsg((struct Message*)msg);
+
+    // Create a Map to return
+    // We reuse the standard library OP_MAP logic manually or call helper
+    // For simplicity, we'll build a map manually using heap_alloc
+
+    int cap = 4;
+    double map_ptr = heap_alloc(vm, 4);
+    double data_ptr = heap_alloc(vm, cap * 2);
+    double* base = vm_resolve_ptr(vm, map_ptr);
+    base[0] = TYPE_MAP; base[1] = (double)cap; base[2] = 0; base[3] = data_ptr;
+
+    // Helper to push key/value to this map
+    // Note: In a real implementation, you'd add a helper function for this
+    // We will just return an Array [type_str, code, x, y] for speed and ease
+
+    /* Return Format: [Type (str), Code (num), MouseX (num), MouseY (num)]
+    */
+
+    double arr_ptr = heap_alloc(vm, 4 + HEAP_HEADER_ARRAY);
+    double* arr = vm_resolve_ptr(vm, arr_ptr);
+    int* types = vm_resolve_type(vm, arr_ptr);
+
+    arr[0] = TYPE_ARRAY;
+    arr[1] = 4; // Length
+
+    // 1. Type String
+    const char* typeStr = "unknown";
+    if (class == IDCMP_CLOSEWINDOW) typeStr = "close";
+    else if (class == IDCMP_MOUSEBUTTONS) typeStr = "mouse";
+    else if (class == IDCMP_VANILLAKEY) typeStr = "key";
+
+    int str_id = make_string(vm, typeStr);
+    arr[2] = (double)str_id; types[2] = T_STR;
+
+    // 2. Code
+    arr[3] = (double)code; types[3] = T_NUM;
+
+    // 3. X
+    arr[4] = (double)mouseX; types[4] = T_NUM;
+
+    // 4. Y
+    arr[5] = (double)mouseY; types[5] = T_NUM;
+
+    vm_push(vm, arr_ptr, T_OBJ);
+}
+
+// Amiga.Wait(window_ptr) - Blocks until signal
+void amiga_wait(VM* vm) {
+    double win_ref = vm_pop(vm);
+    struct Window* win = (struct Window*)((unsigned long)win_ref);
+    if(win) Wait(1L << win->UserPort->mp_SigBit);
+    vm_push(vm, 0, T_NUM);
+}
+
+
 
 // Implementation of std_copy (Deep Copy)
 void std_copy(VM* vm) {
@@ -907,5 +1163,14 @@ const StdLibDef std_library[] = {
     {"max_list", std_list_max, "num", 1, {"arr"}},
     {"noise", std_noise, "num", 3, {"num", "num", "num"}},
     {"copy", std_copy, "any", 1, {"any"}},
+//{"window", std_amiga_window, "void", 2, {"num", "num"}},
+    {"amiga_open_window", amiga_open_window, "num", 5, {"str", "num", "num", "num", "num"}},
+    {"amiga_close_window", amiga_close_window, "void", 1, {"num"}},
+    {"amiga_draw_line", amiga_draw_line, "void", 6, {"num", "num", "num", "num", "num", "num"}},
+    {"amiga_draw_rect", amiga_draw_rect, "void", 6, {"num", "num", "num", "num", "num", "num"}},
+    {"amiga_draw_text", amiga_draw_text, "void", 5, {"num", "num", "num", "str", "num"}},
+    {"amiga_set_color", amiga_set_color, "void", 5, {"num", "num", "num", "num", "num"}},
+    {"amiga_get_event", amiga_get_event, "any", 1, {"num"}}, // Returns Array or Null
+    {"amiga_wait", amiga_wait, "void", 1, {"num"}},
     {NULL, NULL, NULL, 0, {NULL}}
 };
