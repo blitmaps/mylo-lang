@@ -327,11 +327,6 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // Instantiate Main VM
-    VM vm;
-    vm_init(&vm);
-    compiler_reset();
-
     bool build_mode = false;
     bool bind_mode = false;
     bool dump = false;
@@ -355,7 +350,6 @@ int main(int argc, char** argv) {
         else if (strcmp(argv[i], "--repl") == 0) repl_mode = true;
         else if (strcmp(argv[i], "--help") == 0) {
             print_help();
-            vm_cleanup(&vm);
             return 0;
         }
         else fn = argv[i];
@@ -363,13 +357,11 @@ int main(int argc, char** argv) {
 
     if (version) {
         printf("Mylo version %s\n", VERSION_INFO);
-        vm_cleanup(&vm);
         return 0;
     }
 
     if (repl_mode) {
         // start_repl manages its own VM cycle usually, but since we have one, we could pass it or just cleanup and call start_repl
-        vm_cleanup(&vm);
         start_repl();
         return 0;
     }
@@ -377,16 +369,20 @@ int main(int argc, char** argv) {
     MyloConfig.build_mode = build_mode;
     if(!fn) {
         printf("No input file provided.\n");
-        vm_cleanup(&vm);
         return 1;
     }
 
     char* content = read_file(fn);
     if (!content) {
         printf("Error: Cannot read file %s\n", fn);
-        vm_cleanup(&vm);
         return 1;
     }
+
+    // Instantiate Main VM
+    VM vm;
+    vm_init(&vm);
+    compiler_reset();
+
 
     // Apply TUI Debugger settings to VM instance
     vm.source_code = content;
