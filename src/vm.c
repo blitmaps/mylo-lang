@@ -39,6 +39,7 @@ const char *OP_NAMES[] = {
     "CAST",
     "CHECK_TYPE",
     "OR",
+    "AND",
     "RANGE","SCOPE_ENTER", "SCOPE_EXIT",
     "DEBUGGER"
 };
@@ -1784,6 +1785,15 @@ int vm_step(VM* vm, bool debug_trace) {
             double a = vm->stack[vm->sp]; // Peek 'a' to overwrite it
             // Logic: result is 1.0 if either a or b is non-zero, else 0.0
             vm->stack[vm->sp] = (a != 0.0 || b != 0.0) ? 1.0 : 0.0;
+            vm->stack_types[vm->sp] = T_NUM;
+            break;
+        }
+        case OP_AND: {
+            CHECK_STACK(2);
+            double b = vm_pop(vm);
+            double a = vm->stack[vm->sp]; // Peek 'a' to overwrite it
+            // Logic: result is 1.0 if both a and b are non-zero, else 0.0
+            vm->stack[vm->sp] = (a != 0.0 && b != 0.0) ? 1.0 : 0.0;
             vm->stack_types[vm->sp] = T_NUM;
             break;
         }
