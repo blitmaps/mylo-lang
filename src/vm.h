@@ -58,6 +58,7 @@ typedef enum {
     OP_CAST,
     OP_CHECK_TYPE,
     OP_OR,
+    OP_AND,
     OP_RANGE,
     OP_SCOPE_ENTER,
     OP_SCOPE_EXIT,

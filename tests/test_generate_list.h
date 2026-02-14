@@ -92,9 +92,11 @@ inline TestOutput test_logic() {
     "if (1 == 1) {print(1)} else {print(0)}\n"
     "if (1 || 0) {print(1)} else {print(0)}\n"
     "if (1 != 0) {print(1)} else {print(0)}\n"
-    "if (0 <= 1) {print(1)} else {print(0)}\n";
+    "if (0 <= 1) {print(1)} else {print(0)}\n"
+    "if (1 && 1) {print(1)} else {print(0)}\n";
+
     std::string expected = """"
-        "1\n1\n1\n1\n1\n1\n1\n"; // As it is an array, it is promoted to num array :')
+        "1\n1\n1\n1\n1\n1\n1\n1\n"; // As it is an array, it is promoted to num array :')
     return run_source_test(src, expected);
 }
 

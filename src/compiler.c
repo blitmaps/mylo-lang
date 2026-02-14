@@ -39,7 +39,8 @@ typedef enum {
     TK_CLEAR,
     TK_MONITOR,
     TK_DEBUGGER,
-    TK_OR
+    TK_OR,
+    TK_AND
 } MyloTokenType;
 
 // Token Names for pretty printing
@@ -55,7 +56,7 @@ const char *TOKEN_NAMES[] = {
     "break", "continue", "enum", "module_path",
     "true", "false", "*", "/", "%",
     "embed", "Type Definition", "region", "clear", "monitor",
-    "debugger","||",
+    "debugger","||","&&",
 };
 
 // Mylo Exit Function
@@ -539,6 +540,7 @@ void next_token() {
         case '!': if (*src == '=') { src++; curr.type = TK_NEQ; } else error("Unexpected char '!'"); break;
         case '=': if (*src == '=') { src++; curr.type = TK_EQ; } else curr.type = TK_EQ_ASSIGN; break;
         case '|': if (*src == '|') { src++; curr.type = TK_OR; } else error("Unexpected char '|'"); break;
+        case '&': if (*src == '&') { src++; curr.type = TK_AND; } else { error("Unexpected char '&' (Did you mean &&?)");} break;
         default: error("Unknown char '%c'", *(src - 1));
     }
     curr.length = (int) (src - curr.start);
@@ -1056,11 +1058,22 @@ void range_expr() {
         emit(OP_RANGE);
     }
 }
+// 1. Create the AND expression parser
+void logic_and_expr() {
+    relation_expr();
+    while (curr.type == TK_AND) {
+        match(TK_AND);
+        relation_expr();
+        emit(OP_AND);
+    }
+}
+
+// 2. Update logic_or_expr to point to logic_and_expr instead of relation_expr
 void logic_or_expr() {
-    relation_expr(); // Lower precedence (comparisons)
+    logic_and_expr(); //
     while (curr.type == TK_OR) {
         match(TK_OR);
-        relation_expr();
+        logic_and_expr();
         emit(OP_OR);
     }
 }
