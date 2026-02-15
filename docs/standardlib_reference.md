@@ -1010,6 +1010,12 @@ Draws a line between two points.
 * **x2, y2**: Ending coordinates. 
 * **thickness**: The width of the line in pixels. 
 
+### `web_triangle(x1: num, y1: num, x2: num, y2: num, x3: num, y3: num, color: str) -> any`
+Draws a filled triangle using three sets of coordinates.
+* **x1, y1 / x2, y2 / x3, y3**: The three vertices of the triangle.
+* **color**: Standard color string (name, hex, or rgba).
+
+
 ---
 
 ## **Text & UI**
@@ -1050,3 +1056,4 @@ forever {
     // Render status text
     web_text("System Online", 20, 40, 20)
 }
+```

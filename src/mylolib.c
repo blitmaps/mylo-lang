@@ -1802,30 +1802,69 @@ void std_get_keys(VM *vm) {
 
 // Minimal HTML Screen with SSE Listener
 const char* HTML_SCREEN =
-        "HTTP/1.1 200 OK\r\n"
-        "Content-Type: text/html\r\n"
-        "Connection: close\r\n\r\n"
-        "<!DOCTYPE html><html><head><title>Mylo Canvas</title></head>"
-        "<body style='margin:0;background:#000;overflow:hidden;'>"
-        "<canvas id='v'></canvas><script>"
-        "const cvs=document.getElementById('v'), ctx=cvs.getContext('2d');"
-        "const res=()=>{cvs.width=window.innerWidth; cvs.height=window.innerHeight;};"
-        "window.onresize=res; res();"
-        "console.log('Connecting to stream...');"
-        "const es=new EventSource('/stream');"
-        "es.onmessage=(e)=>{"
-        "  const [cmd, ...a]=e.data.split('|');"
-        "  const col = a[a.length-1];"
-        "  ctx.fillStyle = ctx.strokeStyle = col;"
-        "  if(cmd==='CLR') ctx.clearRect(0,0,cvs.width,cvs.height);"
-        "  else if(cmd==='R') ctx.fillRect(parseFloat(a[0]),parseFloat(a[1]),parseFloat(a[2]),parseFloat(a[3]));"
-        "  else if(cmd==='C') {"
-        "    ctx.beginPath(); ctx.arc(parseFloat(a[0]),parseFloat(a[1]),parseFloat(a[2]),0,Math.PI*2);"
-        "    ctx.fill();"
-        "  }"
-        "};"
-        "es.onerror=(e)=>console.error('SSE Error:', e);"
-        "</script></body></html>";
+    "HTTP/1.1 200 OK\r\n"
+    "Content-Type: text/html\r\n"
+    "Connection: close\r\n\r\n"
+    "<!DOCTYPE html><html><head><title>Mylo Canvas</title></head>"
+    "<body style='margin:0;background:#000;overflow:hidden;'>"
+    "<canvas id='v'></canvas><script>"
+    "const cvs=document.getElementById('v'), ctx=cvs.getContext('2d');"
+    "const res=()=>{cvs.width=window.innerWidth; cvs.height=window.innerHeight;};"
+    "window.onresize=res; res();"
+
+    // Shader Cache to prevent re-compiling every frame
+    "const shaders = new Map();"
+    "const getShader = (w, h, code) => {"
+    "  if(shaders.has(code)) return shaders.get(code);"
+    "  const sc = document.createElement('canvas'); sc.width=w; sc.height=h;"
+    "  const gl = sc.getContext('webgl');"
+    "  const vs = 'attribute vec2 p; void main(){gl_Position=vec4(p,0,1);}';"
+    "  const createS = (t, s) => { const sh=gl.createShader(t); gl.shaderSource(sh,s); gl.compileShader(sh); return sh; };"
+    "  const prog = gl.createProgram();"
+    "  gl.attachShader(prog, createS(gl.VERTEX_SHADER, vs));"
+    "  gl.attachShader(prog, createS(gl.FRAGMENT_SHADER, code));"
+    "  gl.linkProgram(prog); gl.useProgram(prog);"
+    "  const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);"
+    "  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]), gl.STATIC_DRAW);"
+    "  const pL = gl.getAttribLocation(prog, 'p'); gl.enableVertexAttribArray(pL);"
+    "  gl.vertexAttribPointer(pL, 2, gl.FLOAT, false, 0, 0);"
+    "  const resL = gl.getUniformLocation(prog, 'u_resolution');"
+    "  const timeL = gl.getUniformLocation(prog, 'u_time');"
+    "  const render = (t) => {"
+    "    gl.uniform2f(resL, w, h); gl.uniform1f(timeL, t/1000);"
+    "    gl.drawArrays(gl.TRIANGLES, 0, 6); return sc;"
+    "  };"
+    "  shaders.set(code, render); return render;"
+    "};"
+
+    "const es=new EventSource('/stream');"
+    "es.onmessage=(e)=>{"
+    "  const [cmd, ...a]=e.data.split('|');"
+    "  ctx.fillStyle = ctx.strokeStyle = a[a.length-1];"
+    "  if(cmd==='CLR') ctx.clearRect(0,0,cvs.width,cvs.height);"
+    "  else if(cmd==='R') ctx.fillRect(parseFloat(a[0]),parseFloat(a[1]),parseFloat(a[2]),parseFloat(a[3]));"
+    "  else if(cmd==='C') {"
+    "    ctx.beginPath(); ctx.arc(parseFloat(a[0]),parseFloat(a[1]),parseFloat(a[2]),0,Math.PI*2); ctx.fill();"
+    "  }"
+    "  else if(cmd==='L') {"
+    "    ctx.lineWidth=parseFloat(a[4]); ctx.beginPath();"
+    "    ctx.moveTo(parseFloat(a[0]),parseFloat(a[1])); ctx.lineTo(parseFloat(a[2]),parseFloat(a[3])); ctx.stroke();"
+    "  }"
+    "  else if(cmd==='TRI') {"
+    "    ctx.beginPath(); ctx.moveTo(parseFloat(a[0]),parseFloat(a[1]));"
+    "    ctx.lineTo(parseFloat(a[2]),parseFloat(a[3])); ctx.lineTo(parseFloat(a[4]),parseFloat(a[5]));"
+    "    ctx.closePath(); ctx.fill();"
+    "  }"
+    "  else if(cmd==='SHD') {"
+    "    const draw = getShader(parseFloat(a[2]), parseFloat(a[3]), a[4]);"
+    "    ctx.drawImage(draw(performance.now()), parseFloat(a[0]), parseFloat(a[1]));"
+    "  }"
+    "  else if(cmd==='T') {"
+    "    ctx.font = a[2]+'px monospace'; ctx.fillText(a[3], parseFloat(a[0]), parseFloat(a[1]));"
+    "  }"
+    "};"
+    "es.onerror=(e)=>console.error('SSE Error:', e);"
+    "</script></body></html>";
 
 static int server_fd = -1;
 static int client_fd = -1;
@@ -2005,6 +2044,21 @@ void std_web_line(VM *vm) {
     web_ret(vm);
 }
 
+void std_web_triangle(VM *vm) {
+    char* color = (char*)get_str(vm, vm_pop(vm)); // Arg 7
+    double y3 = vm_pop(vm);                        // Arg 6
+    double x3 = vm_pop(vm);                        // Arg 5
+    double y2 = vm_pop(vm);                        // Arg 4
+    double x2 = vm_pop(vm);                        // Arg 3
+    double y1 = vm_pop(vm);                        // Arg 2
+    double x1 = vm_pop(vm);                        // Arg 1
+
+    char payload[512];
+    snprintf(payload, sizeof(payload), "%f|%f|%f|%f|%f|%f|%s", x1, y1, x2, y2, x3, y3, color);
+    send_event_sse("TRI", payload);
+    web_ret(vm);
+}
+
 const StdLibDef std_library[] = {
     {"len", std_len, "num", 1, {"any"}},
     {"contains", std_contains, "num", 2, {"any", "any"}},
@@ -2057,5 +2111,6 @@ const StdLibDef std_library[] = {
     {"web_rect",   std_web_rect,     "any", 5, {"num", "num", "num", "num", "str"}},
     {"web_circle", std_web_circle,   "any", 4, {"num", "num", "num", "str"}},
     {"web_line",   std_web_line,     "any", 6, {"num", "num", "num", "num", "num", "str"}},
+    {"web_triangle", std_web_triangle, "any", 7, {"num","num","num","num","num","num","str"}},
     {NULL, NULL, NULL, 0, {NULL}}
 };
