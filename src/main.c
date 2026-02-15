@@ -1,4 +1,4 @@
-#define VERSION_INFO "0.3.3"
+#define VERSION_INFO "0.3.4"
 #define MAX_INPUT 4096
 
 #include <setjmp.h>
