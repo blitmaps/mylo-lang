@@ -1089,6 +1089,27 @@ static void exec_math_op(VM* vm, int op) {
         broadcast_math(vm, op, arrVal, scalVal, scalType, objIsLhs);
         return;
     }
+
+    if (op == OP_ADD && (ta == T_STR || tb == T_STR)) {
+        char s1[MAX_STRING_LENGTH], s2[MAX_STRING_LENGTH];
+
+        // Convert Left Side
+        if (ta == T_STR) strncpy(s1, vm->string_pool[(int)a], MAX_STRING_LENGTH-1);
+        else snprintf(s1, MAX_STRING_LENGTH, "%g", a);
+        s1[MAX_STRING_LENGTH-1] = '\0';
+
+        // Convert Right Side
+        if (tb == T_STR) strncpy(s2, vm->string_pool[(int)b], MAX_STRING_LENGTH-1);
+        else snprintf(s2, MAX_STRING_LENGTH, "%g", b);
+        s2[MAX_STRING_LENGTH-1] = '\0';
+
+        char res[MAX_STRING_LENGTH * 2];
+        snprintf(res, sizeof(res), "%s%s", s1, s2);
+        int id = make_string(vm, res);
+        vm->stack[vm->sp] = (double)id;
+        vm->stack_types[vm->sp] = T_STR;
+        return;
+    }
     RUNTIME_ERROR("Invalid types for math operation");
 }
 

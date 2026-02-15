@@ -1011,15 +1011,19 @@ void term() {
 }
 
 void additive_expr() {
-    term();
+    term(); // Parses multiplication/division first
     while (curr.type == TK_PLUS || curr.type == TK_MINUS) {
         MyloTokenType op = curr.type;
         next_token();
         term();
         switch (op) {
-            case TK_PLUS: emit(OP_ADD);
+            case TK_PLUS:
+                // The VM's exec_math_op already checks if the
+                // operands are T_STR and performs concatenation.
+                emit(OP_ADD);
                 break;
-            case TK_MINUS: emit(OP_SUB);
+            case TK_MINUS:
+                emit(OP_SUB);
                 break;
             default: break;
         }
@@ -1166,11 +1170,8 @@ static void parse_region() {
 static void parse_print() {
     match(TK_PRINT);
     match(TK_LPAREN);
-    if (curr.type == TK_STR) {
-        int id = make_string(compiling_vm, curr.text);
-        emit(OP_PSH_STR); emit(id);
-        match(TK_STR);
-    } else expression();
+    expression();
+
     match(TK_RPAREN);
     emit(OP_PRN);
 }

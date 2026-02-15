@@ -462,6 +462,19 @@ inline TestOutput test_list_concat() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_string_concat() {
+
+    std::string src = """"
+    "print(\"He\" + \"llo\")\n"
+    "print(\"He\" + 77)\n";
+
+    std::string expected = """"
+    "Hello\nHe77\n";
+
+    return run_source_test(src, expected);
+}
+
+
 inline TestOutput test_list_slices() {
 
     std::string src = """"
@@ -1328,6 +1341,7 @@ inline void test_generate_list() {
     ADD_TEST("Test Struct", test_struct);
     ADD_TEST("Test Type Struct", test_typed_struct);
     ADD_TEST("Test String Interpolation", test_string_interp);
+    ADD_TEST("Test String Concat", test_string_concat);
     ADD_TEST("Test Scope", test_scope);
     ADD_TEST("Test Variable Access", test_var_access);
     ADD_TEST("Test Reverse Loop", test_literal_reverse);
