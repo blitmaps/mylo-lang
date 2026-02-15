@@ -52,6 +52,16 @@ The Mylo Standard Library provides essential functions for file I/O, math, and d
   * [Universal Bus](#universal-bus)
     + [`bus_get(key: str) -> any`](#bus_getkey-str---any)
     + [`bus_set(key: str, value: any) -> any`](#bus_setkey-str-value-any---num)
+  * [Web Visual Library](#mylo-web-visual-library)
+    + [`web_init() -> any`](#web_init---any)
+    + [`web_status(wait: num) -> num`](#web_statuswait-num---num)
+    + [`web_clr() -> any`](#web_clr---any)
+  * [Web Primitives](#drawing-primitives)
+    + [`web_rect(x: num, y: num, w: num, h: num, color: str) -> any`](#web_rectx-num-y-num-w-num-h-num-color-str---any)
+    + [`web_circle(x: num, y: num, r: num, color: str) -> any`](#web_circlex-num-y-num-r-num-color-str---any)
+    + [`web_line(x1: num, y1: num, x2: num, y2: num, thickness: num, color: str) -> any`](#web_linex1-num-y1-num-x2-num-y2-num-thickness-num-color-str---any)
+    + [`web_text(text: str, x: num, y: num, size: num) -> any`](#web_texttext-str-x-num-y-num-size-num---any)
+
 
 <!-- TOC end -->
 
@@ -947,3 +957,96 @@ if (diff > 1) {
     print("Hard Mode Active")
 }
 ```
+
+# Mylo Web Visual Library
+
+The Web Library provides a high-fidelity alternative to standard terminal output. It enables hardware-accelerated 2D graphics, anti-aliased primitives, and transparent UI overlays using standard web technologies. 
+
+### **Getting Started**
+1.  Call `web_init()` at the start of your script. 
+2.  Open your browser to `http://localhost:8080`. 
+3.  The script will pause until the browser connects, then begin streaming. 
+
+---
+
+## **Core Lifecycle**
+
+### `web_init() -> any`
+Initializes the background TCP server and sets up the internal EventSource stream. 
+* **Behavior:** Blocks execution until a browser successfully connects to the display URL. 
+* **URL:** `http://localhost:8080` 
+
+### `web_status(wait: num) -> num`
+Checks the connection status of the browser display. 
+* **Arguments:** * `wait`: If `0`, performs a non-blocking check. 
+  * If `1`, blocks execution until a new browser connection is established (useful for handling window refreshes). 
+* **Returns:** `1` if a browser is currently connected, `0` otherwise. 
+
+### `web_clr() -> any`
+Clears the entire canvas, resetting it to a transparent state.  Use this at the start of every frame in a `forever` loop to prevent "trails" from moving objects. 
+
+---
+
+## **Drawing Primitives**
+
+All drawing functions accept a `color` string as their final argument.  The browser engine supports:
+* **Named Colors:** `"orange"`, `"cyan"`, `"magenta"` 
+* **Hex Codes:** `"#FF5500"`, `"#00CCFF"` 
+* **RGBA:** `"rgba(255, 0, 0, 0.5)"` (Supports transparency) 
+
+### `web_rect(x: num, y: num, w: num, h: num, color: str) -> any`
+Draws a filled rectangle at the specified coordinates. 
+* **x, y**: The top-left corner of the rectangle. 
+* **w, h**: The width and height in pixels. 
+
+### `web_circle(x: num, y: num, r: num, color: str) -> any`
+Draws a filled, anti-aliased circle. 
+* **x, y**: The center point of the circle. 
+* **r**: The radius in pixels. 
+
+### `web_line(x1: num, y1: num, x2: num, y2: num, thickness: num, color: str) -> any`
+Draws a line between two points. 
+* **x1, y1**: Starting coordinates. 
+* **x2, y2**: Ending coordinates. 
+* **thickness**: The width of the line in pixels. 
+
+---
+
+## **Text & UI**
+
+### `web_text(text: str, x: num, y: num, size: num) -> any`
+Renders high-fidelity text using the browser's default monospace font. 
+* **text**: The string to display. 
+* **x, y**: The baseline starting coordinates. 
+* **size**: The font size in pixels (e.g., `24`). 
+
+---
+
+## **Example Usage**
+
+```javascript
+// Initialize the display
+web_init()
+
+forever {
+    // Re-connect if the browser window was closed/refreshed
+    if (web_status(0) == 0) {
+        print("Waiting for browser...")
+        web_status(1) 
+    }
+
+    // Start a new frame
+    web_clr()
+    
+    // Draw a semi-transparent background
+    web_rect(0, 0, 1920, 1080, "rgba(20, 20, 20, 0.8)")
+    
+    // Draw an orange circle
+    web_circle(400, 300, 50, "orange")
+    
+    // Draw a grid line
+    web_line(0, 300, 800, 300, 2, "#444")
+    
+    // Render status text
+    web_text("System Online", 20, 40, 20)
+}
