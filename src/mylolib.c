@@ -14,35 +14,6 @@
 #include <stdlib.h>
 
 // AMIGA
-/*#include <proto/intuition.h>
-#include <proto/dos.h>
-#include <intuition/intuition.h>
-#include <utility/tagitem.h>
-
-// For testing 1 window
-struct Window *myWindow;
-
-
-void std_amiga_window(VM* vm) {
-    double height = vm_pop(vm);
-    double width = vm_pop(vm);
-
-    struct NewWindow winlayout = {
-        20, 20,
-        200, 150,
-        0,1,
-        IDCMP_CLOSEWINDOW,
-        WFLG_SIZEGADGET | WFLG_DRAGBAR | WFLG_DEPTHGADGET |    WFLG_CLOSEGADGET | WFLG_ACTIVATE,
-        NULL, NULL,
-        "My Window",
-        NULL,NULL,
-        0,0,
-        600,400,
-        WBENCHSCREEN
-     };
-    myWindow = OpenWindow(&winlayout);
-
-}*/
 
 /* mylo_amiga.c */
 #include <proto/exec.h>

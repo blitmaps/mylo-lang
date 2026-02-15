@@ -23,6 +23,10 @@ extern void enter_debugger(VM* vm);
 extern int ffi_count;
 extern int bound_ffi_count;
 
+VM vm;
+char buffer[MAX_INPUT];
+char line_buf[MAX_INPUT];
+
 void disassemble(VM* vm) {
     printf("\n--- Disassembly ---\n");
     int i = 0;
@@ -120,14 +124,11 @@ void print_greeting() {
 }
 
 void start_repl() {
-    char buffer[MAX_INPUT];
-    char line_buf[MAX_INPUT];
 
     // Setup
     print_greeting();
 
     // Instantiate VM
-    VM vm;
     vm_init(&vm);
     compiler_reset();
 
@@ -316,7 +317,7 @@ void print_help() {
     SET_COLOUR(FG_GRAY, BG_DEFAULT);
     printf(" More examples, documentation and guides at "); SET_COLOUR(FG_CYAN, BG_DEFAULT); printf("https://github.com/blitmaps/mylo-lang/tree/main/docs\n");
     SET_COLOUR(FG_DEFAULT, BG_DEFAULT);
-
+    printf("VM Size: %lu", sizeof(VM));
 }
 #undef PRINT_ARG
 
@@ -395,8 +396,8 @@ int main(int argc, char** argv) {
         char out_name[1024];
         snprintf(out_name, 1024, "%s_bind.c", fn);
         generate_binding_c_source(&vm, out_name);
-        free(content);
-        vm_cleanup(&vm);
+        //free(content);
+        //vm_cleanup(&vm);
         return 0;
     }
 
@@ -404,15 +405,15 @@ int main(int argc, char** argv) {
     // The Debug Adapter manages its own parsing/execution loop via stdin/out commands
     if (debug_mode) {
         start_debug_adapter(&vm, fn, content);
-        free(content);
-        vm_cleanup(&vm);
+        //free(content);
+        //vm_cleanup(&vm);
         return 0;
     }
 
     if (build_mode) {
         compile_to_c_source(&vm, "out.c");
-        free(content);
-        vm_cleanup(&vm);
+        //free(content);
+        //vm_cleanup(&vm);
         return 0;
     }
 
@@ -423,8 +424,8 @@ int main(int argc, char** argv) {
         setTerminalColor(MyloFgCyan, MyloBgColorDefault);
         printf("Please compile it to bytecode using: mylo --build %s\n", fn);
         setTerminalColor(MyloFgDefault, MyloBgColorDefault);
-        free(content);
-        vm_cleanup(&vm);
+        //free(content);
+        //vm_cleanup(&vm);
         return 1;
     }
 
@@ -437,7 +438,7 @@ int main(int argc, char** argv) {
 
     run_vm(&vm, trace);
 
-    free(content);
-    vm_cleanup(&vm);
+    //free(content);
+    //vm_cleanup(&vm);
     return 0;
 }

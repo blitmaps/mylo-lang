@@ -4,30 +4,30 @@
 // VM Memory Limits
 #define STACK_SIZE 2048
 #define MAX_CODE 2048
-#define MAX_HEAP 2048
-#define MAX_GLOBALS 2048
-#define MAX_CONSTANTS 1024
-#define MAX_ARENAS 64         // 6 bits
+#define MAX_HEAP 5000
+#define MAX_GLOBALS 64
+#define MAX_CONSTANTS 64
+#define MAX_ARENAS 4         // 6 bits
 
 // String Limits
-#define MAX_STRINGS 1024
-#define MAX_STRING_LENGTH 1024
+#define MAX_STRINGS 128
+#define MAX_STRING_LENGTH 256
 #define MAX_C_HEADERS 32
 
 // Compilation Limits
 #define MAX_IDENTIFIER 64
-#define MAX_STRUCTS 64
+#define MAX_STRUCTS 32
 #define MAX_FIELDS 16
 #define MAX_NATIVES 64
 #define MAX_FFI_ARGS 12
 #define MAX_C_BLOCK_SIZE 1024
 #define MAX_LOOP_NESTING 32
 #define MAX_JUMPS_PER_LOOP 64
-#define MAX_ENUM_MEMBERS 1024
+#define MAX_ENUM_MEMBERS 32
 #define MAX_SEARCH_PATHS 16
 
 // Output
-#define OUTPUT_BUFFER_SIZE 512
+#define OUTPUT_BUFFER_SIZE 256
 
 // Types
 #define TYPE_ANY -99
