@@ -3,8 +3,6 @@
 
 #include "vm.h"
 
-#define MAX_STD_ARGS 4
-
 typedef struct {
     const char *name;
     NativeFunc func;

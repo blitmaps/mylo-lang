@@ -7,6 +7,7 @@
 #include "vm.h"
 #include "defines.h"
 #include "os_job.h"
+#include <errno.h>
 
 #ifdef _WIN32
     #include <io.h>
@@ -24,6 +25,19 @@
 
 #endif
 
+
+// HTTP Display Includes
+#include <stdio.h>
+#include <string.h>
+
+#ifdef _WIN32
+    #include <winsock2.h>
+    #pragma comment(lib, "ws2_32.lib")
+#else
+    #include <sys/socket.h>
+    #include <netinet/in.h>
+    #include <unistd.h>
+#endif
 
 // --- Worker Structure ---
 typedef struct {
@@ -1786,6 +1800,211 @@ void std_get_keys(VM *vm) {
     vm_push(vm, ptr, T_OBJ);
 }
 
+// Minimal HTML Screen with SSE Listener
+const char* HTML_SCREEN =
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: text/html\r\n"
+        "Connection: close\r\n\r\n"
+        "<!DOCTYPE html><html><head><title>Mylo Canvas</title></head>"
+        "<body style='margin:0;background:#000;overflow:hidden;'>"
+        "<canvas id='v'></canvas><script>"
+        "const cvs=document.getElementById('v'), ctx=cvs.getContext('2d');"
+        "const res=()=>{cvs.width=window.innerWidth; cvs.height=window.innerHeight;};"
+        "window.onresize=res; res();"
+        "console.log('Connecting to stream...');"
+        "const es=new EventSource('/stream');"
+        "es.onmessage=(e)=>{"
+        "  const [cmd, ...a]=e.data.split('|');"
+        "  const col = a[a.length-1];"
+        "  ctx.fillStyle = ctx.strokeStyle = col;"
+        "  if(cmd==='CLR') ctx.clearRect(0,0,cvs.width,cvs.height);"
+        "  else if(cmd==='R') ctx.fillRect(parseFloat(a[0]),parseFloat(a[1]),parseFloat(a[2]),parseFloat(a[3]));"
+        "  else if(cmd==='C') {"
+        "    ctx.beginPath(); ctx.arc(parseFloat(a[0]),parseFloat(a[1]),parseFloat(a[2]),0,Math.PI*2);"
+        "    ctx.fill();"
+        "  }"
+        "};"
+        "es.onerror=(e)=>console.error('SSE Error:', e);"
+        "</script></body></html>";
+
+static int server_fd = -1;
+static int client_fd = -1;
+
+void std_canvas_init(VM *vm) {
+    int port = 8080;
+    struct sockaddr_in addr;
+    int opt = 1;
+
+    // ONLY create the server socket if it doesn't exist yet
+    if (server_fd == -1) {
+#ifdef _WIN32
+        WSADATA wsa; WSAStartup(MAKEWORD(2,2), &wsa);
+#endif
+        server_fd = socket(AF_INET, SOCK_STREAM, 0);
+        setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, (char*)&opt, sizeof(opt));
+
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = INADDR_ANY;
+        addr.sin_port = htons(port);
+
+        if (bind(server_fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+            printf("Bind failed: %d\n", errno);
+            vm_push(vm, 0, T_NUM);
+            return;
+        }
+        listen(server_fd, 3);
+        printf("Mylo Display active: http://localhost:%d\n", port);
+    }
+
+    printf("Waiting for browser connection...\n");
+
+    while (1) {
+        int fd = accept(server_fd, NULL, NULL);
+        char buf[1024] = {0};
+        recv(fd, buf, 1024, 0);
+
+        if (strstr(buf, "GET /stream")) {
+            const char* sse_hdr =
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: text/event-stream\r\n"
+                "Cache-Control: no-cache\r\n"
+                "Connection: keep-alive\r\n\r\n";
+            send(fd, sse_hdr, strlen(sse_hdr), 0);
+            client_fd = fd;
+            printf("Visual Stream Connected!\n");
+            break;
+        } else {
+            send(fd, HTML_SCREEN, strlen(HTML_SCREEN), 0);
+#ifdef _WIN32
+            closesocket(fd);
+#else
+            close(fd);
+#endif
+        }
+    }
+    vm_push(vm, 1.0, T_NUM); // Return true to indicate successful connection
+}
+// --- Helper: Minimal Base64 for Image Transmission ---
+char* base64_encode(const unsigned char* data, size_t input_length) {
+    const char table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    size_t output_length = 4 * ((input_length + 2) / 3);
+    char* encoded_data = malloc(output_length + 1);
+    for (size_t i = 0, j = 0; i < input_length;) {
+        uint32_t octet_a = i < input_length ? data[i++] : 0;
+        uint32_t octet_b = i < input_length ? data[i++] : 0;
+        uint32_t octet_c = i < input_length ? data[i++] : 0;
+        uint32_t triple = (octet_a << 16) + (octet_b << 8) + octet_c;
+        encoded_data[j++] = table[(triple >> 18) & 0x3F];
+        encoded_data[j++] = table[(triple >> 12) & 0x3F];
+        encoded_data[j++] = table[(triple >> 6) & 0x3F];
+        encoded_data[j++] = table[triple & 0x3F];
+    }
+    encoded_data[output_length] = '\0';
+    return encoded_data;
+}
+
+// --- SSE Event Dispatcher ---
+void send_event_sse(const char* cmd, const char* data) {
+    if (client_fd == -1) return;
+
+    char buf[4096];
+    int len = snprintf(buf, sizeof(buf), "data: %s|%s\n\n", cmd, data);
+
+#ifdef _WIN32
+    int sent = send(client_fd, buf, len, 0);
+#else
+    // MSG_NOSIGNAL prevents the OS from killing Mylo when the browser closes
+    int sent = send(client_fd, buf, len, MSG_NOSIGNAL);
+#endif
+
+    if (sent < 0) {
+#ifdef _WIN32
+        closesocket(client_fd);
+#else
+        close(client_fd);
+#endif
+        client_fd = -1;
+    }
+}
+
+void std_web_status(VM *vm) {
+    double wait_val = vm_pop(vm);
+    int wait_for_reconnect = (int)wait_val;
+
+    // If lost and wait is requested, re-trigger the init logic
+    if (client_fd == -1 && wait_for_reconnect == 1) {
+        printf("Connection lost. Re-initializing listener...\n");
+        // Reuse your existing std_canvas_init logic
+        std_canvas_init(vm);
+        return; // std_canvas_init already pushes a return value
+    }
+
+    // Return 1 if connected, 0 otherwise
+    vm_push(vm, client_fd != -1 ? 1.0 : 0.0, T_NUM);
+}
+
+// --- Mylo Native Functions ---
+void std_canvas_text(VM *vm) {
+    // Signature: text(str, x, y, size)
+    double size = vm_pop(vm);
+    double y = vm_pop(vm);
+    double x = vm_pop(vm);
+    char* text = (char*)get_str(vm, vm_pop(vm));
+
+    char payload[512];
+    snprintf(payload, 512, "%f|%f|%f|%s", x, y, size, text);
+    send_event_sse("T", payload);
+    vm_push(vm, 0, T_NUM);
+
+}
+
+void std_canvas_clear(VM *vm) {
+    send_event_sse("CLR", "");
+    vm_push(vm, 0, T_NUM);
+}
+
+// --- Helper to push return value ---
+void web_ret(VM *vm) { vm_push(vm, 0, T_NUM); }
+
+void std_web_rect(VM *vm) {
+    char* color = (char*)get_str(vm, vm_pop(vm));
+    double h = vm_pop(vm);
+    double w = vm_pop(vm);
+    double y = vm_pop(vm);
+    double x = vm_pop(vm);
+
+    char payload[256];
+    snprintf(payload, 256, "%f|%f|%f|%f|%s", x, y, w, h, color);
+    send_event_sse("R", payload);
+    web_ret(vm);
+}
+
+void std_web_circle(VM *vm) {
+    char* color = (char*)get_str(vm, vm_pop(vm));
+    double r = vm_pop(vm);
+    double y = vm_pop(vm);
+    double x = vm_pop(vm);
+
+    char payload[256];
+    snprintf(payload, 256, "%f|%f|%f|%s", x, y, r, color);
+    send_event_sse("C", payload);
+    web_ret(vm);
+}
+
+void std_web_line(VM *vm) {
+    char* color = (char*)get_str(vm, vm_pop(vm));
+    double thickness = vm_pop(vm);
+    double y2 = vm_pop(vm);
+    double x2 = vm_pop(vm);
+    double y1 = vm_pop(vm);
+    double x1 = vm_pop(vm);
+
+    char payload[256];
+    snprintf(payload, 256, "%f|%f|%f|%f|%f|%s", x1, y1, x2, y2, thickness, color);
+    send_event_sse("L", payload);
+    web_ret(vm);
+}
+
 const StdLibDef std_library[] = {
     {"len", std_len, "num", 1, {"any"}},
     {"contains", std_contains, "num", 2, {"any", "any"}},
@@ -1831,5 +2050,12 @@ const StdLibDef std_library[] = {
     {"kbhit", std_kbhit, "num", 0, {NULL}},
     {"get_keys", std_get_keys, "str", 0, {NULL}},
     {"copy", std_copy, "any", 1, {"any"}},
+    {"web_status", std_web_status,   "any", 1, {"num"}}, // 1 arg: wait (bool)
+    {"web_init",   std_canvas_init,  "void", 0, {NULL}},
+    {"web_text",   std_canvas_text,  "void", 4, {"str", "num", "num", "num"}},
+    {"web_clr",  std_canvas_clear, "void", 0, {NULL}},
+    {"web_rect",   std_web_rect,     "any", 5, {"num", "num", "num", "num", "str"}},
+    {"web_circle", std_web_circle,   "any", 4, {"num", "num", "num", "str"}},
+    {"web_line",   std_web_line,     "any", 6, {"num", "num", "num", "num", "num", "str"}},
     {NULL, NULL, NULL, 0, {NULL}}
 };
