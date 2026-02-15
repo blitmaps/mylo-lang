@@ -1,0 +1,22 @@
+web_init()
+
+forever {
+    
+    if (web_status(0) == 0) {
+        print("Waiting for reconnection...")
+        web_status(1) //Blocks for reconnection to 8080
+    }
+    web_clr()
+    
+    // 1. Named color
+    web_rect(50, 50, 100, 100, "orange")
+    
+    // 2. Hex color
+    web_circle(300, 100, 40, "#00ffcc")
+    
+    // 3. RGBA color (Transparency!)
+    web_line(50, 200, 400, 250, 5, "rgba(255, 255, 255, 0.5)")
+    
+    // 4. Creative overlapping
+    web_circle(100, 100, 60, "rgba(255, 0, 0, 0.3)")
+}
