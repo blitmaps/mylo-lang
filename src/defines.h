@@ -95,4 +95,16 @@
 #define UNPACK_GEN(ptr) \
     ((int)(((unsigned long long)(ptr) >> (PTR_OFFSET_BITS + PTR_ARENA_BITS)) & 0x3FFF))
 
+
+// For bundles
+
+#define MYLO_MAGIC "MYLO_EXE"
+
+typedef struct {
+    long bytecode_size;
+    long const_size;     // Size of constants block
+    long string_size;    // Size of string pool
+    char magic[9];       // "MYLO_EXE\0"
+} StandaloneFooter;
+
 #endif

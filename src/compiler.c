@@ -2502,3 +2502,58 @@ void compile_repl(VM* vm, char *source, int *out_start_ip) {
         vm->global_symbols[i].addr = globals[i].addr;
     }
 }
+
+// Copies the host executable and appends the current program's bytecode
+void create_standalone_executable(VM* vm, const char* output_filename, const char* host_exe_path) {
+    FILE* host = fopen(host_exe_path, "rb");
+    if (!host) {
+        printf("Error: Could not open host executable '%s'\n", host_exe_path);
+        exit(1);
+    }
+
+    FILE* out = fopen(output_filename, "wb");
+    if (!out) {
+        printf("Error: Could not create output file '%s'\n", output_filename);
+        fclose(host);
+        exit(1);
+    }
+
+    // 1. Copy the Host Executable (The VM itself)
+    char buffer[4096];
+    size_t n;
+    while ((n = fread(buffer, 1, sizeof(buffer), host)) > 0) {
+        fwrite(buffer, 1, n, out);
+    }
+
+    // 2. Append Bytecode
+    fwrite(vm->bytecode, sizeof(int), vm->code_size, out);
+
+    // 3. Append Constants
+    fwrite(vm->constants, sizeof(double), vm->const_count, out);
+
+    // 4. Append String Pool
+    // We flatten the 2D array for simple writing
+    fwrite(vm->string_pool, MAX_STRING_LENGTH, vm->str_count, out);
+
+    // 5. Append Footer (The Metadata)
+    StandaloneFooter footer;
+    strcpy(footer.magic, MYLO_MAGIC);
+    footer.bytecode_size = vm->code_size * sizeof(int);
+    footer.const_size = vm->const_count * sizeof(double);
+    footer.string_size = vm->str_count * MAX_STRING_LENGTH;
+
+    fwrite(&footer, sizeof(StandaloneFooter), 1, out);
+
+    // Cleanup
+    fclose(host);
+    fclose(out);
+
+    // Make executable (Unix-like systems only, ignored on Windows)
+#ifndef _WIN32
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd), "chmod +x %s", output_filename);
+    system(cmd);
+#endif
+
+    printf("Successfully created standalone executable: %s\n", output_filename);
+}

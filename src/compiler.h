@@ -53,4 +53,5 @@ void compile_to_c_source(VM* vm, const char *output_filename);
 void generate_binding_c_source(VM* vm, const char *output_filename);
 void compile_repl(VM* vm, char* source, int* out_start_ip);
 void compiler_reset();
+void create_standalone_executable(VM* vm, const char* output_filename, const char* host_exe_path);
 #endif
