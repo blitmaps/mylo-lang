@@ -67,7 +67,6 @@ typedef enum {
 
 extern const char *OP_NAMES[];
 
-// ... [Rest of file unchanged] ...
 typedef struct {
     char name[64];
     int addr;
@@ -102,9 +101,15 @@ typedef struct {
     int fp;       // Frame pointer (safety check)
 } VMScope;
 
+
 // Forward declaration
 struct VM;
 typedef void (*NativeFunc)(struct VM *);
+
+typedef struct {
+    char name[64];   // Name of the library (e.g., "raylib_binding.so")
+    int start_index; // The VM Native ID index where this library starts
+} Dependency;
 
 typedef struct VM {
     double* stack;
@@ -139,6 +144,8 @@ typedef struct VM {
     int last_debug_line;
     // --- Native Interface ---
     NativeFunc natives[MAX_NATIVES];
+    Dependency dependencies[MAX_DEPENDENCIES];
+    int dependency_count;
 } VM;
 
 typedef struct {
@@ -188,5 +195,7 @@ void enter_debugger(VM* vm);
 #define MYLO_RETRIEVE_FROM_VM(vm, id, c_type, type_name) (c_type*)vm_get_ref(vm, (int)(id), type_name)
 #define MYLO_REGISTER_IN_VM(vm, ptr, type_name) vm_store_ptr(vm, (void*)(ptr), type_name)
 
+// [NEW] Standalone Loader
+bool load_self_contained(VM* vm, const char* exe_path);
 
 #endif

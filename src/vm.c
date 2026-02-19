@@ -10,6 +10,7 @@
 #include <stdarg.h>
 
 #include "mylolib.h"
+#include "loader.h"
 
 // --- Global Instance ---
 // VM vm; // REMOVED GLOBAL VM
@@ -364,6 +365,7 @@ void vm_init(VM* vm) {
         vm->local_symbol_count = 0;
         vm->cli_debug_mode = false;
         vm->last_debug_line = -1;
+        vm->dependency_count = 0; // [NEW] Reset dependencies
 
         // 2. Clear Small Buffers
         memset(vm->natives, 0, sizeof(vm->natives));
@@ -450,6 +452,7 @@ void vm_init(VM* vm) {
     vm->source_code = NULL;
     vm->cli_debug_mode = false;
     vm->last_debug_line = -1;
+    vm->dependency_count = 0; // [NEW] Initialize dependency count
     memset(vm->natives, 0, sizeof(vm->natives));
     register_stdlib(vm);
 }
@@ -1866,4 +1869,83 @@ void run_vm_from(VM* vm, int start_ip, bool debug_trace) {
 
 void run_vm(VM* vm, bool debug_trace) {
     run_vm_from(vm, 0, debug_trace);
+}
+
+// =========================================================
+// [NEW] Standalone Loader Implementation
+// =========================================================
+
+typedef void (*BindFunc)(VM *, int, MyloAPI *);
+
+bool load_self_contained(VM* vm, const char* exe_path) {
+    FILE* f = fopen(exe_path, "rb");
+    if (!f) return false;
+
+    // Check Footer
+    fseek(f, -((long)sizeof(StandaloneFooter)), SEEK_END);
+    StandaloneFooter footer;
+    if (fread(&footer, sizeof(StandaloneFooter), 1, f) != 1) { fclose(f); return false; }
+    if (strcmp(footer.magic, MYLO_MAGIC) != 0) { fclose(f); return false; }
+
+    // Calculate offsets
+    // Footer is strictly at the end.
+    // Order written: [HOST EXE] [BYTECODE] [CONSTANTS] [STRINGS] [DEPENDENCIES] [FOOTER]
+    long total_payload_size = footer.bytecode_size + footer.const_size + footer.string_size + footer.dependency_size;
+    fseek(f, -(total_payload_size + (long)sizeof(StandaloneFooter)), SEEK_END);
+
+    // 1. Read Bytecode
+    vm->code_size = footer.bytecode_size / sizeof(int);
+    fread(vm->bytecode, sizeof(int), vm->code_size, f);
+
+    // 2. Read Constants
+    vm->const_count = footer.const_size / sizeof(double);
+    fread(vm->constants, sizeof(double), vm->const_count, f);
+
+    // 3. Read Strings
+    vm->str_count = footer.string_size / MAX_STRING_LENGTH;
+    fread(vm->string_pool, MAX_STRING_LENGTH, vm->str_count, f);
+
+    // 4. Read & Load Dependencies
+    int dep_count = footer.dependency_size / sizeof(Dependency);
+    if (dep_count > 0) {
+        Dependency* deps = malloc(sizeof(Dependency) * dep_count);
+        fread(deps, sizeof(Dependency), dep_count, f);
+
+        // Prepare API for binding (Same setup as parse_import in compiler.c)
+        MyloAPI api;
+        api.push = vm_push;
+        api.pop = vm_pop;
+        api.make_string = make_string;
+        api.heap_alloc = heap_alloc;
+        api.resolve_ptr = vm_resolve_ptr;
+        api.store_copy = vm_store_copy;
+        api.store_ptr = vm_store_ptr;
+        api.get_ref = vm_get_ref;
+        api.free_ref = vm_free_ref;
+        api.natives_array = vm->natives;
+        api.string_pool = vm->string_pool;
+
+        for (int i = 0; i < dep_count; i++) {
+            // Try to load the library alongside the executable
+            void* lib = load_library(deps[i].name);
+            if (!lib) {
+                printf("Runtime Error: Could not load dependency '%s'\n", deps[i].name);
+                printf("Ensure the .so/.dll file is in the same directory as the executable.\n");
+                exit(1);
+            }
+
+            BindFunc binder = (BindFunc)get_symbol(lib, "mylo_bind_lib");
+            if (!binder) {
+                printf("Runtime Error: Library '%s' is not a valid Mylo module.\n", deps[i].name);
+                exit(1);
+            }
+
+            // Bind it to the EXACT same index it was compiled with
+            binder(vm, deps[i].start_index, &api);
+        }
+        free(deps);
+    }
+
+    fclose(f);
+    return true;
 }

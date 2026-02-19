@@ -112,47 +112,6 @@ void disassemble(VM* vm) {
     printf("-------------------\n\n");
 }
 
-// Function to check and load embedded payload
-bool load_self_contained(VM* vm, const char* exe_path) {
-    FILE* f = fopen(exe_path, "rb");
-    if (!f) return false;
-
-    // Seek to end to look for footer
-    fseek(f, -((long)sizeof(StandaloneFooter)), SEEK_END);
-
-    StandaloneFooter footer;
-    if (fread(&footer, sizeof(StandaloneFooter), 1, f) != 1) {
-        fclose(f);
-        return false;
-    }
-
-    // Check Magic String
-    if (strcmp(footer.magic, MYLO_MAGIC) != 0) {
-        fclose(f);
-        return false; // Not a standalone EXE
-    }
-
-    // Calculate where the data starts
-    // File Size - Footer - Data Blocks
-    long total_payload_size = footer.bytecode_size + footer.const_size + footer.string_size;
-    fseek(f, -(total_payload_size + (long)sizeof(StandaloneFooter)), SEEK_END);
-
-    // 1. Read Bytecode
-    vm->code_size = footer.bytecode_size / sizeof(int);
-    fread(vm->bytecode, sizeof(int), vm->code_size, f);
-
-    // 2. Read Constants
-    vm->const_count = footer.const_size / sizeof(double);
-    fread(vm->constants, sizeof(double), vm->const_count, f);
-
-    // 3. Read Strings
-    vm->str_count = footer.string_size / MAX_STRING_LENGTH;
-    fread(vm->string_pool, MAX_STRING_LENGTH, vm->str_count, f);
-
-    fclose(f);
-    return true;
-}
-
 void print_greeting() {
     setTerminalColor(MyloFgMagenta, MyloBgColorDefault);
     printf("Mylo REPL v%s\n", VERSION_INFO);
