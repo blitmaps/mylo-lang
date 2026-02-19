@@ -1,0 +1,156 @@
+// --- Vector Math & Structs ---
+struct Vec3 { 
+    var x
+    var y
+    var z 
+}
+
+fn add_v(a: Vec3, b: Vec3) { ret {x: a.x + b.x, y: a.y + b.y, z: a.z + b.z} }
+fn sub_v(a: Vec3, b: Vec3) { ret {x: a.x - b.x, y: a.y - b.y, z: a.z - b.z} }
+fn mul_vs(a: Vec3, s: num) { ret {x: a.x * s, y: a.y * s, z: a.z * s} }
+fn dot(a: Vec3, b: Vec3)   { ret a.x * b.x + a.y * b.y + a.z * b.z }
+
+fn norm(v: Vec3) {
+    var mag = sqrt(dot(v, v))
+    if (mag == 0) { ret {x:0, y:0, z:0} }
+    ret {x: v.x/mag, y: v.y/mag, z: v.z/mag}
+}
+
+// --- Scene Definitions ---
+struct Ray { 
+    var o 
+    var d 
+}
+struct Sphere {
+    var r     // radius
+    var p     // position (Vec3)
+    var e     // emission (Vec3)
+    var c     // color (Vec3)
+}
+
+// A fake Cornell Box made entirely of spheres
+var scene: Sphere[] = [
+    {r: 10000, p: {x: 10001, y: 50, z: 81}, e: {x:0,y:0,z:0}, c: {x:0.75, y:0.25, z:0.25}}, // Left (Red)
+    {r: 10000, p: {x: -9999, y: 50, z: 81}, e: {x:0,y:0,z:0}, c: {x:0.25, y:0.25, z:0.75}}, // Right (Blue)
+    {r: 10000, p: {x: 50, y: 50, z: 10081}, e: {x:0,y:0,z:0}, c: {x:0.75, y:0.75, z:0.75}}, // Back (White)
+    {r: 10000, p: {x: 50, y: 10000, z: 81}, e: {x:0,y:0,z:0}, c: {x:0.75, y:0.75, z:0.75}}, // Floor
+    {r: 10000, p: {x: 50, y: -9900, z: 81}, e: {x:0,y:0,z:0}, c: {x:0.75, y:0.75, z:0.75}}, // Ceiling
+    {r: 16.5,  p: {x: 27, y: 16.5, z: 47},  e: {x:0,y:0,z:0}, c: {x:1, y:1, z:1}},          // Sphere 1
+    {r: 16.5,  p: {x: 73, y: 16.5, z: 78},  e: {x:0,y:0,z:0}, c: {x:1, y:1, z:1}},          // Sphere 2
+    {r: 600,   p: {x: 50, y: -600, z: 81},  e: {x:12, y:12, z:12}, c: {x:0,y:0,z:0}}        // Light
+]
+
+// --- Core Raytracing ---
+fn intersect(ray: Ray, sph: Sphere) {
+    var op = sub_v(sph.p, ray.o)
+    var b = dot(op, ray.d)
+    var det = b * b - dot(op, op) + sph.r * sph.r
+    
+    if (det < 0) { ret 0 }
+    det = sqrt(det)
+    
+    var t1 = b - det
+    var t2 = b + det
+    if (t1 > 0.001) { ret t1 }
+    if (t2 > 0.001) { ret t2 }
+    ret 0
+}
+
+fn trace(ray: Ray) {
+    var t = 999999
+    var id = -1
+    var i = 0
+    
+    // Find nearest intersection
+    for (sph in scene) {
+        var d = intersect(ray, sph)
+        if (d > 0) {
+            if (d < t) {
+                t = d
+                id = i
+            }
+        }
+        i = i + 1
+    }
+    
+    if (id == -1) { ret {x:0, y:0, z:0} } // Background
+    
+    var obj: Sphere = scene[id]
+    var hit = add_v(ray.o, mul_vs(ray.d, t))
+    var n = norm(sub_v(hit, obj.p))
+    
+    // --- THE FIX ---
+    // If the ray hits the inside of a sphere, flip the normal inwards!
+    if (dot(ray.d, n) > 0) {
+        n = mul_vs(n, -1)
+    }
+    
+    // Direct lighting from the main light (Index 7)
+    var light: Sphere = scene[7]
+    var l_dir = norm(sub_v(light.p, hit))
+    var n_dot_l = dot(n, l_dir)
+    
+    if (n_dot_l < 0) { n_dot_l = 0 }
+    
+    // Calculate the diffuse color
+    var color_diffuse = mul_vs(obj.c, n_dot_l)
+    
+    // Add a cheap "ambient" bounce light (15% base color) so shadows aren't pitch black
+    var ambient = mul_vs(obj.c, 0.15)
+    color_diffuse = add_v(color_diffuse, ambient)
+    
+    ret add_v(obj.e, color_diffuse)
+}
+
+fn clamp(x: num) {
+    if (x < 0) { ret 0 }
+    if (x > 1) { ret 1 }
+    ret x
+}
+
+// --- Main Render Loop ---
+
+// --- Main Render Loop (Binary P6 PPM) ---
+print("Starting render...")
+var width = 256
+var height = 256
+
+// Hardcoded ASCII bytes for the P6 Header: "P6\n256 256\n255\n"
+var header = [80, 54, 10, 50, 53, 54, 32, 50, 53, 54, 10, 50, 53, 53, 10]
+
+// Pre-allocate a generic array for the pixel data (width * height * 3 colors)
+var pixels = list(width * height * 3)
+var idx = 0
+
+var cam_o: Vec3 = {x: 50, y: 52, z: 295.6}
+
+var comp = 0
+// Render pixels
+for (var y in 0...255) {
+    for (var x in 0...255) {
+        var u = (x - width/2) / width
+        var v = (y - height/2) / height
+        var dir = norm({x: u, y: -v, z: -1})
+        var r: Ray = {o: cam_o, d: dir}
+        
+        var col: Vec3 = trace(r)
+        
+        // Write numerical byte values (0-255) directly into the array
+        pixels[idx] = floor(clamp(col.x) * 255)
+        pixels[idx+1] = floor(clamp(col.y) * 255)
+        pixels[idx+2] = floor(clamp(col.z) * 255)
+        
+        idx = idx + 3
+        comp = comp + 1
+    }
+    var ras : i32 = (comp / (width * height))*100
+    print(f"Rendering Rasterline : {y}, [{ras} % Complete] .") 
+}
+
+print("Saving to binary image...")
+// Concatenate the header array with the pixel array
+var file_data = header + pixels
+
+// Dump the numbers to a file as raw bytes
+write_bytes("cornell.ppm", file_data)
+print("Done! You can open cornell.ppm in an image viewer.")
