@@ -1298,6 +1298,13 @@ static void parse_import() {
             api.string_pool = compiling_vm->string_pool;
             binder(compiling_vm, std_count + start_ffi_index, &api);
             bound_ffi_count += added_natives;
+
+            if (compiling_vm->dependency_count < MAX_DEPENDENCIES) {
+                Dependency* dep = &compiling_vm->dependencies[compiling_vm->dependency_count++];
+                // Save the calculated library name (lib_name was derived earlier in this function)
+                strcpy(dep->name, lib_name);
+                dep->start_index = std_count + start_ffi_index;
+            }
         }
     }
     else if (curr.type == TK_ID && strcmp(curr.text, "C") == 0) {
@@ -2535,8 +2542,10 @@ void create_standalone_executable(VM* vm, const char* output_filename, const cha
     // We flatten the 2D array for simple writing
     fwrite(vm->string_pool, MAX_STRING_LENGTH, vm->str_count, out);
 
+    fwrite(vm->dependencies, sizeof(Dependency), vm->dependency_count, out);
     // 5. Append Footer (The Metadata)
     StandaloneFooter footer;
+    footer.dependency_size = vm->dependency_count * sizeof(Dependency);
     strcpy(footer.magic, MYLO_MAGIC);
     footer.bytecode_size = vm->code_size * sizeof(int);
     footer.const_size = vm->const_count * sizeof(double);
