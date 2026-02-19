@@ -10,7 +10,7 @@
 #define MAX_ARENAS 64         // 6 bits
 
 // String Limits
-#define MAX_STRINGS 1024
+#define MAX_STRINGS 1000000
 #define MAX_STRING_LENGTH 1024
 #define MAX_C_HEADERS 32
 
