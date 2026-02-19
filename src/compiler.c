@@ -1789,11 +1789,16 @@ void for_statement() {
 
         match(TK_IN);
         expression(); // Pushes Range/Array (Cleaned up by Outer Scope)
+        // Generate unique hidden variable names based on the nesting depth
+        char arr_name[64];
+        char idx_name[64];
+        sprintf(arr_name, "_arr_%d", loop_depth);
+        sprintf(idx_name, "_idx_%d", loop_depth);
 
-        int a = alloc_var(is_local_scope, "_arr", TYPE_ANY, true);
+        int a = alloc_var(is_local_scope, arr_name, TYPE_ANY, true);
         if (!is_local_scope) { emit(OP_SET); emit(a); }
-        int i = alloc_var(is_local_scope, "_idx", TYPE_NUM, false);
-        emit(OP_PSH_NUM); emit(make_const(compiling_vm, 0.0));
+
+        int i = alloc_var(is_local_scope, idx_name, TYPE_NUM, false);   emit(OP_PSH_NUM); emit(make_const(compiling_vm, 0.0));
         if (!is_local_scope) { emit(OP_SET); emit(i); }
 
         int loop = compiling_vm->code_size;

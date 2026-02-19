@@ -1263,6 +1263,28 @@ inline TestOutput test_nested_iterator_from_region_in_func() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_nested_for_loop() {
+
+    std::string src = """"
+    "for (var x in 0...2) {\n"
+    "for (var y in 0...2) {\n"
+        "print(f\"{x}, {y}\")\n"
+    "}"
+    "}\n";
+    std::string expected = """"
+    "0, 0\n"
+    "0, 1\n"
+    "0, 2\n"
+    "1, 0\n"
+    "1, 1\n"
+    "1, 2\n"
+    "2, 0\n"
+    "2, 1\n"
+    "2, 2\n";
+
+    return run_source_test(src, expected);
+}
+
 inline TestOutput test_nested_scope_conditional_return() {
 
     std::string src = """"
@@ -1410,6 +1432,7 @@ inline void test_generate_list() {
     ADD_TEST("Test Iterator in Func from Region Nest", test_nested_iterator_from_region_in_func);
     ADD_TEST("Test Forever Stack Leak", test_forever_stack_leak);
     ADD_TEST("Test Nested Scope Conditional Return", test_nested_scope_conditional_return);
+    ADD_TEST("Test Nested For Loop", test_nested_for_loop);
 
 }
 
