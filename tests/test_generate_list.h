@@ -1298,9 +1298,12 @@ inline TestOutput test_type_chaining() {
     "}\n"
     "var t : Foo = {}\n"
     "t.c = {x=255, y=0, z=0}\n"
-    "print(t.c.x)";
+    "print(t.c.x)\n"
+    "t.c.y = 99\n"
+    "print(t.c.y)\n";
+
     std::string expected = """"
-    "255\n";
+    "255\n99\n";
     return run_source_test(src, expected);
 }
 

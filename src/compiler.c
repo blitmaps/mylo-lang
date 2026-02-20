@@ -1613,17 +1613,16 @@ static void parse_id_statement(Token start_token, char *name) {
                 int offset = find_field(type_id, f);
                 if (offset == -1) error("Struct '%s' has no field '%s'", struct_defs[type_id].name, f);
 
+                int field_type = struct_defs[type_id].field_types[offset];
                 if (curr.type == TK_EQ_ASSIGN) {
                     match(TK_EQ_ASSIGN);
                     expression();
 
-                    // --- CHANGED: Strong Typing for Assignments ---
-                    int field_type = struct_defs[type_id].field_types[offset];
+                    // Strong Typing: If the leaf field has a specific type, cast the expression result
                     if (field_type != TYPE_ANY && field_type != TYPE_NUM) {
                         emit(OP_CAST);
                         emit(field_type);
                     }
-                    // ----------------------------------------------
 
                     emit(OP_HSET);
                     emit(offset);
@@ -1634,7 +1633,7 @@ static void parse_id_statement(Token start_token, char *name) {
                     emit(OP_HGET);
                     emit(offset);
                     emit(type_id);
-                    type_id = -1;
+                    type_id = field_type;
                 }
             } else if (curr.type == TK_LBRACKET) {
                 match(TK_LBRACKET);
