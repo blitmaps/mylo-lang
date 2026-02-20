@@ -978,7 +978,10 @@ void factor() {
 
                     int offset = find_field(type_id, f);
                     if (offset == -1) error("Struct '%s' has no field '%s'", struct_defs[type_id].name, f);
-                    emit(OP_HGET); emit(offset); emit(type_id); type_id = -1;
+                    //emit(OP_HGET); emit(offset); emit(type_id); type_id = -1;
+                    int field_type = struct_defs[type_id].field_types[offset];
+                    emit(OP_HGET); emit(offset); emit(type_id);
+                    type_id = field_type; // Propagate the type of the field to the next iteration
                 } else if (curr.type == TK_LBRACKET) {
                     match(TK_LBRACKET); expression();
                     if (curr.type == TK_COLON) { match(TK_COLON); expression(); match(TK_RBRACKET); emit(OP_SLICE); }

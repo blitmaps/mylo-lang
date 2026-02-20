@@ -1285,6 +1285,25 @@ inline TestOutput test_nested_for_loop() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_type_chaining() {
+
+    std::string src = """"
+    "struct Vec3 {"
+    "var x\n"
+    "var y\n"
+    "var z\n"
+    "}\n"
+    "struct Foo {\n"
+    "var c : Vec3\n"
+    "}\n"
+    "var t : Foo = {}\n"
+    "t.c = {x=255, y=0, z=0}\n"
+    "print(t.c.x)";
+    std::string expected = """"
+    "255\n";
+    return run_source_test(src, expected);
+}
+
 inline TestOutput test_nested_scope_conditional_return() {
 
     std::string src = """"
@@ -1433,6 +1452,7 @@ inline void test_generate_list() {
     ADD_TEST("Test Forever Stack Leak", test_forever_stack_leak);
     ADD_TEST("Test Nested Scope Conditional Return", test_nested_scope_conditional_return);
     ADD_TEST("Test Nested For Loop", test_nested_for_loop);
+    ADD_TEST("Test Type Chaining", test_type_chaining);
 
 }
 
