@@ -122,10 +122,13 @@ typedef struct {
     int break_count;
     int continue_patches[MAX_JUMPS_PER_LOOP];
     int continue_count;
+    int scope_depth; // <-- NEW: Scope depth at loop body entry
+    int local_count; // <-- NEW: Locals at loop body entry
 } LoopControl;
 
 LoopControl loop_stack[MAX_LOOP_NESTING];
 int loop_depth = 0;
+int current_scope_depth = 0; // <-- NEW: Compiler-wide scope tracker
 
 Symbol globals[MAX_GLOBALS];
 int global_count = 0;
@@ -318,10 +321,13 @@ void get_mangled_name(char *out, char *raw_name) {
     }
 }
 
-void push_loop() {
+// Pass in the current depths right before entering the loop body
+void push_loop(int scope_depth_at_body, int local_count_at_body) {
     if (loop_depth >= MAX_LOOP_NESTING) error("Loop nesting too deep");
     loop_stack[loop_depth].break_count = 0;
     loop_stack[loop_depth].continue_count = 0;
+    loop_stack[loop_depth].scope_depth = scope_depth_at_body;
+    loop_stack[loop_depth].local_count = local_count_at_body;
     loop_depth++;
 }
 
@@ -338,9 +344,18 @@ void pop_loop(int continue_addr, int break_addr) {
 
 void emit_break() {
     if (loop_depth == 0) error("'break' outside of loop");
-    // Pop the inner-most scope (Loop Body) before jumping
-    emit(OP_SCOPE_EXIT);
     LoopControl *loop = &loop_stack[loop_depth - 1];
+
+    // Unwind nested memory scopes
+    int scopes_to_pop = current_scope_depth - loop->scope_depth;
+    for (int i = 0; i < scopes_to_pop; i++) emit(OP_SCOPE_EXIT);
+
+    // Unwind nested local variables
+    if (inside_function) {
+        int locals_to_pop = local_count - loop->local_count;
+        for (int i = 0; i < locals_to_pop; i++) emit(OP_POP);
+    }
+
     if (loop->break_count >= MAX_JUMPS_PER_LOOP) error("Too many 'break' statements");
     emit(OP_JMP);
     loop->break_patches[loop->break_count++] = compiling_vm->code_size;
@@ -349,14 +364,22 @@ void emit_break() {
 
 void emit_continue() {
     if (loop_depth == 0) error("'continue' outside of loop");
-    // Pop the inner-most scope (Loop Body) before jumping
-    emit(OP_SCOPE_EXIT);
     LoopControl *loop = &loop_stack[loop_depth - 1];
+
+    int scopes_to_pop = current_scope_depth - loop->scope_depth;
+    for (int i = 0; i < scopes_to_pop; i++) emit(OP_SCOPE_EXIT);
+
+    if (inside_function) {
+        int locals_to_pop = local_count - loop->local_count;
+        for (int i = 0; i < locals_to_pop; i++) emit(OP_POP);
+    }
+
     if (loop->continue_count >= MAX_JUMPS_PER_LOOP) error("Too many 'continue' statements");
     emit(OP_JMP);
     loop->continue_patches[loop->continue_count++] = compiling_vm->code_size;
     emit(0);
 }
+
 void next_token() {
     while (1) {
         unsigned char c = (unsigned char) *src;
@@ -596,6 +619,7 @@ void compiler_reset() {
     bound_ffi_count = 0;
     debug_symbol_count = 0;
     loop_depth = 0;
+    current_scope_depth = 0;
     current_namespace[0] = '\0';
     search_path_count = 0;
     c_header_count = 0;
@@ -1675,8 +1699,25 @@ static void parse_if() {
     int p1 = compiling_vm->code_size;
     emit(0);
     match(TK_LBRACE);
+    // --- Track locals for the IF body ---
+    int saved_local_count_if = local_count;
+    bool is_local_scope = inside_function;
+
+    emit(OP_SCOPE_ENTER);
+    current_scope_depth++; // <-- FIX: Track scope entry
+
     while (curr.type != TK_RBRACE) statement();
+
+    if (is_local_scope) {
+        int vars_to_pop = local_count - saved_local_count_if;
+        for(int k = 0; k < vars_to_pop; k++) emit(OP_POP);
+        local_count = saved_local_count_if;
+    }
+
+    emit(OP_SCOPE_EXIT);
+    current_scope_depth--; // <-- FIX: Track scope exit
     match(TK_RBRACE);
+
     if (curr.type == TK_ELSE) {
         emit(OP_JMP);
         int p2 = compiling_vm->code_size;
@@ -1684,7 +1725,22 @@ static void parse_if() {
         compiling_vm->bytecode[p1] = compiling_vm->code_size;
         match(TK_ELSE);
         match(TK_LBRACE);
+
+        int saved_local_count_else = local_count;
+        emit(OP_SCOPE_ENTER);
+        current_scope_depth++; // <-- FIX: Track scope entry
+
         while (curr.type != TK_RBRACE) statement();
+
+        if (is_local_scope) {
+            int vars_to_pop = local_count - saved_local_count_else;
+            for(int k = 0; k < vars_to_pop; k++) emit(OP_POP);
+            local_count = saved_local_count_else;
+        }
+
+        emit(OP_SCOPE_EXIT);
+        current_scope_depth--; // <-- FIX: Track scope exit
+
         match(TK_RBRACE);
         compiling_vm->bytecode[p2] = compiling_vm->code_size;
     } else compiling_vm->bytecode[p1] = compiling_vm->code_size;
@@ -1741,61 +1797,34 @@ void for_statement() {
     bool is_pair = false;
     int explicit_type = -1;
 
-    // Outer Loop Scope (for iterators/ranges allocated in setup)
-    emit(OP_SCOPE_ENTER);
+    emit(OP_SCOPE_ENTER); current_scope_depth++; // Outer Loop Scope
 
     if (curr.type == TK_VAR) {
         match(TK_VAR);
         strcpy(name1, curr.text);
         match(TK_ID);
-        if (curr.type == TK_COLON) {
-            match(TK_COLON);
-            TypeInfo ti = parse_type_spec();
-            explicit_type = ti.id;
-        }
+        if (curr.type == TK_COLON) { match(TK_COLON); TypeInfo ti = parse_type_spec(); explicit_type = ti.id; }
         is_iter = true;
     } else if (curr.type == TK_ID) {
-        char *safe_src = src;
-        Token safe_curr = curr;
-        int safe_line = line;
+        char *safe_src = src; Token safe_curr = curr; int safe_line = line;
         strcpy(name1, curr.text);
         match(TK_ID);
-        if (curr.type == TK_COMMA) {
-            match(TK_COMMA);
-            strcpy(name2, curr.text);
-            match(TK_ID);
-            is_pair = true;
-        }
-        if (!is_pair && curr.type == TK_COLON) {
-            match(TK_COLON);
-            TypeInfo ti = parse_type_spec();
-            explicit_type = ti.id;
-        }
+        if (curr.type == TK_COMMA) { match(TK_COMMA); strcpy(name2, curr.text); match(TK_ID); is_pair = true; }
+        if (!is_pair && curr.type == TK_COLON) { match(TK_COLON); TypeInfo ti = parse_type_spec(); explicit_type = ti.id; }
         if (curr.type == TK_IN) is_iter = true;
-        else {
-            src = safe_src;
-            curr = safe_curr;
-            line = safe_line;
-            is_iter = false;
-        }
+        else { src = safe_src; curr = safe_curr; line = safe_line; is_iter = false; }
     }
 
-    // We track scope for the OUTER variables (like the iterator itself)
     int saved_local_count = local_count;
     bool is_local_scope = inside_function;
 
     if (is_iter) {
-        push_loop();
         int var1_addr = get_var_addr(name1, is_local_scope, explicit_type);
         int var2_addr = (is_pair) ? get_var_addr(name2, is_local_scope, explicit_type) : -1;
 
-        match(TK_IN);
-        expression(); // Pushes Range/Array (Cleaned up by Outer Scope)
-        // Generate unique hidden variable names based on the nesting depth
-        char arr_name[64];
-        char idx_name[64];
-        sprintf(arr_name, "_arr_%d", loop_depth);
-        sprintf(idx_name, "_idx_%d", loop_depth);
+        match(TK_IN); expression();
+        char arr_name[64]; char idx_name[64];
+        sprintf(arr_name, "_arr_%d", loop_depth); sprintf(idx_name, "_idx_%d", loop_depth);
 
         int a = alloc_var(is_local_scope, arr_name, TYPE_ANY, true);
         if (!is_local_scope) { emit(OP_SET); emit(a); }
@@ -1804,13 +1833,9 @@ void for_statement() {
         if (!is_local_scope) { emit(OP_SET); emit(i); }
 
         int loop = compiling_vm->code_size;
-        EMIT_GET(is_local_scope, i);
-        EMIT_GET(is_local_scope, a);
-        emit(OP_ALEN); emit(OP_LT); emit(OP_JZ);
-        int exit = compiling_vm->code_size;
-        emit(0);
+        EMIT_GET(is_local_scope, i); EMIT_GET(is_local_scope, a); emit(OP_ALEN); emit(OP_LT); emit(OP_JZ);
+        int exit = compiling_vm->code_size; emit(0);
 
-        // Loop Body Setup
         if (is_pair) {
             EMIT_GET(is_local_scope, a); EMIT_GET(is_local_scope, i); emit(OP_IT_KEY); EMIT_SET(is_local_scope, var1_addr);
             EMIT_GET(is_local_scope, a); EMIT_GET(is_local_scope, i); emit(OP_IT_VAL); EMIT_SET(is_local_scope, var2_addr);
@@ -1818,26 +1843,25 @@ void for_statement() {
             EMIT_GET(is_local_scope, a); EMIT_GET(is_local_scope, i); emit(OP_IT_DEF); EMIT_SET(is_local_scope, var1_addr);
         }
 
-        match(TK_RPAREN);
-        match(TK_LBRACE);
+        match(TK_RPAREN); match(TK_LBRACE);
 
-        // [FIX START] Track locals declared INSIDE the loop body
         int body_saved_local_count = local_count;
         bool body_is_local_scope = inside_function;
-        // [FIX END]
 
-        emit(OP_SCOPE_ENTER); // Inner Body Scope
+        // Capture State right before entering the body!
+        push_loop(current_scope_depth, local_count);
+
+        emit(OP_SCOPE_ENTER); current_scope_depth++; // Inner Body Scope
+
         while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
 
-        // [FIX START] Pop locals declared inside the loop body
         if (body_is_local_scope) {
             int vars_to_pop = local_count - body_saved_local_count;
             for(int k=0; k<vars_to_pop; k++) emit(OP_POP);
             local_count = body_saved_local_count;
         }
-        // [FIX END]
 
-        emit(OP_SCOPE_EXIT); // Inner Body Scope
+        emit(OP_SCOPE_EXIT); current_scope_depth--; // Inner Body Scope
 
         int brace_line = curr.line;
         match(TK_RBRACE);
@@ -1847,51 +1871,54 @@ void for_statement() {
         emit(OP_JMP); emit(loop);
 
         compiling_vm->lines[compiling_vm->code_size - 1] = brace_line;
-        compiling_vm->bytecode[exit] = compiling_vm->code_size; // Break jumps here
+        compiling_vm->bytecode[exit] = compiling_vm->code_size;
 
-        // Clean up the iterator variables (Outer Scope)
+        int break_dest = compiling_vm->code_size; // Break jumps HERE!
+
+        // Clean up the iterator variables
         if (is_local_scope) {
             int vars_to_pop = local_count - saved_local_count;
             for(int k=0; k<vars_to_pop; k++) emit(OP_POP);
             local_count = saved_local_count;
         }
 
-        emit(OP_SCOPE_EXIT); // Outer Scope (Cleanup Iterator/Range)
-        pop_loop(continue_dest, compiling_vm->code_size - 1); // Pass address of SCOPE_EXIT(Outer)
+        emit(OP_SCOPE_EXIT); current_scope_depth--; // Outer Scope
+        pop_loop(continue_dest, break_dest);
     } else {
-        // C-Style For
-        push_loop();
         int loop = compiling_vm->code_size;
-        expression();
-        match(TK_RPAREN);
-        emit(OP_JZ);
-        int exit = compiling_vm->code_size;
-        emit(0);
-        match(TK_LBRACE);
 
-        // [FIX START] Track locals declared INSIDE the loop body
+        // push_loop needs to happen before body!
+        push_loop(current_scope_depth, local_count);
+
+        emit(OP_SCOPE_ENTER); current_scope_depth++; // Inner Scope starts BEFORE condition!
+
+        expression(); match(TK_RPAREN); emit(OP_JZ);
+        int exit = compiling_vm->code_size; emit(0); match(TK_LBRACE);
+
         int body_saved_local_count = local_count;
         bool body_is_local_scope = inside_function;
-        // [FIX END]
 
-        emit(OP_SCOPE_ENTER); // Inner Body Scope
         while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
 
-        // [FIX START] Pop locals declared inside the loop body
         if (body_is_local_scope) {
             int vars_to_pop = local_count - body_saved_local_count;
             for(int k=0; k<vars_to_pop; k++) emit(OP_POP);
             local_count = body_saved_local_count;
         }
-        // [FIX END]
 
-        emit(OP_SCOPE_EXIT); // Inner Body Scope
+        int brace_line = curr.line; match(TK_RBRACE);
 
-        int brace_line = curr.line;
-        match(TK_RBRACE);
-        emit(OP_JMP); emit(loop);
+        emit(OP_SCOPE_EXIT); current_scope_depth--; // Close inner scope normally
+
+        int continue_dest = compiling_vm->code_size; // 'continue' jumps here bypassing static exit
+        emit(OP_JMP); emit(loop);                    // Jump to next iteration
         compiling_vm->lines[compiling_vm->code_size - 1] = brace_line;
+
+        // If condition failed, we land here.
         compiling_vm->bytecode[exit] = compiling_vm->code_size;
+        emit(OP_SCOPE_EXIT); current_scope_depth--; // Close inner scope because we broke out of condition
+
+        int break_dest = compiling_vm->code_size;
 
         if (is_local_scope) {
             int vars_to_pop = local_count - saved_local_count;
@@ -1899,8 +1926,8 @@ void for_statement() {
             local_count = saved_local_count;
         }
 
-        emit(OP_SCOPE_EXIT); // Outer Scope
-        pop_loop(loop, compiling_vm->code_size - 1);
+        emit(OP_SCOPE_EXIT); current_scope_depth--; // Outer Scope
+        pop_loop(continue_dest, break_dest);
     }
 }
 
@@ -2085,34 +2112,37 @@ void statement() {
     } else if (curr.type == TK_FOREVER) {
         match(TK_FOREVER);
         match(TK_LBRACE);
-        // [FIX] 1. Track local variables before entering loop
         int saved_local_count = local_count;
         bool is_local_scope = inside_function;
 
-        push_loop();
         int loop_start = compiling_vm->code_size;
 
-        emit(OP_SCOPE_ENTER); // Body Scope
+        push_loop(current_scope_depth, local_count);
+
+        emit(OP_SCOPE_ENTER); current_scope_depth++; // Body Scope
+
         while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
 
-        // [FIX] 2. Pop locals declared inside the loop
         if (is_local_scope) {
             int vars_to_pop = local_count - saved_local_count;
             for(int k=0; k<vars_to_pop; k++) emit(OP_POP);
             local_count = saved_local_count;
         }
 
-        emit(OP_SCOPE_EXIT); // Body Scope
+        emit(OP_SCOPE_EXIT); current_scope_depth--; // Body Scope
 
         int brace_line = curr.line;
         match(TK_RBRACE);
 
+        int continue_dest = loop_start; // Continue loops straight back to start
         emit(OP_JMP);
         emit(loop_start);
         compiling_vm->lines[compiling_vm->code_size - 1] = brace_line;
         compiling_vm->lines[compiling_vm->code_size - 2] = brace_line;
 
-        pop_loop(loop_start, compiling_vm->code_size);
+        int break_dest = compiling_vm->code_size; // Break falls after the loop
+
+        pop_loop(continue_dest, break_dest);
     } else if (curr.type == TK_EMBED) {
         parse_embed();
     } else if (curr.type == TK_RET) {
@@ -2127,6 +2157,8 @@ void statement() {
 
 void function() {
     match(TK_FN);
+    int saved_scope_depth = current_scope_depth; // <-- Save outer scope
+    current_scope_depth = 0;                     // <-- Reset for new function
     if (curr.type == TK_ID && strcmp(curr.text, "C") == 0) error("'C' is reserved");
     char name[MAX_IDENTIFIER];
     strcpy(name, curr.text);
@@ -2173,7 +2205,7 @@ void function() {
     match(TK_LBRACE);
 
     // [NEW] Function Scope
-    emit(OP_SCOPE_ENTER);
+    emit(OP_SCOPE_ENTER); current_scope_depth++; // <-- Track the function scope
 
     for(int i=0; i<typed_arg_count; i++) {
         if (!typed_args[i].is_arr) {
@@ -2196,6 +2228,7 @@ void function() {
     }
     inside_function = ps;
     local_count = pl;
+    current_scope_depth = saved_scope_depth;     // <-- Restore outer scope
 }
 
 

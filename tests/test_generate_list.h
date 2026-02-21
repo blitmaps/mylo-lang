@@ -1369,6 +1369,102 @@ inline TestOutput test_forever_stack_leak() {
     return output;
 }
 
+inline TestOutput test_conditional_scoped_var_fn() {
+
+    std::string src = """"
+    "struct Dummy {\n"
+    "    var val \n"
+    "}\n"
+
+    "fn test_if_scope() {\n"
+    "    var trigger = 0\n"
+
+        // The compiler will assign 'inner_var' to stack offset 1
+    "    if (trigger == 1) {\n"
+    "        var inner_var = 99\n"
+    "        print(inner_var)\n"
+    "    }\n"
+
+        // The compiler will assign 'obj' to stack offset 2.
+        // However, because the 'if' condition was false, 'inner_var' was never
+        // pushed to the physical VM stack. 'obj' is actually sitting at offset 1!
+        "var obj: Dummy = {val: 42}\n"
+
+        // The VM attempts to read offset 2, finds uninitialized memory (0.0),
+        // and throws a "Type Mismatch" when trying to access '.val'
+        "print(obj.val)\n"
+    "}\n"
+    "test_if_scope()";
+    std::string expected = """"
+    "42\n";
+
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_conditional_scoped_var_forever() {
+
+    std::string src = """"
+    "struct Dummy {\n"
+    "    var val \n"
+    "}\n"
+
+    "forever {\n"
+    "    var trigger = 0\n"
+
+        // The compiler will assign 'inner_var' to stack offset 1
+    "    if (trigger == 1) {\n"
+    "        var inner_var = 99\n"
+    "        print(inner_var)\n"
+    "    }\n"
+
+        // The compiler will assign 'obj' to stack offset 2.
+        // However, because the 'if' condition was false, 'inner_var' was never
+        // pushed to the physical VM stack. 'obj' is actually sitting at offset 1!
+        "var obj: Dummy = {val: 42}\n"
+
+        // The VM attempts to read offset 2, finds uninitialized memory (0.0),
+        // and throws a "Type Mismatch" when trying to access '.val'
+        "print(obj.val)\n"
+        "break\n"
+    "}\n";
+    std::string expected = """"
+    "42\n";
+
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_conditional_scoped_var_for() {
+
+    std::string src = """"
+    "struct Dummy {\n"
+    "    var val \n"
+    "}\n"
+
+    "for (x in 0...1) {\n"
+    "    var trigger = 0\n"
+
+        // The compiler will assign 'inner_var' to stack offset 1
+    "    if (trigger == 1) {\n"
+    "        var inner_var = 99\n"
+    "        print(inner_var)\n"
+    "    }\n"
+
+        // The compiler will assign 'obj' to stack offset 2.
+        // However, because the 'if' condition was false, 'inner_var' was never
+        // pushed to the physical VM stack. 'obj' is actually sitting at offset 1!
+        "var obj: Dummy = {val: 42}\n"
+
+        // The VM attempts to read offset 2, finds uninitialized memory (0.0),
+        // and throws a "Type Mismatch" when trying to access '.val'
+        "print(obj.val)\n"
+        "break\n"
+    "}\n";
+    std::string expected = """"
+    "42\n";
+
+    return run_source_test(src, expected);
+}
+
 
 inline void test_generate_list() {
     ADD_TEST("Test Test", test_test);
@@ -1456,7 +1552,9 @@ inline void test_generate_list() {
     ADD_TEST("Test Nested Scope Conditional Return", test_nested_scope_conditional_return);
     ADD_TEST("Test Nested For Loop", test_nested_for_loop);
     ADD_TEST("Test Type Chaining", test_type_chaining);
-
+    ADD_TEST("Test Conditional Scoping (func)", test_conditional_scoped_var_fn);
+    ADD_TEST("Test Conditional Scoping (forever)", test_conditional_scoped_var_forever);
+    ADD_TEST("Test Conditional Scoping (for)", test_conditional_scoped_var_for);
 }
 
 #endif //MYLO_TEST_GENERATE_LIST_H
