@@ -105,7 +105,9 @@ typedef struct {
     long bytecode_size;
     long const_size;     // Size of constants block
     long string_size;    // Size of string pool
-    long dependency_size; // <--- Add this
+    long dependency_size;
+    long symbol_size;
+    long function_size; // func table size
     char magic[9];       // "MYLO_EXE\0"
 } StandaloneFooter;
 

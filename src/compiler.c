@@ -2428,6 +2428,20 @@ void compile_to_c_source(VM* vm, const char *output_filename) {
     }
     fprintf(fp, "};\n\n");
 
+    int sym_count = vm->global_symbol_count > 0 ? vm->global_symbol_count : 1;
+    fprintf(fp, "VMSymbol global_symbols[%d] = {\n", sym_count);
+    for (int i = 0; i < vm->global_symbol_count; i++) {
+        fprintf(fp, "  {\"%s\", %d},\n", vm->global_symbols[i].name, vm->global_symbols[i].addr);
+    }
+    fprintf(fp, "};\n\n");
+
+    int vm_func_count = vm->function_count > 0 ? vm->function_count : 1;
+    fprintf(fp, "VMFunction vm_functions[%d] = {\n", vm_func_count);
+    for (int i = 0; i < vm->function_count; i++) {
+        fprintf(fp, "  {\"%s\", %d},\n", vm->functions[i].name, vm->functions[i].addr);
+    }
+    fprintf(fp, "};\n\n");
+
     // Main Entry Point
     fprintf(fp, "int main(int argc, char** argv) {\n");
     // Instantiate VM on stack or heap
@@ -2444,7 +2458,10 @@ void compile_to_c_source(VM* vm, const char *output_filename) {
     fprintf(fp, "    vm.str_count = %d;\n", vm->str_count);
     fprintf(fp, "    memcpy(vm.string_pool, string_pool, sizeof(string_pool));\n\n");
     fprintf(fp, "    vm.global_symbol_count = %d;\n", vm->global_symbol_count);
-
+    fprintf(fp, "    vm.global_symbols = malloc(sizeof(VMSymbol) * %d);\n", sym_count);
+    fprintf(fp, "    memcpy(vm.global_symbols, global_symbols, sizeof(VMSymbol) * vm.global_symbol_count);\n\n");
+    fprintf(fp, "    vm.function_count = %d;\n", vm->function_count);
+    fprintf(fp, "    memcpy(vm.functions, vm_functions, sizeof(VMFunction) * vm.function_count);\n\n");
     fprintf(fp, "    // Register Standard Library\n");
     fprintf(fp, "    int i = 0;\n");
     fprintf(fp, "    while (std_library[i].name != NULL) {\n");
@@ -2583,6 +2600,8 @@ void create_standalone_executable(VM* vm, const char* output_filename, const cha
     fwrite(vm->string_pool, MAX_STRING_LENGTH, vm->str_count, out);
 
     fwrite(vm->dependencies, sizeof(Dependency), vm->dependency_count, out);
+    fwrite(vm->global_symbols, sizeof(VMSymbol), vm->global_symbol_count, out);
+    fwrite(vm->functions, sizeof(VMFunction), vm->function_count, out);
     // 5. Append Footer (The Metadata)
     StandaloneFooter footer;
     footer.dependency_size = vm->dependency_count * sizeof(Dependency);
@@ -2590,7 +2609,8 @@ void create_standalone_executable(VM* vm, const char* output_filename, const cha
     footer.bytecode_size = vm->code_size * sizeof(int);
     footer.const_size = vm->const_count * sizeof(double);
     footer.string_size = vm->str_count * MAX_STRING_LENGTH;
-
+    footer.symbol_size = vm->global_symbol_count * sizeof(VMSymbol);
+    footer.function_size = vm->function_count * sizeof(VMFunction);
     fwrite(&footer, sizeof(StandaloneFooter), 1, out);
 
     // Cleanup

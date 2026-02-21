@@ -1887,10 +1887,7 @@ bool load_self_contained(VM* vm, const char* exe_path) {
     if (fread(&footer, sizeof(StandaloneFooter), 1, f) != 1) { fclose(f); return false; }
     if (strcmp(footer.magic, MYLO_MAGIC) != 0) { fclose(f); return false; }
 
-    // Calculate offsets
-    // Footer is strictly at the end.
-    // Order written: [HOST EXE] [BYTECODE] [CONSTANTS] [STRINGS] [DEPENDENCIES] [FOOTER]
-    long total_payload_size = footer.bytecode_size + footer.const_size + footer.string_size + footer.dependency_size;
+    long total_payload_size = footer.bytecode_size + footer.const_size + footer.string_size + footer.dependency_size + footer.symbol_size + footer.function_size;
     fseek(f, -(total_payload_size + (long)sizeof(StandaloneFooter)), SEEK_END);
 
     // 1. Read Bytecode
@@ -1905,13 +1902,28 @@ bool load_self_contained(VM* vm, const char* exe_path) {
     vm->str_count = footer.string_size / MAX_STRING_LENGTH;
     fread(vm->string_pool, MAX_STRING_LENGTH, vm->str_count, f);
 
-    // 4. Read & Load Dependencies
+    // 4. Read Dependencies (Store in temporary memory so we can read symbols next)
     int dep_count = footer.dependency_size / sizeof(Dependency);
+    Dependency* deps = NULL;
     if (dep_count > 0) {
-        Dependency* deps = malloc(sizeof(Dependency) * dep_count);
+        deps = malloc(footer.dependency_size);
         fread(deps, sizeof(Dependency), dep_count, f);
+    }
 
-        // Prepare API for binding (Same setup as parse_import in compiler.c)
+    // 5. Read Symbols sequentially!
+    int symbol_count = footer.symbol_size / sizeof(VMSymbol);
+    vm->global_symbol_count = symbol_count;
+    vm->global_symbols = malloc(footer.symbol_size);
+    fread(vm->global_symbols, sizeof(VMSymbol), symbol_count, f);
+
+    // --- [NEW] 5b. Read Functions sequentially! ---
+    int func_count = footer.function_size / sizeof(VMFunction);
+    vm->function_count = func_count;
+    fread(vm->functions, sizeof(VMFunction), func_count, f);
+
+    // 6. Bind Dependencies
+    if (dep_count > 0) {
+        // Prepare API for binding
         MyloAPI api;
         api.push = vm_push;
         api.pop = vm_pop;
@@ -1926,11 +1938,9 @@ bool load_self_contained(VM* vm, const char* exe_path) {
         api.string_pool = vm->string_pool;
 
         for (int i = 0; i < dep_count; i++) {
-            // Try to load the library alongside the executable
             void* lib = load_library(deps[i].name);
             if (!lib) {
                 printf("Runtime Error: Could not load dependency '%s'\n", deps[i].name);
-                printf("Ensure the .so/.dll file is in the same directory as the executable.\n");
                 exit(1);
             }
 
@@ -1940,7 +1950,6 @@ bool load_self_contained(VM* vm, const char* exe_path) {
                 exit(1);
             }
 
-            // Bind it to the EXACT same index it was compiled with
             binder(vm, deps[i].start_index, &api);
         }
         free(deps);
