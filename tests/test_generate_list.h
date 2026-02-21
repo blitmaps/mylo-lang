@@ -1323,6 +1323,18 @@ inline TestOutput test_nested_scope_conditional_return() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_print_interp_len() {
+
+    std::string src = """"
+    "var x = \"hi\"\n"
+    "print(\"123456789123456789123456789123456789123456789123456789123456789123456789123456789123456789{x}\")";
+
+    std::string expected = """"
+    "123456789123456789123456789123456789123456789123456789123456789123456789123456789123456789hi\n";
+
+    return run_source_test(src, expected);
+}
+
 inline TestOutput test_forever_stack_leak() {
     std::string src =
     "var i = 0\n"
@@ -1555,6 +1567,7 @@ inline void test_generate_list() {
     ADD_TEST("Test Conditional Scoping (func)", test_conditional_scoped_var_fn);
     ADD_TEST("Test Conditional Scoping (forever)", test_conditional_scoped_var_forever);
     ADD_TEST("Test Conditional Scoping (for)", test_conditional_scoped_var_for);
+    ADD_TEST("Test String Interpolation * Long Print", test_print_interp_len);
 }
 
 #endif //MYLO_TEST_GENERATE_LIST_H
