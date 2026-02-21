@@ -287,7 +287,7 @@ void std_create_worker(VM *vm) {
     w->arena = vm->arenas[region_id];
 
     // Disable in Main VM (It is now owned by the worker)
-    vm->arenas[region_id].active = false;
+    // vm->arenas[region_id].active = false;
     vm->arenas[region_id].memory = NULL; // Prevent main VM from freeing it if it crashes
     vm->arenas[region_id].types = NULL;
 
@@ -1566,8 +1566,8 @@ void std_bus_set(VM *vm) {
     // Objects cannot be safely shared across VMs without deep serialization.
     if (val_type == T_OBJ) {
         // Fallback for objects: store as string representation
-        global_bus[idx].type = T_STR;
-        global_bus[idx].str_val = strdup("[Shared Object]");
+        global_bus[idx].type = T_OBJ;
+        global_bus[idx].num_val = val;
     } else if (val_type == T_STR) {
         global_bus[idx].type = T_STR;
         // Must copy string because the source VM might GC the original
@@ -1600,6 +1600,8 @@ void std_bus_get(VM *vm) {
                 // Create a new string in the CALLING VM's heap
                 int id = make_string(vm, global_bus[i].str_val);
                 vm_push(vm, (double)id, T_STR);
+            } else if (type == T_OBJ) {
+                vm_push(vm, global_bus[i].num_val, T_OBJ);
             } else {
                 vm_push(vm, 0.0, T_NUM);
             }
