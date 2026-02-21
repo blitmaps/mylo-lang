@@ -186,6 +186,9 @@ void print_recursive(VM* vm, double val, int type, int depth, int max_elem);
 double vm_evacuate_object(VM* vm, double ptr_val, int target_head);
 void enter_debugger(VM* vm);
 
+// Expose arena memory allocators
+void init_arena(VM* vm, int id);
+void free_arena(VM* vm, int id);
 // Pointer storage and retrieval
 #define MYLO_STORE(val, type_name) vm_store_copy(vm, &(val), sizeof(val), type_name)
 #define MYLO_RETRIEVE(id, c_type, type_name) (c_type*)vm_get_ref(vm, (int)(id), type_name)

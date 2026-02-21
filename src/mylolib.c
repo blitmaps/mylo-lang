@@ -84,7 +84,42 @@ static pthread_mutex_t bus_lock = PTHREAD_MUTEX_INITIALIZER;
 #define INIT_BUS_LOCK // Static init is enough for pthreads
 #endif
 
+void std_create_region(VM *vm) {
+    int id = -1;
+    // Find the first available region slot
+    for (int i = 1; i < MAX_ARENAS; i++) {
+        if (!vm->arenas[i].active) { id = i; break; }
+    }
+    if (id == -1) { printf("Runtime Error: Max Regions Reached\n"); exit(1); }
 
+    init_arena(vm, id);
+    vm_push(vm, (double)id, T_NUM); // Return the region ID to Mylo
+}
+
+void std_set_region(VM *vm) {
+    if (vm->sp < 0) { printf("Stack underflow\n"); exit(1); }
+    int id = (int)vm_pop(vm);
+
+    if (id < 0 || id >= MAX_ARENAS) { printf("Invalid Region ID\n"); exit(1); }
+    if (!vm->arenas[id].active && id != 0) { printf("Region %d is not active\n", id); exit(1); }
+
+    vm->current_arena = id;
+    vm_push(vm, 0, T_NUM);
+}
+
+void std_get_region(VM *vm) {
+    // Allows a thread to query which arena it is currently executing inside
+    vm_push(vm, (double)vm->current_arena, T_NUM);
+}
+
+void std_clear_region(VM *vm) {
+    if (vm->sp < 0) { printf("Stack underflow\n"); exit(1); }
+    int id = (int)vm_pop(vm);
+
+    if (id <= 0) { printf("Cannot clear main region or invalid region\n"); exit(1); }
+    free_arena(vm, id);
+    vm_push(vm, 0, T_NUM);
+}
 // Implementation of std_copy (Deep Copy)
 void std_copy(VM* vm) {
     if (vm->sp < 0) {
@@ -2112,5 +2147,9 @@ const StdLibDef std_library[] = {
     {"web_circle", std_web_circle,   "any", 4, {"num", "num", "num", "str"}},
     {"web_line",   std_web_line,     "any", 6, {"num", "num", "num", "num", "num", "str"}},
     {"web_triangle", std_web_triangle, "any", 7, {"num","num","num","num","num","num","str"}},
+    {"create_region", std_create_region, "num", 0, {NULL}},
+    {"set_region", std_set_region, "void", 1, {"num"}},
+    {"get_region", std_get_region, "num", 0, {NULL}},
+    {"clear_region", std_clear_region, "void", 1, {"num"}},
     {NULL, NULL, NULL, 0, {NULL}}
 };
