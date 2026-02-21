@@ -195,7 +195,21 @@ void enter_debugger(VM* vm);
 #define MYLO_RETRIEVE_FROM_VM(vm, id, c_type, type_name) (c_type*)vm_get_ref(vm, (int)(id), type_name)
 #define MYLO_REGISTER_IN_VM(vm, ptr, type_name) vm_store_ptr(vm, (void*)(ptr), type_name)
 
-// [NEW] Standalone Loader
 bool load_self_contained(VM* vm, const char* exe_path);
+
+// DLL Loading functions
+// Loads a shared library (.dll / .so) at the given path
+// Returns an opaque handle, or NULL on failure
+void* load_library(const char* path);
+
+// Retrieves a function pointer from the library
+void* get_symbol(void* lib_handle, const char* symbol_name);
+
+// Unloads the library
+void close_library(void* lib_handle);
+
+// Helper to construct platform specific names (foo -> foo.dll or libfoo.so)
+void get_lib_name(char* out, const char* base_name);
+
 
 #endif

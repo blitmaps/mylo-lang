@@ -9,7 +9,6 @@
 #include "vm.h"
 #include "utils.h"
 #include "defines.h"
-#include "loader.h"
 #include "compiler.h"
 #include <setjmp.h>
 
