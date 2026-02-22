@@ -167,6 +167,14 @@ if (myvar == Transport::car) {
 }
 ```
 
+Enums also have string reflection:
+```javascript
+print(Transport::car)
+// 'car'
+print(f"I'm on the {Transpot::bus}")
+// I'm on the bus.
+```
+
 <a name="bools"></a>
 ### Bools
 Truth statements evaluate to 0 for false and 1 for true. These are also codified as `true` and `false`
