@@ -1,0 +1,102 @@
+// 1. Setup Region & Data
+region bg
+
+// Data lives inside the region (thanks to ::)
+var bg::data_list = [0, 0, 0] 
+
+// Control flags (Primitives are safe for peek/poke)
+var bg::status = 0       // 0=Ready, 1=Running, 2=Done, 3=Interrupted
+var bg::stop_signal = 0  // Main thread will set this to 1 to force stop
+
+fn task() {
+    bg::status = 1 // Signal "Running"
+    
+    // Reset data
+    bg::data_list[0] = 0
+    
+    // Infinite loop simulating heavy work
+    forever {
+        // 1. Do some work (update complex data in region)
+        bg::data_list[0] = bg::data_list[0] + 1
+        
+        // 2. Update status for Main Thread to see
+        // We use the first element as a progress counter for this demo
+        
+        // 3. CHECK FOR INTERRUPT
+        // The Main Thread can inject '1' into this variable using send_worker_var
+        if (bg::stop_signal == 1) {
+            bg::status = 3 // Signal "Interrupted"
+            break
+        }
+        
+        // Natural finish condition (if not interrupted)
+        if (bg::data_list[0] >= 100) {
+            bg::status = 2 // Signal "Done"
+            break
+        }
+        
+        // Slow down slightly so we can see the progress in the console
+        var k = 0
+        for (k in range(0, 50000, 1)){} 
+    }
+}
+
+// 2. Launch Worker
+print("Launching Worker...")
+worker("task", bg, "job_1")
+
+// 3. Monitor & Control Loop
+forever {
+    // GET: Peek at status safely
+    var current_status = get_worker_var("job_1", "bg::status")
+    var current_val = get_worker_var("job_1", "bg::data_list") // Note: This gets the pointer ID, not content
+    
+    // We can't read the list content easily via peek, 
+    // but we can infer progress from the loop counter if we exposed it as a number.
+    // For this test, we just check status.
+    
+    print(f"Worker Status: {to_string(current_status)}")
+    
+    // INTERRUPT DEMO:
+    // If the worker has done 5 iterations, tell it to STOP.
+    // We don't have direct read access to 'bg::data_list[0]' here (it's in the region),
+    // so we'll just stop it after a few main-loop iterations.
+    
+    // Let's simulate a user pressing "Cancel" after a short while
+    // We use a local counter for the main thread
+    if (current_status == 1) {
+        // Wait a bit...
+        var w = 0 
+        for (w in range(0, 200000, 1)){}
+        
+        print("Sending STOP signal...")
+        
+        // SET: Inject variable into running worker!
+        send_worker_var("job_1", "bg::stop_signal", 1)
+    }
+    
+    if (current_status == 2) {
+        print("Worker finished naturally.")
+        break
+    }
+    
+    if (current_status == 3) {
+        print("Worker confirmed stop.")
+        break
+    }
+}
+
+// 4. Dock (Reclaim Memory)
+print("Docking...")
+dock("job_1")
+
+// 5. Verify Results
+// Now that we have the region back, we can read the list
+print(f"Final Status: {to_string(bg::status)}")
+print(f"Items Processed: {to_string(bg::data_list[0])}")
+
+if (bg::status == 3) {
+    print("TEST PASS: Worker was successfully interrupted.")
+} else {
+    print("TEST RESULT: Worker finished without interrupt.")
+}
