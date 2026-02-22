@@ -15,7 +15,7 @@
 #define MAX_C_HEADERS 32
 
 // Compilation Limits
-#define MAX_IDENTIFIER 64
+#define MAX_IDENTIFIER 256
 #define MAX_STRUCTS 64
 #define MAX_FIELDS 16
 #define MAX_NATIVES 64

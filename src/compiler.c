@@ -408,10 +408,10 @@ void next_token() {
                 char c2 = *(src + 3);
                 int v1 = (isdigit(c1) ? c1 - '0' : tolower(c1) - 'a' + 10);
                 int v2 = (isdigit(c2) ? c2 - '0' : tolower(c2) - 'a' + 10);
-                if (idx < MAX_IDENTIFIER - 1) curr.text[idx++] = (char) ((v1 << 4) | v2);
+                if (idx < MAX_STRING_LENGTH - 1) curr.text[idx++] = (char) ((v1 << 4) | v2);
                 src += 4;
             } else {
-                if (idx < MAX_IDENTIFIER - 1) curr.text[idx++] = *src;
+                if (idx < MAX_STRING_LENGTH - 1) curr.text[idx++] = *src;
                 src++;
             }
         }
@@ -433,7 +433,7 @@ void next_token() {
             src++;
         }
         int len = (int) (src - start);
-        if (len > MAX_IDENTIFIER - 1) len = MAX_IDENTIFIER - 1;
+        if (len > MAX_STRING_LENGTH - 1) len = MAX_STRING_LENGTH - 1;
         strncpy(curr.text, start, len);
         curr.text[len] = '\0';
         if (*src == '"') src++;
@@ -466,7 +466,7 @@ void next_token() {
         char *start = src;
         while (isalnum((unsigned char)*src) || *src == '_') src++;
         int len = (int) (src - start);
-        if (len > MAX_IDENTIFIER - 1) len = MAX_IDENTIFIER - 1;
+        if (len > MAX_STRING_LENGTH - 1) len = MAX_STRING_LENGTH - 1;
         strncpy(curr.text, start, len);
         curr.text[len] = '\0';
         if (strcmp(curr.text, "fn") == 0) curr.type = TK_FN;
@@ -514,7 +514,7 @@ void next_token() {
             src++;
         }
         int len = (int) (src - start);
-        if (len > MAX_IDENTIFIER - 1) len = MAX_IDENTIFIER - 1;
+        if (len > MAX_STRING_LENGTH - 1) len = MAX_STRING_LENGTH - 1;
         strncpy(curr.text, start, len);
         curr.text[len] = '\0';
         if (*src == '"') src++;
