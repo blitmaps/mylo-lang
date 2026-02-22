@@ -1477,6 +1477,21 @@ inline TestOutput test_conditional_scoped_var_for() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_enum_string_repl() {
+
+    std::string src = """"
+    "enum GOO {"
+    "poo,"
+    "too,"
+    "}"
+    "print(GOO::poo)"
+    "print(f\">{GOO::too}\")\n";
+    std::string expected = """"
+    "poo\n>too\n";
+
+    return run_source_test(src, expected);
+}
+
 
 inline void test_generate_list() {
     ADD_TEST("Test Test", test_test);
@@ -1568,6 +1583,7 @@ inline void test_generate_list() {
     ADD_TEST("Test Conditional Scoping (forever)", test_conditional_scoped_var_forever);
     ADD_TEST("Test Conditional Scoping (for)", test_conditional_scoped_var_for);
     ADD_TEST("Test String Interpolation * Long Print", test_print_interp_len);
+    ADD_TEST("Test Enum String Representation", test_enum_string_repl);
 }
 
 #endif //MYLO_TEST_GENERATE_LIST_H

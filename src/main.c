@@ -40,16 +40,6 @@ void disassemble(VM* vm) {
         i++;
 
         switch (op) {
-            case OP_PSH_NUM: {
-                int idx = vm->bytecode[i++];
-                printf("[%d] (%g)", idx, vm->constants[idx]);
-                break;
-            }
-            case OP_PSH_STR: {
-                int idx = vm->bytecode[i++];
-                printf("[%d] (\"%s\")", idx, vm->string_pool[idx]);
-                break;
-            }
             case OP_JMP:
             case OP_JZ:
             case OP_JNZ: {
@@ -103,6 +93,17 @@ void disassemble(VM* vm) {
                 printf("(len: %d) <embedded data>", len);
                 // Important: Skip the raw data bytes so we don't interpret them as opcodes
                 i += len;
+                break;
+            }
+            case OP_PSH_STR: {
+                int idx = vm->bytecode[i++];
+                printf("[%d] (\"%s\")", idx, vm->string_pool[idx]);
+                break;
+            }
+            case OP_PSH_ENUM: {
+                int idx = vm->bytecode[i++];
+                unsigned int packed = (unsigned int)vm->constants[idx];
+                printf("[%d] (Enum %d -> \"%s\")", idx, packed & 0xFFFF, vm->string_pool[(packed >> 16) & 0xFFFF]);
                 break;
             }
             default: break;

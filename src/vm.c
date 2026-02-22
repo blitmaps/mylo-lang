@@ -49,7 +49,8 @@ const char *OP_NAMES[] = {
     "OR",
     "AND",
     "RANGE","SCOPE_ENTER", "SCOPE_EXIT",
-    "DEBUGGER"
+    "DEBUGGER",
+    "PSH_ENUM"
 };
 
 
@@ -580,7 +581,15 @@ void print_recursive(VM* vm, double val, int type, int depth, int max_elem) {
         if (depth > 0) print_raw(vm, "\"");
         print_raw(vm, vm->string_pool[(int)val]);
         if (depth > 0) print_raw(vm, "\"");
-    } else if (type == T_OBJ) {
+    } 
+    else if (type == T_ENUM) {
+        unsigned int packed = (unsigned int)val;
+        int str_id = (packed >> 16) & 0xFFFF;
+        if (depth > 0) print_raw(vm, "\"");
+        print_raw(vm, vm->string_pool[str_id]);
+        if (depth > 0) print_raw(vm, "\"");
+    }
+    else if (type == T_OBJ) {
         int arena_id = UNPACK_ARENA(val);
         int gen = UNPACK_GEN(val);
 
@@ -983,6 +992,23 @@ static void exec_math_op(VM* vm, int op) {
     CHECK_STACK(2);
     double b = vm_pop(vm); int tb = vm->stack_types[vm->sp + 1];
     double a = vm->stack[vm->sp]; int ta = vm->stack_types[vm->sp];
+    
+    bool is_num_a = (ta == T_NUM || ta == T_ENUM);
+    bool is_num_b = (tb == T_NUM || tb == T_ENUM);
+
+    if (is_num_a && is_num_b) {
+        double val_a = (ta == T_ENUM) ? (double)((unsigned int)a & 0xFFFF) : a;
+        double val_b = (tb == T_ENUM) ? (double)((unsigned int)b & 0xFFFF) : b;
+        double res = 0;
+        if (op == OP_ADD) res = val_a + val_b;
+        else if (op == OP_SUB) res = val_a - val_b;
+        else if (op == OP_MUL) res = val_a * val_b;
+        else if (op == OP_DIV) res = val_a / val_b;
+        else if (op == OP_MOD) res = fmod(val_a, val_b);
+        vm->stack[vm->sp] = res;
+        vm->stack_types[vm->sp] = T_NUM; // Returns standard number
+        return;
+    }
 
     if (ta == T_NUM && tb == T_NUM) {
         double res = 0;
@@ -1099,17 +1125,17 @@ static void exec_math_op(VM* vm, int op) {
         broadcast_math(vm, op, arrVal, scalVal, scalType, objIsLhs);
         return;
     }
-
+    
     if (op == OP_ADD && (ta == T_STR || tb == T_STR)) {
         char s1[MAX_STRING_LENGTH], s2[MAX_STRING_LENGTH];
 
-        // Convert Left Side
         if (ta == T_STR) strncpy(s1, vm->string_pool[(int)a], MAX_STRING_LENGTH-1);
+        else if (ta == T_ENUM) strncpy(s1, vm->string_pool[((unsigned int)a >> 16) & 0xFFFF], MAX_STRING_LENGTH-1);
         else snprintf(s1, MAX_STRING_LENGTH, "%g", a);
         s1[MAX_STRING_LENGTH-1] = '\0';
 
-        // Convert Right Side
         if (tb == T_STR) strncpy(s2, vm->string_pool[(int)b], MAX_STRING_LENGTH-1);
+        else if (tb == T_ENUM) strncpy(s2, vm->string_pool[((unsigned int)b >> 16) & 0xFFFF], MAX_STRING_LENGTH-1);
         else snprintf(s2, MAX_STRING_LENGTH, "%g", b);
         s2[MAX_STRING_LENGTH-1] = '\0';
 
@@ -1125,18 +1151,24 @@ static void exec_math_op(VM* vm, int op) {
 
 static void exec_compare_op(VM* vm, int op) {
     CHECK_STACK(2);
-    double b = vm_pop(vm);
-    double a = vm->stack[vm->sp];
+    double b = vm_pop(vm); int tb = vm->stack_types[vm->sp + 1];
+    double a = vm->stack[vm->sp]; int ta = vm->stack_types[vm->sp];
+    
+    // Extract integer if comparing enums
+    double val_a = (ta == T_ENUM) ? (double)((unsigned int)a & 0xFFFF) : a;
+    double val_b = (tb == T_ENUM) ? (double)((unsigned int)b & 0xFFFF) : b;
+
     double res = 0;
     switch(op) {
-        case OP_LT: res = (a < b); break;
-        case OP_GT: res = (a > b); break;
-        case OP_LE: res = (a <= b); break;
-        case OP_GE: res = (a >= b); break;
-        case OP_EQ: res = (a == b); break;
-        case OP_NEQ: res = (a != b); break;
+        case OP_LT: res = (val_a < val_b); break;
+        case OP_GT: res = (val_a > val_b); break;
+        case OP_LE: res = (val_a <= val_b); break;
+        case OP_GE: res = (val_a >= val_b); break;
+        case OP_EQ: res = (val_a == val_b); break;
+        case OP_NEQ: res = (val_a != val_b); break;
     }
     vm->stack[vm->sp] = res;
+    vm->stack_types[vm->sp] = T_NUM;
 }
 
 static void exec_var_op(VM* vm, int op) {
@@ -1555,6 +1587,24 @@ static void exec_cast_op(VM* vm, int target_type, bool is_check_only) {
 
     double val = vm->stack[vm->sp];
     int current_type = vm->stack_types[vm->sp];
+    
+    if (current_type == T_ENUM) {
+        if (target_type == TYPE_STR) {
+            if (!is_check_only) {
+                int str_id = ((unsigned int)val >> 16) & 0xFFFF;
+                vm->stack[vm->sp] = (double)str_id;
+                vm->stack_types[vm->sp] = T_STR;
+            }
+            return;
+        }
+        // Extract raw number for integer casts (i32, byte, etc.)
+        val = (double)((unsigned int)val & 0xFFFF);
+        if (!is_check_only) {
+            vm->stack[vm->sp] = val;
+            vm->stack_types[vm->sp] = T_NUM;
+        }
+        current_type = T_NUM;
+    }
 
     if (target_type == TYPE_NUM || target_type == TYPE_I32_ARRAY || target_type == TYPE_I64_ARRAY ||
         target_type == TYPE_I16_ARRAY || target_type == TYPE_F32_ARRAY || target_type == TYPE_BOOL_ARRAY ||
@@ -1669,6 +1719,7 @@ int vm_step(VM* vm, bool debug_trace) {
         case OP_SLICE_SET: exec_slice_op(vm, op); break;
 
         // Misc
+        case OP_PSH_ENUM: { int idx = vm->bytecode[vm->ip++]; vm_push(vm, vm->constants[idx], T_ENUM); break; }
         case OP_CAT: {
             CHECK_STACK(2);
             double b = vm_pop(vm); int bt = vm->stack_types[vm->sp + 1];
@@ -1676,10 +1727,12 @@ int vm_step(VM* vm, bool debug_trace) {
             char s1[MAX_STRING_LENGTH], s2[MAX_STRING_LENGTH];
 
             if (at == T_STR) strncpy(s1, vm->string_pool[(int)a], MAX_STRING_LENGTH-1);
+            else if (at == T_ENUM) strncpy(s1, vm->string_pool[((unsigned int)a >> 16) & 0xFFFF], MAX_STRING_LENGTH-1);
             else snprintf(s1, MAX_STRING_LENGTH, "%g", a);
             s1[MAX_STRING_LENGTH-1] = '\0';
 
             if (bt == T_STR) strncpy(s2, vm->string_pool[(int)b], MAX_STRING_LENGTH-1);
+            else if (bt == T_ENUM) strncpy(s2, vm->string_pool[((unsigned int)b >> 16) & 0xFFFF], MAX_STRING_LENGTH-1);
             else snprintf(s2, MAX_STRING_LENGTH, "%g", b);
             s2[MAX_STRING_LENGTH-1] = '\0';
 

@@ -6,9 +6,10 @@
 #include "stddef.h"
 
 // --- Types ---
-#define T_NUM 0
-#define T_STR 1
-#define T_OBJ 2
+#define T_NUM  0
+#define T_STR  1
+#define T_OBJ  2
+#define T_ENUM 3
 
 // Return type for C-Blocks
 typedef struct {
@@ -62,7 +63,8 @@ typedef enum {
     OP_RANGE,
     OP_SCOPE_ENTER,
     OP_SCOPE_EXIT,
-    OP_DEBUGGER
+    OP_DEBUGGER,
+    OP_PSH_ENUM
 } OpCode;
 
 extern const char *OP_NAMES[];

@@ -962,7 +962,18 @@ void factor() {
 
         int enum_val = find_enum_val(name);
         if (enum_val != -1) {
-            int idx = make_const(compiling_vm, (double) enum_val); emit(OP_PSH_NUM); emit(idx); return;
+            // Extract the short name (e.g., "bar" from "Foo_bar")
+            char* short_name = strchr(name, '_');
+            short_name = short_name ? short_name + 1 : name;
+            
+            int str_id = make_string(compiling_vm, short_name);
+            
+            // Pack the String ID and Integer value into a single unsigned int
+            unsigned int packed = (str_id << 16) | (enum_val & 0xFFFF);
+            
+            int idx = make_const(compiling_vm, (double)packed); 
+            emit(OP_PSH_ENUM); emit(idx); 
+            return;
         }
         if (curr.type == TK_LPAREN) {
             match(TK_LPAREN);
