@@ -129,6 +129,7 @@ void start_repl() {
 
     // Instantiate VM
     VM vm;
+    memset(&vm, 0, sizeof(vm));
     vm_init(&vm);
     compiler_reset();
 
@@ -326,6 +327,7 @@ void print_help() {
 int main(int argc, char** argv) {
     // Instantiate Main VM
     VM vm;
+    memset(&vm, 0, sizeof(vm));
     vm_init(&vm);
     compiler_reset();
 

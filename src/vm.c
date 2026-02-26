@@ -12,6 +12,7 @@
 #include "mylolib.h"
 // Loader
 #ifdef _WIN32
+    #define _WINSOCKAPI_    // stops windows.h including winsock.h
     #include <windows.h>
     #define EXT ".dll"
 #else

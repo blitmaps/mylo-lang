@@ -174,7 +174,6 @@ double heap_alloc(VM* vm, int size);
 void run_vm_from(VM* vm, int start_ip, bool debug_trace);
 void run_vm(VM* vm, bool debug_trace);
 int vm_step(VM* vm, bool debug_trace);
-void mylo_reset(VM* vm);
 double* vm_resolve_ptr(VM* vm, double ptr_val);
 double* vm_resolve_ptr_safe(VM* vm, double ptr_val);
 int* vm_resolve_type(VM* vm, double ptr_val);
@@ -209,9 +208,6 @@ void* load_library(const char* path);
 
 // Retrieves a function pointer from the library
 void* get_symbol(void* lib_handle, const char* symbol_name);
-
-// Unloads the library
-void close_library(void* lib_handle);
 
 // Helper to construct platform specific names (foo -> foo.dll or libfoo.so)
 void get_lib_name(char* out, const char* base_name);

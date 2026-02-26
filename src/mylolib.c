@@ -12,6 +12,7 @@
 
 #ifdef _WIN32
     #include <io.h>
+    #define _WINSOCKAPI_    // stops windows.h including winsock.h
     #include <windows.h>
     #include <process.h>
     #include <conio.h>
@@ -32,7 +33,7 @@
 #include <string.h>
 
 #ifdef _WIN32
-    #include <winsock2.h>
+    //#include <winsock2.h> // This was causing a redefinition failure on MSVC
     #pragma comment(lib, "ws2_32.lib")
 #else
     #include <sys/socket.h>
