@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <stdint.h>
 #include "mylolib.h"
 #include "vm.h"
 #include "defines.h"

@@ -20,6 +20,9 @@ add_executable(tests tests/tests.cpp src/compiler.c src/vm.h src/vm.c
 )
 IF (WIN32)
   # Math not needed on Windows
+
+    target_link_libraries(mylo ws2_32)
+    target_link_libraries(tests ws2_32)
 ELSE()
   # Math needed on other plats
     target_link_libraries(mylo m)
