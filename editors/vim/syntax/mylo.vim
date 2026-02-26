@@ -1,76 +1,38 @@
-" Vim syntax file
-" Language: Mylo
-" Maintainer: Mylo User
-" Latest Revision: 2026
-
 if exists("b:current_syntax")
   finish
 endif
 
-" Keywords
-"
-syn keyword myloKeyword var struct enum fn mod import module_path ret C
-syn keyword myloConditional if else
-syn keyword myloRepeat for in break continue
-syn keyword myloBoolean true false
+" 1. Keywords and Types (Based on TK_ enum in compiler.c)
+syntax keyword myloKeyword fn var if else for in ret print mod import break continue enum module_path true false forever embed region clear monitor debugger
+syntax keyword myloType any num str f64 f32 i32 i16 i64 byte bool
 
-" Standard Library Functions
-"
-" Note: 'contains' is separated because it is a reserved Vim syntax keyword
-syn keyword myloStdFunc print len sqrt to_string to_num
-syn keyword myloStdFunc read_lines write_file read_bytes write_bytes
-syn match myloStdFunc "\<contains\>" 
+" 2. Comments - Defined as // until newline in compiler.c
+syntax region myloComment start="//" end="$" contains=@NoGroup
 
-" Types
-"
-syn keyword myloType num str bool arr any
+" 3. Special Characters and Symbols
+syntax match myloNamespace "::"
+syntax match myloBraces "[{}]"
+syntax match myloRange "\.\.\."
+syntax match myloArrow "->"
 
-" Comments
-"
-syn match myloComment "//.*$"
+" 4. Strings (Standard, Format, and Byte strings)
+syntax region myloString start='"' end='"' skip='\\"'
+syntax region myloString start='f"' end='"' skip='\\"'
+syntax region myloString start='b"' end='"' skip='\\"'
 
-" Strings
-"
-syn region myloString start='"' end='"' skip='\\"'
-syn region myloFString start='f"' end='"' skip='\\"' contains=myloInterpolation
+" 5. Numbers
+syntax match myloNumber "\v<\d+>"
+syntax match myloNumber "\v<\d+\.\d+>"
 
-" String Interpolation for F-Strings
-syn region myloInterpolation matchgroup=myloInterpDelim start="{" end="}" contained containedin=myloFString
-
-" Numbers
-"
-syn match myloNumber "\<\d\+\>"
-syn match myloNumber "\<\d\+\.\d\+\>"
-
-" Operators and Delimiters
-syn match myloOperator "\v\+"
-syn match myloOperator "\v\-"
-syn match myloOperator "\v\*"
-syn match myloOperator "\v\/"
-syn match myloOperator "\v\="
-syn match myloOperator "\v:\="
-syn match myloOperator "\v\:\:"
-syn match myloOperator "\v\->"
-syn match myloOperator "\v\.\.\."
-
-" Structure Names (Heuristic: Capitalized words are usually Structs/Enums)
-"
-syn match myloStructure "\<[A-Z][a-zA-Z0-9_]*\>"
-
-" Linking groups to standard Vim highlighting
-hi def link myloKeyword Statement
-hi def link myloConditional Conditional
-hi def link myloRepeat Repeat
-hi def link myloBoolean Boolean
-hi def link myloComment Comment
-hi def link myloString String
-hi def link myloFString String
-hi def link myloNumber Number
-hi def link myloType Type
-hi def link myloStdFunc Function
-hi def link myloOperator Operator
-hi def link myloStructure Structure
-hi def link myloInterpDelim Special
-hi def link myloInterpolation Normal
+" 6. Highlight Links
+highlight default link myloKeyword Keyword
+highlight default link myloType Type
+highlight default link myloComment Comment
+highlight default link myloNamespace Special
+highlight default link myloBraces Delimiter
+highlight default link myloRange Boolean
+highlight default link myloArrow Operator
+highlight default link myloString String
+highlight default link myloNumber Number
 
 let b:current_syntax = "mylo"

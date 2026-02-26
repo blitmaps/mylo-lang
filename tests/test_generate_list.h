@@ -462,6 +462,19 @@ inline TestOutput test_list_concat() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_string_concat() {
+
+    std::string src = """"
+    "print(\"He\" + \"llo\")\n"
+    "print(\"He\" + 77)\n";
+
+    std::string expected = """"
+    "Hello\nHe77\n";
+
+    return run_source_test(src, expected);
+}
+
+
 inline TestOutput test_list_slices() {
 
     std::string src = """"
@@ -1250,6 +1263,50 @@ inline TestOutput test_nested_iterator_from_region_in_func() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_nested_for_loop() {
+
+    std::string src = """"
+    "for (var x in 0...2) {\n"
+    "for (var y in 0...2) {\n"
+        "print(f\"{x}, {y}\")\n"
+    "}"
+    "}\n";
+    std::string expected = """"
+    "0, 0\n"
+    "0, 1\n"
+    "0, 2\n"
+    "1, 0\n"
+    "1, 1\n"
+    "1, 2\n"
+    "2, 0\n"
+    "2, 1\n"
+    "2, 2\n";
+
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_type_chaining() {
+
+    std::string src = """"
+    "struct Vec3 {"
+    "var x\n"
+    "var y\n"
+    "var z\n"
+    "}\n"
+    "struct Foo {\n"
+    "var c : Vec3\n"
+    "}\n"
+    "var t : Foo = {}\n"
+    "t.c = {x=255, y=0, z=0}\n"
+    "print(t.c.x)\n"
+    "t.c.y = 99\n"
+    "print(t.c.y)\n";
+
+    std::string expected = """"
+    "255\n99\n";
+    return run_source_test(src, expected);
+}
+
 inline TestOutput test_nested_scope_conditional_return() {
 
     std::string src = """"
@@ -1262,6 +1319,18 @@ inline TestOutput test_nested_scope_conditional_return() {
 
     std::string expected = """"
     "[0, 1, 2]\n";
+
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_print_interp_len() {
+
+    std::string src = """"
+    "var x = \"hi\"\n"
+    "print(f\"123456789123456789123456789123456789123456789123456789123456789123456789123456789123456789{x}\")";
+
+    std::string expected = """"
+    "123456789123456789123456789123456789123456789123456789123456789123456789123456789123456789hi\n";
 
     return run_source_test(src, expected);
 }
@@ -1312,6 +1381,117 @@ inline TestOutput test_forever_stack_leak() {
     return output;
 }
 
+inline TestOutput test_conditional_scoped_var_fn() {
+
+    std::string src = """"
+    "struct Dummy {\n"
+    "    var val \n"
+    "}\n"
+
+    "fn test_if_scope() {\n"
+    "    var trigger = 0\n"
+
+        // The compiler will assign 'inner_var' to stack offset 1
+    "    if (trigger == 1) {\n"
+    "        var inner_var = 99\n"
+    "        print(inner_var)\n"
+    "    }\n"
+
+        // The compiler will assign 'obj' to stack offset 2.
+        // However, because the 'if' condition was false, 'inner_var' was never
+        // pushed to the physical VM stack. 'obj' is actually sitting at offset 1!
+        "var obj: Dummy = {val: 42}\n"
+
+        // The VM attempts to read offset 2, finds uninitialized memory (0.0),
+        // and throws a "Type Mismatch" when trying to access '.val'
+        "print(obj.val)\n"
+    "}\n"
+    "test_if_scope()";
+    std::string expected = """"
+    "42\n";
+
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_conditional_scoped_var_forever() {
+
+    std::string src = """"
+    "struct Dummy {\n"
+    "    var val \n"
+    "}\n"
+
+    "forever {\n"
+    "    var trigger = 0\n"
+
+        // The compiler will assign 'inner_var' to stack offset 1
+    "    if (trigger == 1) {\n"
+    "        var inner_var = 99\n"
+    "        print(inner_var)\n"
+    "    }\n"
+
+        // The compiler will assign 'obj' to stack offset 2.
+        // However, because the 'if' condition was false, 'inner_var' was never
+        // pushed to the physical VM stack. 'obj' is actually sitting at offset 1!
+        "var obj: Dummy = {val: 42}\n"
+
+        // The VM attempts to read offset 2, finds uninitialized memory (0.0),
+        // and throws a "Type Mismatch" when trying to access '.val'
+        "print(obj.val)\n"
+        "break\n"
+    "}\n";
+    std::string expected = """"
+    "42\n";
+
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_conditional_scoped_var_for() {
+
+    std::string src = """"
+    "struct Dummy {\n"
+    "    var val \n"
+    "}\n"
+
+    "for (x in 0...1) {\n"
+    "    var trigger = 0\n"
+
+        // The compiler will assign 'inner_var' to stack offset 1
+    "    if (trigger == 1) {\n"
+    "        var inner_var = 99\n"
+    "        print(inner_var)\n"
+    "    }\n"
+
+        // The compiler will assign 'obj' to stack offset 2.
+        // However, because the 'if' condition was false, 'inner_var' was never
+        // pushed to the physical VM stack. 'obj' is actually sitting at offset 1!
+        "var obj: Dummy = {val: 42}\n"
+
+        // The VM attempts to read offset 2, finds uninitialized memory (0.0),
+        // and throws a "Type Mismatch" when trying to access '.val'
+        "print(obj.val)\n"
+        "break\n"
+    "}\n";
+    std::string expected = """"
+    "42\n";
+
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_enum_string_repl() {
+
+    std::string src = """"
+    "enum GOO {"
+    "poo,"
+    "too,"
+    "}"
+    "print(GOO::poo)"
+    "print(f\">{GOO::too}\")\n";
+    std::string expected = """"
+    "poo\n>too\n";
+
+    return run_source_test(src, expected);
+}
+
 
 inline void test_generate_list() {
     ADD_TEST("Test Test", test_test);
@@ -1328,6 +1508,7 @@ inline void test_generate_list() {
     ADD_TEST("Test Struct", test_struct);
     ADD_TEST("Test Type Struct", test_typed_struct);
     ADD_TEST("Test String Interpolation", test_string_interp);
+    ADD_TEST("Test String Concat", test_string_concat);
     ADD_TEST("Test Scope", test_scope);
     ADD_TEST("Test Variable Access", test_var_access);
     ADD_TEST("Test Reverse Loop", test_literal_reverse);
@@ -1396,7 +1577,13 @@ inline void test_generate_list() {
     ADD_TEST("Test Iterator in Func from Region Nest", test_nested_iterator_from_region_in_func);
     ADD_TEST("Test Forever Stack Leak", test_forever_stack_leak);
     ADD_TEST("Test Nested Scope Conditional Return", test_nested_scope_conditional_return);
-
+    ADD_TEST("Test Nested For Loop", test_nested_for_loop);
+    ADD_TEST("Test Type Chaining", test_type_chaining);
+    ADD_TEST("Test Conditional Scoping (func)", test_conditional_scoped_var_fn);
+    ADD_TEST("Test Conditional Scoping (forever)", test_conditional_scoped_var_forever);
+    ADD_TEST("Test Conditional Scoping (for)", test_conditional_scoped_var_for);
+    ADD_TEST("Test String Interpolation * Long Print", test_print_interp_len);
+    ADD_TEST("Test Enum String Representation", test_enum_string_repl);
 }
 
 #endif //MYLO_TEST_GENERATE_LIST_H

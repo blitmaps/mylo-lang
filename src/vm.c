@@ -10,6 +10,15 @@
 #include <stdarg.h>
 
 #include "mylolib.h"
+// Loader
+#ifdef _WIN32
+    #define _WINSOCKAPI_    // stops windows.h including winsock.h
+    #include <windows.h>
+    #define EXT ".dll"
+#else
+    #include <dlfcn.h>
+    #define EXT ".so"
+#endif
 
 // --- Global Instance ---
 // VM vm; // REMOVED GLOBAL VM
@@ -41,7 +50,8 @@ const char *OP_NAMES[] = {
     "OR",
     "AND",
     "RANGE","SCOPE_ENTER", "SCOPE_EXIT",
-    "DEBUGGER"
+    "DEBUGGER",
+    "PSH_ENUM"
 };
 
 
@@ -364,6 +374,7 @@ void vm_init(VM* vm) {
         vm->local_symbol_count = 0;
         vm->cli_debug_mode = false;
         vm->last_debug_line = -1;
+        vm->dependency_count = 0; // [NEW] Reset dependencies
 
         // 2. Clear Small Buffers
         memset(vm->natives, 0, sizeof(vm->natives));
@@ -450,6 +461,7 @@ void vm_init(VM* vm) {
     vm->source_code = NULL;
     vm->cli_debug_mode = false;
     vm->last_debug_line = -1;
+    vm->dependency_count = 0; // [NEW] Initialize dependency count
     memset(vm->natives, 0, sizeof(vm->natives));
     register_stdlib(vm);
 }
@@ -570,7 +582,15 @@ void print_recursive(VM* vm, double val, int type, int depth, int max_elem) {
         if (depth > 0) print_raw(vm, "\"");
         print_raw(vm, vm->string_pool[(int)val]);
         if (depth > 0) print_raw(vm, "\"");
-    } else if (type == T_OBJ) {
+    } 
+    else if (type == T_ENUM) {
+        unsigned int packed = (unsigned int)val;
+        int str_id = (packed >> 16) & 0xFFFF;
+        if (depth > 0) print_raw(vm, "\"");
+        print_raw(vm, vm->string_pool[str_id]);
+        if (depth > 0) print_raw(vm, "\"");
+    }
+    else if (type == T_OBJ) {
         int arena_id = UNPACK_ARENA(val);
         int gen = UNPACK_GEN(val);
 
@@ -973,6 +993,23 @@ static void exec_math_op(VM* vm, int op) {
     CHECK_STACK(2);
     double b = vm_pop(vm); int tb = vm->stack_types[vm->sp + 1];
     double a = vm->stack[vm->sp]; int ta = vm->stack_types[vm->sp];
+    
+    bool is_num_a = (ta == T_NUM || ta == T_ENUM);
+    bool is_num_b = (tb == T_NUM || tb == T_ENUM);
+
+    if (is_num_a && is_num_b) {
+        double val_a = (ta == T_ENUM) ? (double)((unsigned int)a & 0xFFFF) : a;
+        double val_b = (tb == T_ENUM) ? (double)((unsigned int)b & 0xFFFF) : b;
+        double res = 0;
+        if (op == OP_ADD) res = val_a + val_b;
+        else if (op == OP_SUB) res = val_a - val_b;
+        else if (op == OP_MUL) res = val_a * val_b;
+        else if (op == OP_DIV) res = val_a / val_b;
+        else if (op == OP_MOD) res = fmod(val_a, val_b);
+        vm->stack[vm->sp] = res;
+        vm->stack_types[vm->sp] = T_NUM; // Returns standard number
+        return;
+    }
 
     if (ta == T_NUM && tb == T_NUM) {
         double res = 0;
@@ -1089,23 +1126,50 @@ static void exec_math_op(VM* vm, int op) {
         broadcast_math(vm, op, arrVal, scalVal, scalType, objIsLhs);
         return;
     }
+    
+    if (op == OP_ADD && (ta == T_STR || tb == T_STR)) {
+        char s1[MAX_STRING_LENGTH], s2[MAX_STRING_LENGTH];
+
+        if (ta == T_STR) strncpy(s1, vm->string_pool[(int)a], MAX_STRING_LENGTH-1);
+        else if (ta == T_ENUM) strncpy(s1, vm->string_pool[((unsigned int)a >> 16) & 0xFFFF], MAX_STRING_LENGTH-1);
+        else snprintf(s1, MAX_STRING_LENGTH, "%g", a);
+        s1[MAX_STRING_LENGTH-1] = '\0';
+
+        if (tb == T_STR) strncpy(s2, vm->string_pool[(int)b], MAX_STRING_LENGTH-1);
+        else if (tb == T_ENUM) strncpy(s2, vm->string_pool[((unsigned int)b >> 16) & 0xFFFF], MAX_STRING_LENGTH-1);
+        else snprintf(s2, MAX_STRING_LENGTH, "%g", b);
+        s2[MAX_STRING_LENGTH-1] = '\0';
+
+        char res[MAX_STRING_LENGTH * 2];
+        snprintf(res, sizeof(res), "%s%s", s1, s2);
+        int id = make_string(vm, res);
+        vm->stack[vm->sp] = (double)id;
+        vm->stack_types[vm->sp] = T_STR;
+        return;
+    }
     RUNTIME_ERROR("Invalid types for math operation");
 }
 
 static void exec_compare_op(VM* vm, int op) {
     CHECK_STACK(2);
-    double b = vm_pop(vm);
-    double a = vm->stack[vm->sp];
+    double b = vm_pop(vm); int tb = vm->stack_types[vm->sp + 1];
+    double a = vm->stack[vm->sp]; int ta = vm->stack_types[vm->sp];
+    
+    // Extract integer if comparing enums
+    double val_a = (ta == T_ENUM) ? (double)((unsigned int)a & 0xFFFF) : a;
+    double val_b = (tb == T_ENUM) ? (double)((unsigned int)b & 0xFFFF) : b;
+
     double res = 0;
     switch(op) {
-        case OP_LT: res = (a < b); break;
-        case OP_GT: res = (a > b); break;
-        case OP_LE: res = (a <= b); break;
-        case OP_GE: res = (a >= b); break;
-        case OP_EQ: res = (a == b); break;
-        case OP_NEQ: res = (a != b); break;
+        case OP_LT: res = (val_a < val_b); break;
+        case OP_GT: res = (val_a > val_b); break;
+        case OP_LE: res = (val_a <= val_b); break;
+        case OP_GE: res = (val_a >= val_b); break;
+        case OP_EQ: res = (val_a == val_b); break;
+        case OP_NEQ: res = (val_a != val_b); break;
     }
     vm->stack[vm->sp] = res;
+    vm->stack_types[vm->sp] = T_NUM;
 }
 
 static void exec_var_op(VM* vm, int op) {
@@ -1524,6 +1588,24 @@ static void exec_cast_op(VM* vm, int target_type, bool is_check_only) {
 
     double val = vm->stack[vm->sp];
     int current_type = vm->stack_types[vm->sp];
+    
+    if (current_type == T_ENUM) {
+        if (target_type == TYPE_STR) {
+            if (!is_check_only) {
+                int str_id = ((unsigned int)val >> 16) & 0xFFFF;
+                vm->stack[vm->sp] = (double)str_id;
+                vm->stack_types[vm->sp] = T_STR;
+            }
+            return;
+        }
+        // Extract raw number for integer casts (i32, byte, etc.)
+        val = (double)((unsigned int)val & 0xFFFF);
+        if (!is_check_only) {
+            vm->stack[vm->sp] = val;
+            vm->stack_types[vm->sp] = T_NUM;
+        }
+        current_type = T_NUM;
+    }
 
     if (target_type == TYPE_NUM || target_type == TYPE_I32_ARRAY || target_type == TYPE_I64_ARRAY ||
         target_type == TYPE_I16_ARRAY || target_type == TYPE_F32_ARRAY || target_type == TYPE_BOOL_ARRAY ||
@@ -1638,6 +1720,7 @@ int vm_step(VM* vm, bool debug_trace) {
         case OP_SLICE_SET: exec_slice_op(vm, op); break;
 
         // Misc
+        case OP_PSH_ENUM: { int idx = vm->bytecode[vm->ip++]; vm_push(vm, vm->constants[idx], T_ENUM); break; }
         case OP_CAT: {
             CHECK_STACK(2);
             double b = vm_pop(vm); int bt = vm->stack_types[vm->sp + 1];
@@ -1645,10 +1728,12 @@ int vm_step(VM* vm, bool debug_trace) {
             char s1[MAX_STRING_LENGTH], s2[MAX_STRING_LENGTH];
 
             if (at == T_STR) strncpy(s1, vm->string_pool[(int)a], MAX_STRING_LENGTH-1);
+            else if (at == T_ENUM) strncpy(s1, vm->string_pool[((unsigned int)a >> 16) & 0xFFFF], MAX_STRING_LENGTH-1);
             else snprintf(s1, MAX_STRING_LENGTH, "%g", a);
             s1[MAX_STRING_LENGTH-1] = '\0';
 
             if (bt == T_STR) strncpy(s2, vm->string_pool[(int)b], MAX_STRING_LENGTH-1);
+            else if (bt == T_ENUM) strncpy(s2, vm->string_pool[((unsigned int)b >> 16) & 0xFFFF], MAX_STRING_LENGTH-1);
             else snprintf(s2, MAX_STRING_LENGTH, "%g", b);
             s2[MAX_STRING_LENGTH-1] = '\0';
 
@@ -1845,4 +1930,129 @@ void run_vm_from(VM* vm, int start_ip, bool debug_trace) {
 
 void run_vm(VM* vm, bool debug_trace) {
     run_vm_from(vm, 0, debug_trace);
+}
+
+// =========================================================
+// [NEW] Standalone Loader Implementation
+// =========================================================
+
+typedef void (*BindFunc)(VM *, int, MyloAPI *);
+
+bool load_self_contained(VM* vm, const char* exe_path) {
+    FILE* f = fopen(exe_path, "rb");
+    if (!f) return false;
+
+    // Check Footer
+    fseek(f, -((long)sizeof(StandaloneFooter)), SEEK_END);
+    StandaloneFooter footer;
+    if (fread(&footer, sizeof(StandaloneFooter), 1, f) != 1) { fclose(f); return false; }
+    if (strcmp(footer.magic, MYLO_MAGIC) != 0) { fclose(f); return false; }
+
+    long total_payload_size = footer.bytecode_size + footer.const_size + footer.string_size + footer.dependency_size + footer.symbol_size + footer.function_size;
+    fseek(f, -(total_payload_size + (long)sizeof(StandaloneFooter)), SEEK_END);
+
+    // 1. Read Bytecode
+    vm->code_size = footer.bytecode_size / sizeof(int);
+    fread(vm->bytecode, sizeof(int), vm->code_size, f);
+
+    // 2. Read Constants
+    vm->const_count = footer.const_size / sizeof(double);
+    fread(vm->constants, sizeof(double), vm->const_count, f);
+
+    // 3. Read Strings
+    vm->str_count = footer.string_size / MAX_STRING_LENGTH;
+    fread(vm->string_pool, MAX_STRING_LENGTH, vm->str_count, f);
+
+    // 4. Read Dependencies (Store in temporary memory so we can read symbols next)
+    int dep_count = footer.dependency_size / sizeof(Dependency);
+    Dependency* deps = NULL;
+    if (dep_count > 0) {
+        deps = malloc(footer.dependency_size);
+        fread(deps, sizeof(Dependency), dep_count, f);
+    }
+
+    // 5. Read Symbols sequentially!
+    int symbol_count = footer.symbol_size / sizeof(VMSymbol);
+    vm->global_symbol_count = symbol_count;
+    vm->global_symbols = malloc(footer.symbol_size);
+    fread(vm->global_symbols, sizeof(VMSymbol), symbol_count, f);
+
+    // --- [NEW] 5b. Read Functions sequentially! ---
+    int func_count = footer.function_size / sizeof(VMFunction);
+    vm->function_count = func_count;
+    fread(vm->functions, sizeof(VMFunction), func_count, f);
+
+    // 6. Bind Dependencies
+    if (dep_count > 0) {
+        // Prepare API for binding
+        MyloAPI api;
+        api.push = vm_push;
+        api.pop = vm_pop;
+        api.make_string = make_string;
+        api.heap_alloc = heap_alloc;
+        api.resolve_ptr = vm_resolve_ptr;
+        api.store_copy = vm_store_copy;
+        api.store_ptr = vm_store_ptr;
+        api.get_ref = vm_get_ref;
+        api.free_ref = vm_free_ref;
+        api.natives_array = vm->natives;
+        api.string_pool = vm->string_pool;
+
+        for (int i = 0; i < dep_count; i++) {
+            void* lib = load_library(deps[i].name);
+            if (!lib) {
+                printf("Runtime Error: Could not load dependency '%s'\n", deps[i].name);
+                exit(1);
+            }
+
+            BindFunc binder = (BindFunc)get_symbol(lib, "mylo_bind_lib");
+            if (!binder) {
+                printf("Runtime Error: Library '%s' is not a valid Mylo module.\n", deps[i].name);
+                exit(1);
+            }
+
+            binder(vm, deps[i].start_index, &api);
+        }
+        free(deps);
+    }
+
+    fclose(f);
+    return true;
+}
+
+void get_lib_name(char* out, const char* base_name) {
+    char temp[1024];
+    strcpy(temp, base_name);
+    char* dot = strrchr(temp, '.');
+    if (dot) *dot = '\0';
+
+#ifdef _WIN32
+    sprintf(out, "%s.dll", temp);
+#else
+    sprintf(out, "./%s.so", temp);
+#endif
+}
+
+void* load_library(const char* path) {
+#ifdef _WIN32
+    HMODULE h = LoadLibraryA(path);
+    if (!h)
+        fprintf(stderr, "Failed to load library %s (Error: %lu)\n", path, GetLastError());
+    return (void*)h;
+#else
+    // RTLD_GLOBAL allows the plugin to see symbols if we exported them,
+    // but we are using the struct method now, so standard load is fine.
+    void* h = dlopen(path, RTLD_NOW);
+    if (!h)
+        fprintf(stderr, "Failed to load library %s (%s)\n", path, dlerror());
+    return h;
+#endif
+}
+
+void* get_symbol(void* handle, const char* symbol) {
+#ifdef _WIN32
+    return (void*)GetProcAddress((HMODULE)handle, symbol);
+#else
+    return dlsym(handle, symbol);
+#endif
 }

@@ -6,9 +6,10 @@
 #include "stddef.h"
 
 // --- Types ---
-#define T_NUM 0
-#define T_STR 1
-#define T_OBJ 2
+#define T_NUM  0
+#define T_STR  1
+#define T_OBJ  2
+#define T_ENUM 3
 
 // Return type for C-Blocks
 typedef struct {
@@ -62,12 +63,12 @@ typedef enum {
     OP_RANGE,
     OP_SCOPE_ENTER,
     OP_SCOPE_EXIT,
-    OP_DEBUGGER
+    OP_DEBUGGER,
+    OP_PSH_ENUM
 } OpCode;
 
 extern const char *OP_NAMES[];
 
-// ... [Rest of file unchanged] ...
 typedef struct {
     char name[64];
     int addr;
@@ -102,9 +103,15 @@ typedef struct {
     int fp;       // Frame pointer (safety check)
 } VMScope;
 
+
 // Forward declaration
 struct VM;
 typedef void (*NativeFunc)(struct VM *);
+
+typedef struct {
+    char name[64];   // Name of the library (e.g., "raylib_binding.so")
+    int start_index; // The VM Native ID index where this library starts
+} Dependency;
 
 typedef struct VM {
     double* stack;
@@ -139,6 +146,8 @@ typedef struct VM {
     int last_debug_line;
     // --- Native Interface ---
     NativeFunc natives[MAX_NATIVES];
+    Dependency dependencies[MAX_DEPENDENCIES];
+    int dependency_count;
 } VM;
 
 typedef struct {
@@ -165,7 +174,6 @@ double heap_alloc(VM* vm, int size);
 void run_vm_from(VM* vm, int start_ip, bool debug_trace);
 void run_vm(VM* vm, bool debug_trace);
 int vm_step(VM* vm, bool debug_trace);
-void mylo_reset(VM* vm);
 double* vm_resolve_ptr(VM* vm, double ptr_val);
 double* vm_resolve_ptr_safe(VM* vm, double ptr_val);
 int* vm_resolve_type(VM* vm, double ptr_val);
@@ -179,6 +187,9 @@ void print_recursive(VM* vm, double val, int type, int depth, int max_elem);
 double vm_evacuate_object(VM* vm, double ptr_val, int target_head);
 void enter_debugger(VM* vm);
 
+// Expose arena memory allocators
+void init_arena(VM* vm, int id);
+void free_arena(VM* vm, int id);
 // Pointer storage and retrieval
 #define MYLO_STORE(val, type_name) vm_store_copy(vm, &(val), sizeof(val), type_name)
 #define MYLO_RETRIEVE(id, c_type, type_name) (c_type*)vm_get_ref(vm, (int)(id), type_name)
@@ -187,6 +198,19 @@ void enter_debugger(VM* vm);
 #define MYLO_STORE_TO_VM(vm, val, type_name) vm_store_copy(vm, &(val), sizeof(val), type_name)
 #define MYLO_RETRIEVE_FROM_VM(vm, id, c_type, type_name) (c_type*)vm_get_ref(vm, (int)(id), type_name)
 #define MYLO_REGISTER_IN_VM(vm, ptr, type_name) vm_store_ptr(vm, (void*)(ptr), type_name)
+
+bool load_self_contained(VM* vm, const char* exe_path);
+
+// DLL Loading functions
+// Loads a shared library (.dll / .so) at the given path
+// Returns an opaque handle, or NULL on failure
+void* load_library(const char* path);
+
+// Retrieves a function pointer from the library
+void* get_symbol(void* lib_handle, const char* symbol_name);
+
+// Helper to construct platform specific names (foo -> foo.dll or libfoo.so)
+void get_lib_name(char* out, const char* base_name);
 
 
 #endif

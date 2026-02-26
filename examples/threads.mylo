@@ -1,0 +1,93 @@
+// --- Threading Test Program ---
+
+// Create a region for the job
+// 'Regions' are just bags of memory that can
+// be passed around in a safe manner.
+region job_mem
+
+// ! WARNING !
+// Only array objects (Heap Objects) are persistent between threads
+// This means that 'input' below can be read by a worker thread,
+// but if it is written to, that will non persist when the thread dies.
+
+var job_mem::result = [0]   // <-- This is an array, and will survive assignments between threads
+var job_mem::input = 0      // <-- This is read-only (it can be written to for in-thread use, but it will not persist thread exit).
+
+// 1. Define the function that will run in the thread
+fn worker_task() {
+    print("  [Worker] Thread started. Processing...")
+    print(f" [Worker] Input Loops : {job_mem::input}")
+
+    // Simulate heavy work
+    var total = 0
+    for (var i in 0...job_mem::input) {
+        total = total + 1
+    }
+    
+    // Store the result in the shared region 'job_mem'
+    job_mem::result[0] = total
+    
+    print("  [Worker] Done! Result stored.")
+    // We need to access result[0], otherwise we will get it's memory
+    // location.
+    print(f" [Worker] Result Stored {job_mem::result[0]}")
+}
+
+// 2. Main Program
+print("[Main] Initializing...")
+
+
+// Here we define the number of iterations
+// Note: see how this is defined set after the function has been compiled.
+job_mem::input = 100
+
+// Spawn the worker
+// create_worker(region_id, function_name)
+// CRITICAL: This MOVES ownership of 'job_mem' to the worker.
+// The main thread cannot access 'job_mem' variables until dock_worker is called.
+print("[Main] Spawning worker...")
+var worker_id = create_worker(job_mem, "worker_task")
+
+if (worker_id < 0) {
+    print("[Main] Failed to create worker!")
+} else {
+    print(f"[Main] Worker running (ID: {to_string(worker_id)})")
+    
+    // Simple busy-wait loop to monitor status
+    // In a real app, you would do other work here while the thread runs.
+    var running = 1
+    forever {
+        if (running != 1) {
+            break 
+        }
+        // check_worker returns: 0 (running), 1 (complete), -1 (error)
+        var status = check_worker(worker_id)
+        
+        if (status == 1) {
+            print("[Main] Worker reported complete.")
+            running = 0
+        } else {
+             // Still running...
+        }
+    }
+    
+    // Dock the worker
+    // This joins the thread and MOVES the 'job_mem' region back to main.
+    print("[Main] Docking worker...")
+    dock_worker(worker_id)
+
+
+    // Now that we have the region back, we can read the values
+    // that the worker created.
+    print("[Main] Retrieving result from worker memory...")
+    var res :i32 = job_mem::result[0]
+    print(f"[Main] Calculation Result: {to_string(res)}, target: {job_mem::input+1}")
+    if (res == (job_mem::input + 1)) {
+        print("[Main] SUCCESS: Threading working correctly.")
+    } else {
+        print("[Main] FAILURE: Result incorrect.")
+    }
+    
+    // Cleanup
+    clear(job_mem)
+}

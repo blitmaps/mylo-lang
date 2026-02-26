@@ -61,9 +61,11 @@
 
 #define MAP_INITIAL_CAP 16
 #define MAX_VM_FUNCTIONS 1024
-#define MAX_BUS_ENTRIES 256
+#define MAX_BUS_ENTRIES 2048
 #define MAX_WORKERS 128
 
+// FFI
+#define MAX_STD_ARGS 12
 
 // --- POINTER PACKING (Safe Generational) ---
 // We restrict the total used bits to 48 to ensure absolute safety
@@ -92,5 +94,23 @@
 
 #define UNPACK_GEN(ptr) \
     ((int)(((unsigned long long)(ptr) >> (PTR_OFFSET_BITS + PTR_ARENA_BITS)) & 0x3FFF))
+
+
+// For bundles
+
+#define MYLO_MAGIC "MYLO_EXE"
+#define MAX_DEPENDENCIES 128
+
+typedef struct {
+    long bytecode_size;
+    long const_size;     // Size of constants block
+    long string_size;    // Size of string pool
+    long dependency_size;
+    long symbol_size;
+    long function_size; // func table size
+    char magic[9];       // "MYLO_EXE\0"
+} StandaloneFooter;
+
+
 
 #endif

@@ -58,6 +58,27 @@ void amiga_draw_text(VM* vm);
 void amiga_set_color(VM* vm);
 void amiga_get_event(VM* vm);
 void amiga_wait(VM* vm);
+
+// Threads
+void std_create_worker(VM *vm);
+void std_dock_worker(VM *vm);
+void std_check_worker(VM *vm);
+
+// Bus Functions
+void std_bus_set(VM *vm);
+void std_bus_get(VM *vm);
+
+// Terminal
+void std_cget(VM *vm);
+void std_kbhit(VM *vm);
+void std_get_keys(VM *vm);
+
+// Memory Alloc
+void std_create_region(VM *vm);
+void std_set_region(VM *vm);
+void std_get_region(VM *vm);
+void std_clear_region(VM *vm);
+
 // Registry Declaration (Extern)
 // We do NOT define it here, only say it exists.
 extern const StdLibDef std_library[];
