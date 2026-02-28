@@ -1999,7 +1999,22 @@ bool load_self_contained(VM* vm, const char* exe_path) {
         api.string_pool = vm->string_pool;
 
         for (int i = 0; i < dep_count; i++) {
+            printf("Loading ... %s\n", deps[i].name);
             void* lib = load_library(deps[i].name);
+            
+            if (!lib) {
+                char *pathvar;
+                pathvar = getenv("MYLO_LIBS");
+                printf("MYLO_LIBS=%s",pathvar);
+                if (pathvar && (strlen(deps[i].name) > 3)) {
+                    char pathbind[1024] = "";
+                    strcat(pathbind,pathvar);
+                    strcat(pathbind,deps[i].name + 2);
+                    printf("Attempting to load from MYLO_LIBS (%s)\n", pathvar); 
+                    lib = load_library(pathbind);
+                }
+            }
+
             if (!lib) {
                 printf("Runtime Error: Could not load dependency '%s'\n", deps[i].name);
                 exit(1);
@@ -2056,3 +2071,4 @@ void* get_symbol(void* handle, const char* symbol) {
     return dlsym(handle, symbol);
 #endif
 }
+
