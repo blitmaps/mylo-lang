@@ -336,12 +336,14 @@ static void parse_cfn_decl() {
     strcpy(name, curr.text);
     match(TK_ID);
 
+    char mangled_name[MAX_IDENTIFIER * 2];
+    get_mangled_name(mangled_name, name);
+
     int ffi_idx = ffi_count++;
     ffi_blocks[ffi_idx].id = ffi_idx;
     ffi_blocks[ffi_idx].arg_count = 0;
-    strcpy(ffi_blocks[ffi_idx].func_name, name);
+    strcpy(ffi_blocks[ffi_idx].func_name, mangled_name);
     strcpy(ffi_blocks[ffi_idx].return_type, "void");
-
     match(TK_LPAREN);
     while (curr.type != TK_RPAREN && curr.type != TK_EOF) {
         if (ffi_blocks[ffi_idx].arg_count >= MAX_FFI_ARGS) error("Too many FFI args");
