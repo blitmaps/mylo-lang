@@ -15,7 +15,7 @@
 // --- Tokenizer & Structures ---
 
 typedef enum {
-    TK_FN, TK_VAR, TK_IF, TK_FOR, TK_RET, TK_PRINT, TK_IN, TK_STRUCT, TK_ELSE,
+    TK_FN, TK_CFN, TK_VAR, TK_IF, TK_FOR, TK_RET, TK_PRINT, TK_IN, TK_STRUCT, TK_ELSE,
     TK_MOD, TK_IMPORT, TK_FOREVER,
     TK_ID, TK_NUM, TK_STR, TK_RANGE,
     TK_LPAREN, TK_RPAREN, TK_LBRACE, TK_RBRACE,
@@ -44,7 +44,7 @@ typedef enum {
 
 // Token Names for pretty printing
 const char *TOKEN_NAMES[] = {
-    "fn", "var", "if", "for", "ret", "print", "in", "struct", "else",
+    "fn", "cfn", "var", "if", "for", "ret", "print", "in", "struct", "else",
     "mod", "import", "forever",
     "Identifier", "Number", "String", "Range (...)",
     "(", ")", "{", "}", "[", "]",
@@ -60,6 +60,8 @@ const char *TOKEN_NAMES[] = {
 
 // Mylo Exit Function
 extern void mylo_exit(int code);
+
+void match(MyloTokenType t);
 
 const char *get_token_name(MyloTokenType t) {
     if (t < 0 || t > TK_DEBUGGER) return "Unknown";
@@ -82,6 +84,7 @@ typedef struct {
 
 typedef struct {
     int id;
+    char func_name[MAX_IDENTIFIER];
     char code_body[MAX_C_BLOCK_SIZE];
     FFIArg args[MAX_FFI_ARGS];
     int arg_count;
@@ -312,12 +315,81 @@ int find_stdlib_func(char *name) {
     return -1;
 }
 
+int find_cfn(char *name) {
+    for (int i = 0; i < ffi_count; i++) {
+        if (strlen(ffi_blocks[i].func_name) > 0 && strcmp(ffi_blocks[i].func_name, name) == 0) return i;
+    }
+    return -1;
+}
+
 void get_mangled_name(char *out, char *raw_name) {
     if (strlen(current_namespace) > 0) {
         sprintf(out, "%s_%s", current_namespace, raw_name);
     } else {
         strcpy(out, raw_name);
     }
+}
+
+static void parse_cfn_decl() {
+    match(TK_CFN);
+    char name[MAX_IDENTIFIER];
+    strcpy(name, curr.text);
+    match(TK_ID);
+
+    int ffi_idx = ffi_count++;
+    ffi_blocks[ffi_idx].id = ffi_idx;
+    ffi_blocks[ffi_idx].arg_count = 0;
+    strcpy(ffi_blocks[ffi_idx].func_name, name);
+    strcpy(ffi_blocks[ffi_idx].return_type, "void");
+
+    match(TK_LPAREN);
+    while (curr.type != TK_RPAREN && curr.type != TK_EOF) {
+        if (ffi_blocks[ffi_idx].arg_count >= MAX_FFI_ARGS) error("Too many FFI args");
+        strcpy(ffi_blocks[ffi_idx].args[ffi_blocks[ffi_idx].arg_count].name, curr.text);
+        match(TK_ID);
+        match(TK_COLON);
+        if (curr.type == TK_TYPE_DEF) {
+            strcpy(ffi_blocks[ffi_idx].args[ffi_blocks[ffi_idx].arg_count].type, curr.text);
+            match(TK_TYPE_DEF);
+        } else {
+            strcpy(ffi_blocks[ffi_idx].args[ffi_blocks[ffi_idx].arg_count].type, curr.text);
+            match(TK_ID);
+        }
+        if (curr.type == TK_LBRACKET) {
+            match(TK_LBRACKET); match(TK_RBRACKET);
+            strcat(ffi_blocks[ffi_idx].args[ffi_blocks[ffi_idx].arg_count].type, "[]");
+        }
+        ffi_blocks[ffi_idx].arg_count++;
+        if (curr.type == TK_COMMA) match(TK_COMMA);
+    }
+    match(TK_RPAREN);
+
+    if (curr.type == TK_ARROW) {
+        match(TK_ARROW);
+        if (curr.type == TK_TYPE_DEF) {
+            strcpy(ffi_blocks[ffi_idx].return_type, curr.text);
+            match(TK_TYPE_DEF);
+        } else {
+            strcpy(ffi_blocks[ffi_idx].return_type, curr.text);
+            match(TK_ID);
+        }
+        if (curr.type == TK_LBRACKET) {
+            match(TK_LBRACKET); match(TK_RBRACKET);
+            strcat(ffi_blocks[ffi_idx].return_type, "[]");
+        }
+    }
+
+    // Auto-generate the C call logic
+    char call_str[MAX_C_BLOCK_SIZE] = "";
+    if (strcmp(ffi_blocks[ffi_idx].return_type, "void") != 0) strcat(call_str, "return ");
+    strcat(call_str, name);
+    strcat(call_str, "(");
+    for (int i = 0; i < ffi_blocks[ffi_idx].arg_count; i++) {
+        strcat(call_str, ffi_blocks[ffi_idx].args[i].name);
+        if (i < ffi_blocks[ffi_idx].arg_count - 1) strcat(call_str, ", ");
+    }
+    strcat(call_str, ");");
+    strcpy(ffi_blocks[ffi_idx].code_body, call_str);
 }
 
 // Pass in the current depths right before entering the loop body
@@ -470,8 +542,9 @@ void next_token() {
         strncpy(curr.text, start, len);
         curr.text[len] = '\0';
         if (strcmp(curr.text, "fn") == 0) curr.type = TK_FN;
-        else if (strcmp(curr.text, "var") == 0) curr.type = TK_VAR;
         else if (strcmp(curr.text, "struct") == 0) curr.type = TK_STRUCT;
+        else if (strcmp(curr.text, "cfn") == 0) curr.type = TK_CFN;
+        else if (strcmp(curr.text, "var") == 0) curr.type = TK_VAR;
         else if (strcmp(curr.text, "if") == 0) curr.type = TK_IF;
         else if (strcmp(curr.text, "else") == 0) curr.type = TK_ELSE;
         else if (strcmp(curr.text, "for") == 0) curr.type = TK_FOR;
@@ -853,6 +926,7 @@ void factor() {
         match(TK_ID);
         int ffi_idx = ffi_count++;
         ffi_blocks[ffi_idx].id = ffi_idx;
+        ffi_blocks[ffi_idx].func_name[0] = '\0';
         ffi_blocks[ffi_idx].arg_count = 0;
         ffi_blocks[ffi_idx].return_type[0] = '\0';
 
@@ -919,10 +993,22 @@ void factor() {
         int std_count = 0;
         while (std_library[std_count].name != NULL) std_count++;
         emit(std_count + ffi_idx);
-    } else if (curr.type == TK_FSTR) {
+    }     
+    
+    else if (curr.type == TK_FSTR) {
         int empty_id = make_string(compiling_vm, "");
         emit(OP_PSH_STR); emit(empty_id);
-        char *raw = curr.text; char *ptr = raw; char *start = ptr;
+        
+        // --- THE FIX: Isolate the string so recursive tokenization doesn't corrupt it ---
+        char safe_fstr[MAX_STRING_LENGTH];
+        strncpy(safe_fstr, curr.text, MAX_STRING_LENGTH);
+        safe_fstr[MAX_STRING_LENGTH - 1] = '\0';
+        
+        char *raw = safe_fstr; 
+        char *ptr = raw; 
+        char *start = ptr;
+        // --------------------------------------------------------------------------------
+        
         while (*ptr) {
             if (*ptr == '{') {
                 if (ptr > start) {
@@ -935,9 +1021,12 @@ void factor() {
                 while (*ptr && *ptr != '}') ptr++;
                 if (*ptr == '}') {
                     char expr_code[256]; int len = (int) (ptr - expr_start);
+                    if (len >= 256) len = 255;
                     strncpy(expr_code, expr_start, len); expr_code[len] = '\0';
                     char *old_src = src; Token old_token = curr; int old_line = line;
+                    
                     src = expr_code; next_token(); expression();
+                    
                     src = old_src; curr = old_token; line = old_line;
                     emit(OP_CAT);
                     ptr++; start = ptr;
@@ -951,6 +1040,7 @@ void factor() {
             int id = make_string(compiling_vm, chunk); emit(OP_PSH_STR); emit(id); emit(OP_CAT);
         }
         match(TK_FSTR);
+
     } else if (curr.type == TK_BSTR) {
         int id = make_string(compiling_vm, curr.text);
         emit(OP_PSH_STR); emit(id); emit(OP_MK_BYTES);
@@ -990,6 +1080,15 @@ void factor() {
                 if (std_library[std_idx].arg_count != arg_count) error("StdLib function '%s' expects %d args", name, std_library[std_idx].arg_count);
                 emit(OP_NATIVE); emit(std_idx); return;
             }
+
+            int cfn_idx = find_cfn(name);
+            if (cfn_idx != -1) {
+                if (ffi_blocks[cfn_idx].arg_count != arg_count) error("CFN function '%s' expects %d args", name, ffi_blocks[cfn_idx].arg_count);
+                int std_count = 0;
+                while (std_library[std_count].name != NULL) std_count++;
+                emit(OP_NATIVE); emit(std_count + cfn_idx); return;
+            }
+
             char m[MAX_IDENTIFIER * 2]; get_mangled_name(m, name);
             faddr = find_func(m);
             if (faddr != -1) { emit(OP_CALL); emit(faddr); emit(arg_count); return; }
@@ -1216,7 +1315,8 @@ static void parse_print() {
 static void parse_c_block_stmt() {
     match(TK_ID);
     int ffi_idx = ffi_count++;
-    ffi_blocks[ffi_idx].id = ffi_idx;
+    ffi_blocks[ffi_idx].id = ffi_idx; 
+    ffi_blocks[ffi_idx].func_name[0] = '\0';
     ffi_blocks[ffi_idx].arg_count = 0;
     strcpy(ffi_blocks[ffi_idx].return_type, "void");
 
@@ -1353,6 +1453,7 @@ static void parse_import() {
         }
         int ffi_idx = ffi_count++;
         ffi_blocks[ffi_idx].id = ffi_idx;
+        ffi_blocks[ffi_idx].func_name[0] = '\0';
         ffi_blocks[ffi_idx].arg_count = 0;
         strcpy(ffi_blocks[ffi_idx].return_type, "void");
         if (curr.type == TK_LPAREN) {
@@ -1601,6 +1702,15 @@ static void parse_id_statement(Token start_token, char *name) {
             emit(OP_POP);
             return;
         }
+
+        int cfn_idx = find_cfn(name);
+        if (cfn_idx != -1) {
+            if (ffi_blocks[cfn_idx].arg_count != arg_count) error("CFN function '%s' expects %d args", name, ffi_blocks[cfn_idx].arg_count);
+            int std_count = 0; 
+            while (std_library[std_count].name != NULL) std_count++;
+            emit(OP_NATIVE); emit(std_count + cfn_idx); emit(OP_POP); return;
+        }
+
         char m[MAX_IDENTIFIER * 2];
         get_mangled_name(m, name);
         faddr = find_func(m);
@@ -2056,7 +2166,11 @@ void statement() {
         expression();
         match(TK_RPAREN);
         emit(OP_DEL_ARENA);
-    } else if (curr.type == TK_MONITOR) {
+    }
+    else if (curr.type == TK_CFN) {   
+        parse_cfn_decl();               
+    }
+    else if (curr.type == TK_MONITOR) {
         match(TK_MONITOR);
         match(TK_LPAREN);
         match(TK_RPAREN);
@@ -2548,7 +2662,7 @@ void compile_repl(VM* vm, char *source, int *out_start_ip) {
              curr.type == TK_FOREVER || curr.type == TK_PRINT || curr.type == TK_IMPORT ||
              curr.type == TK_RET || curr.type == TK_BREAK || curr.type == TK_CONTINUE ||
              curr.type == TK_ENUM || curr.type == TK_REGION || curr.type == TK_CLEAR ||
-             curr.type == TK_MONITOR) {
+             curr.type == TK_MONITOR || curr.type == TK_CFN) {
         statement();
     } else if (curr.type == TK_ID) {
         int saved_code_size = vm->code_size;

@@ -10,8 +10,11 @@
 #include "test_include.h"
 
 // Toggle this define to print the source code for each test
-//#define PRINT_TEST_CODE
+#define PRINT_TEST_CODE false
+#define PRINT_MACHINE_CODE false
 
+
+// Mylo includes
 extern "C" {
     #include "../src/vm.h"
     void compiler_reset();
@@ -55,13 +58,14 @@ inline TestOutput run_source_test(const std::string& src, const std::string& exp
     vm_init(&test_vm);
     compiler_reset();
     MyloConfig.print_to_memory = true;
+    
+    if (PRINT_TEST_CODE) {
+        std::cout << std::endl;
+        std::cout << src << std::endl;
+    }
 
-#ifdef PRINT_TEST_CODE
-    std::cout << std::endl;
-    std::cout << src << std::endl;
-#endif
     parse(&test_vm, const_cast<char *>(src.c_str()));
-    run_vm(&test_vm, false);
+    run_vm(&test_vm, PRINT_MACHINE_CODE);
 
     // Reset config so other tests don't break
     MyloConfig.print_to_memory = false;
@@ -105,13 +109,13 @@ inline TestOutput test_change_types() {
 
     // Note: escape the quote properly for C string "print(\"hello\")"
     std::string src = """"
-    "var x = \"hi\""
-    "print(x)"
-    "x = 1"
-    "print(x)"
+    "var x = \"hi\"\n"
+    "print(x)\n"
+    "x = 1\n"
+    "print(x)\n"
 
-    "x = f\"hi {x}\""
-    "print(f\"hi {x}\")";
+    "x = f\"hi {x}\"\n"
+    "print(f\"hi {x}\")\n";
 
     std::string expected = """"
     "hi\n"
