@@ -48,6 +48,7 @@ It is fast to write, fast to run, and can run anywhere.
             - [Namespace Complexity](#namespace-complexity)
         + [Getting Type Handles](#getting-type-handles)
         + [Void blocks](#void-blocks)
+        + [Calling C Functions (cfn)](#c-function-calling-native-c-functions-by-prototype)
     * [Dynamically Running Native Code - C Bindings](#dynamically-running-native-code---c-bindings)
 
 <a name="technical-intro-for-nerds"></a>
@@ -1007,6 +1008,29 @@ import C "cool_func.h"
 
 C() {
     cool_func();
+}
+```
+
+### C-Function: Calling native C functions by prototype
+
+Mylo allows functions from C, such as `atoi` below, to be called
+directly by declaring them as a `cfn` (c-function). The input, and return 
+types must be provided.
+```
+// 'cfn' defines a c function, in this case
+// the standard library atoi. It *must* also
+// have the correct return type, otherwise it
+// will return null
+cfn atoi(x : str) -> f32
+// Prints 7
+print(f"{atoi("7")}")
+```
+
+#### Above C code generation
+The above, when compiled generates this c code:
+```
+float __mylo_user_0(VM* vm, char* x) {
+    return atoi(x);
 }
 ```
 

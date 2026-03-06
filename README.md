@@ -144,8 +144,25 @@ Mylo supports debugging in the command line using the `--db` flag. The Mylo prog
 ```
 
 ## But everything cool is written in C, how do I use those libraries?
+
+### Seamlessly call C
+Mylo allows functions from C, such as `atoi` below, to be called
+directly by declaring them as a `cfn` (c-function). The input, and return
+types must be provided.
+```
+// 'cfn' defines a c function, in this case
+// the standard library atoi. It *must* also
+// have the correct return type, otherwise it
+// will return null
+cfn atoi(x : str) -> f32
+// Prints 7
+print(f"{atoi("7")}")
+```
+
 ### Building a native binary with inline C?
-Here is some Mylo code jumping into C and back...
+Here is some Mylo code jumping into C and back. Mylo uses `C() {}` syntax to 
+embed anonymous C function code directly, and it can access variables from
+mylo and return them:
 ```javascript
 // 1. Explicit return: num
 var result: num = C(val: i32 = 25) -> num {
