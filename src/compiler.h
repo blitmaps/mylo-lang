@@ -36,6 +36,14 @@ typedef struct {
 extern FuncDebugInfo funcs[MAX_GLOBALS];
 extern int func_count;
 
+typedef struct {
+    char name[MAX_IDENTIFIER];
+    int value;
+} EnumEntry;
+
+extern EnumEntry enum_entries[MAX_ENUM_MEMBERS];
+extern int enum_entry_count;
+
 #define MAX_DEBUG_SYMBOLS 4096
 extern DebugSym debug_symbols[MAX_DEBUG_SYMBOLS];
 extern int debug_symbol_count;

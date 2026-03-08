@@ -8,6 +8,22 @@
 #include "mylolib.h"
 #include "utils.h"
 
+// Safely converts internal 'Foo_bar' back to 'Foo::bar' for the editor
+void demangle_name(const char* mangled, char* out_label, bool is_enum) {
+    strcpy(out_label, mangled);
+    char* sep = strrchr(out_label, '_'); // Find the last underscore
+    
+    // We replace the underscore if it's an enum, OR if the prefix starts 
+    // with a capital letter (standard Mylo convention for Modules).
+    // This protects normal snake_case variables like 'pixel_color'.
+    if (sep && (is_enum || (out_label[0] >= 'A' && out_label[0] <= 'Z'))) {
+        // Shift the right side of the string over by 1 to make room for '::'
+        memmove(sep + 2, sep + 1, strlen(sep + 1) + 1);
+        sep[0] = ':';
+        sep[1] = ':';
+    }
+}
+
 // Helper to send JSON-RPC responses formatted for LSP
 void lsp_send_response(int id, const char* result_json) {
     char body[65536];
@@ -57,30 +73,67 @@ void handle_completion(int id, const char* body) {
                     parse(&vm, source); 
                 }
 
-                // User Functions
+                // --- User Functions ---
                 for (int i = 0; i < func_count; i++) {
                     if (!first) strcat(items, ",");
-                    char item[256];
-                    snprintf(item, sizeof(item), "{\"label\":\"%s\",\"kind\":3,\"sortText\":\"1\"}", funcs[i].name);
+                    char item[512], display_name[256];
+                    demangle_name(funcs[i].name, display_name, false);
+                    
+                    snprintf(item, sizeof(item), 
+                        "{\"label\":\"%s\",\"insertText\":\"%s\",\"kind\":3,\"sortText\":\"1\"}", 
+                        display_name, display_name);
                     strcat(items, item);
                     first = false;
                 }
 
-                // User Global Variables
+                // --- User Global Variables ---
                 for (int i = 0; i < global_count; i++) {
                     if (!first) strcat(items, ",");
-                    char item[256];
-                    // kind: 6 represents a Variable in LSP
-                    snprintf(item, sizeof(item), "{\"label\":\"%s\",\"kind\":6,\"sortText\":\"2\"}", globals[i].name);
+                    char item[512], display_name[256];
+                    demangle_name(globals[i].name, display_name, false);
+                    
+                    snprintf(item, sizeof(item), 
+                        "{\"label\":\"%s\",\"insertText\":\"%s\",\"kind\":6,\"sortText\":\"2\"}", 
+                        display_name, display_name);
                     strcat(items, item);
                     first = false;
                 }
-
                 // User Local Variables
                 for (int i = 0; i < local_count; i++) {
                     if (!first) strcat(items, ",");
                     char item[256];
                     snprintf(item, sizeof(item), "{\"label\":\"%s\",\"kind\":6,\"sortText\":\"2\"}", locals[i].name);
+                    strcat(items, item);
+                    first = false;
+                }
+
+                for (int i = 0; i < enum_entry_count; i++) {
+                    if (!first) strcat(items, ",");
+                    char item[512], display_name[256];
+                    // Pass true because Enums are ALWAYS namespaced
+                    demangle_name(enum_entries[i].name, display_name, true); 
+                    
+                    snprintf(item, sizeof(item), 
+                        "{\"label\":\"%s\",\"insertText\":\"%s\",\"kind\":20,\"sortText\":\"3\"}", 
+                        display_name, display_name);
+                    strcat(items, item);
+                    first = false;
+                }
+                // 4. Keywords & Types
+                const char* keywords[] = {
+                    "fn", "cfn", "var", "if", "for", "ret", "print", "in", "struct", "else",
+                    "mod", "import", "forever", "break", "continue", "enum", "true", "false",
+                    "embed", "region", "clear", "monitor", "debugger",
+                    // Types
+                    "any", "num", "str", "f64", "f32", "i32", "i16", "i64", "byte", "bool",
+                    NULL
+                };
+
+                for (int i = 0; keywords[i] != NULL; i++) {
+                    if (!first) strcat(items, ",");
+                    char item[256];
+                    // kind: 14 is Keyword
+                    snprintf(item, sizeof(item), "{\"label\":\"%s\",\"kind\":14,\"sortText\":\"4\"}", keywords[i]);
                     strcat(items, item);
                     first = false;
                 }
