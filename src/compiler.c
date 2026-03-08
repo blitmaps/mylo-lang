@@ -153,11 +153,7 @@ struct StructDef {
 
 int struct_count = 0;
 
-struct {
-    char name[MAX_IDENTIFIER];
-    int value;
-} enum_entries[MAX_ENUM_MEMBERS];
-
+EnumEntry enum_entries[MAX_ENUM_MEMBERS];
 int enum_entry_count = 0;
 
 void parse_internal(char *source, bool is_import);
