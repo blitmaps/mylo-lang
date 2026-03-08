@@ -26,7 +26,7 @@ void handle_completion(int id, const char* body) {
         if (!first) strcat(items, ",");
         char item[256];
         // kind: 3 represents a Function/Method in LSP
-        snprintf(item, sizeof(item), "{\"label\":\"%s\",\"kind\":3}", std_library[i].name);
+        snprintf(item, sizeof(item), "{\"label\":\"%s\",\"kind\":3,\"sortText\":\"1\"}", std_library[i].name);
         strcat(items, item);
         first = false;
     }
@@ -61,7 +61,7 @@ void handle_completion(int id, const char* body) {
                 for (int i = 0; i < func_count; i++) {
                     if (!first) strcat(items, ",");
                     char item[256];
-                    snprintf(item, sizeof(item), "{\"label\":\"%s\",\"kind\":3}", funcs[i].name);
+                    snprintf(item, sizeof(item), "{\"label\":\"%s\",\"kind\":3,\"sortText\":\"1\"}", funcs[i].name);
                     strcat(items, item);
                     first = false;
                 }
@@ -71,7 +71,7 @@ void handle_completion(int id, const char* body) {
                     if (!first) strcat(items, ",");
                     char item[256];
                     // kind: 6 represents a Variable in LSP
-                    snprintf(item, sizeof(item), "{\"label\":\"%s\",\"kind\":6}", globals[i].name);
+                    snprintf(item, sizeof(item), "{\"label\":\"%s\",\"kind\":6,\"sortText\":\"2\"}", globals[i].name);
                     strcat(items, item);
                     first = false;
                 }
@@ -80,7 +80,7 @@ void handle_completion(int id, const char* body) {
                 for (int i = 0; i < local_count; i++) {
                     if (!first) strcat(items, ",");
                     char item[256];
-                    snprintf(item, sizeof(item), "{\"label\":\"%s\",\"kind\":6}", locals[i].name);
+                    snprintf(item, sizeof(item), "{\"label\":\"%s\",\"kind\":6,\"sortText\":\"2\"}", locals[i].name);
                     strcat(items, item);
                     first = false;
                 }
