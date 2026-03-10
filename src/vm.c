@@ -1191,6 +1191,7 @@ static void exec_var_op(VM* vm, int op) {
         vm->stack[fp + arg] = vm->stack[vm->sp];
         vm->stack_types[fp + arg] = vm->stack_types[vm->sp];
         vm->sp--;
+        // Reverted: No boundary shifting for local variables to prevent loop leaks!
     }
 }
 
@@ -1402,6 +1403,17 @@ static void exec_array_op(VM* vm, int op) {
                     base[1] = (double)new_cap;
                     base[3] = new_data_ptr;
                     data = new_data; data_types = new_types;
+
+                    int map_offset = UNPACK_OFFSET(ptr);
+                    for (int s = 0; s < vm->scope_sp; s++) {
+                        // If the scope belongs to this arena AND the map is older than the scope
+                        if (vm->scope_stack[s].arena_id == vm->current_arena &&
+                            vm->scope_stack[s].head > map_offset) {
+
+                            // Shift the scope's rewind point to protect the new allocation
+                            vm->scope_stack[s].head = vm->arenas[vm->current_arena].head;
+                            }
+                    }
                 }
                 data[count*2] = key;
                 data_types[count*2] = kt; // Use the actual type instead of T_STR
@@ -1789,6 +1801,7 @@ int vm_step(VM* vm, bool debug_trace) {
             vm->scope_stack[vm->scope_sp].arena_id = vm->current_arena;
             vm->scope_stack[vm->scope_sp].head = vm->arenas[vm->current_arena].head;
             vm->scope_stack[vm->scope_sp].fp = vm->fp;
+            //vm->scope_stack[vm->scope_sp].sp_at_entry = vm->sp;
             vm->scope_sp++;
             break;
         }
