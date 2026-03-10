@@ -634,7 +634,8 @@ void print_recursive(VM* vm, double val, int type, int depth, int max_elem) {
             if(data) {
                 for (int i = 0; i < limit; i++) {
                     if (i > 0) print_raw(vm, ", ");
-                    print_raw(vm, vm->string_pool[(int)data[i * 2]]);
+                    // Let print_recursive handle the key dynamically
+                    print_recursive(vm, data[i * 2], data_types[i * 2], 0, max_elem);
                     print_raw(vm, ": ");
                     print_recursive(vm, data[i * 2 + 1], data_types[i * 2 + 1], depth + 1, max_elem);
                 }
@@ -1306,8 +1307,9 @@ static void exec_array_op(VM* vm, int op) {
         vm_push(vm, ptr, T_OBJ);
     } else if (op == OP_AGET) {
         CHECK_STACK(2);
-        double key = vm_pop(vm);
+        double key = vm_pop(vm); int kt = vm->stack_types[vm->sp+1];
         double ptr = vm_pop(vm);
+
         double* base = vm_resolve_ptr(vm, ptr);
         int* types = vm_resolve_type(vm, ptr);
         int type = (int)base[HEAP_OFFSET_TYPE];
@@ -1339,7 +1341,8 @@ static void exec_array_op(VM* vm, int op) {
             int* data_types = vm_resolve_type(vm, base[HEAP_OFFSET_DATA]);
             bool found = false;
             for(int i=0; i<count; i++) {
-                if(data[i*2] == key) {
+                // Ensure the types match
+                if(data[i*2] == key && data_types[i*2] == kt) {
                     vm_push(vm, data[i*2 + 1], data_types[i*2 + 1]);
                     found = true; break;
                 }
@@ -1359,7 +1362,7 @@ static void exec_array_op(VM* vm, int op) {
     } else if (op == OP_ASET) {
         CHECK_STACK(3);
         double val = vm_pop(vm); int vt = vm->stack_types[vm->sp+1];
-        double key = vm_pop(vm);
+        double key = vm_pop(vm); int kt = vm->stack_types[vm->sp+1];
         double ptr = vm->stack[vm->sp];
         double* base = vm_resolve_ptr(vm, ptr);
         int* types = vm_resolve_type(vm, ptr);
@@ -1381,7 +1384,8 @@ static void exec_array_op(VM* vm, int op) {
             int* data_types = vm_resolve_type(vm, data_ptr);
             bool found = false;
             for(int i=0; i<count; i++) {
-                if (data[i*2] == key) {
+                // Add `kt` type check so numbers and strings don't collide
+                if (data[i*2] == key && data_types[i*2] == kt) {
                     data[i*2+1] = val; data_types[i*2+1] = vt;
                     found = true; break;
                 }
@@ -1400,7 +1404,7 @@ static void exec_array_op(VM* vm, int op) {
                     data = new_data; data_types = new_types;
                 }
                 data[count*2] = key;
-                data_types[count*2] = T_STR;
+                data_types[count*2] = kt; // Use the actual type instead of T_STR
                 data[count*2+1] = val;
                 data_types[count*2+1] = vt;
                 base[2] = (double)(count+1);

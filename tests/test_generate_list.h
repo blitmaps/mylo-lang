@@ -766,6 +766,24 @@ inline TestOutput test_map_iterator() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_map_passing() {
+
+    std::string src = """"
+    "fn foo() {\n"
+        "var header = {}\n"
+        "for (x in 0...3) {\n"
+            "header[x] = x+1\n"
+        "}\n"
+        "print(header)\n"
+        "ret header\n"
+    "}\n"
+    "var o = foo()\n"
+    "print(o)\n";
+    std::string expected = """"
+    "{0: 1, 1: 2, 2: 3, 3: 4}\n{0: 1, 1: 2, 2: 3, 3: 4}\n";
+    return run_source_test(src, expected);
+}
+
 inline TestOutput test_byte_slice_iterator() {
 
     std::string src = """"
@@ -1547,6 +1565,7 @@ inline void test_generate_list() {
     ADD_TEST("Test List (add())", test_list_add);
     ADD_TEST("Test List (remove())", test_list_remove);
     ADD_TEST("Test Map Iterator", test_map_iterator);
+    ADD_TEST("Test Map Passing", test_map_passing);
     ADD_TEST("Test Map (remove())", test_map_remove);
     ADD_TEST("Test Vector (add())", test_vector_ops_add);
     ADD_TEST("Test Vector (mul())", test_vector_ops_mul);
