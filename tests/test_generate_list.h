@@ -1514,6 +1514,36 @@ inline TestOutput test_enum_string_repl() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_type_infer() {
+
+    std::string src = """"
+    "enum GOO {\n"
+    "poo,\n"
+    "too,\n"
+    "}\n"
+    "print(type(GOO::poo))\n"
+    "var x = \"hi\"\n"
+    "var y = 99\n"
+    "print(type(x))\n"
+    "print(type(y))\n";
+    std::string expected = """"
+    "GOO\nstr\nnum\n";
+
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_enum_iter() {
+    std::string src = """"
+    "enum GOO {\n"
+    "poo,\n"
+    "too,\n"
+    "}\n"
+    "for (x in GOO) { print(x)}\n";
+    std::string expected = """"
+    "poo\ntoo\n";
+
+    return run_source_test(src, expected);
+}
 
 inline void test_generate_list() {
     ADD_TEST("Test Test", test_test);
@@ -1607,6 +1637,9 @@ inline void test_generate_list() {
     ADD_TEST("Test Conditional Scoping (for)", test_conditional_scoped_var_for);
     ADD_TEST("Test String Interpolation * Long Print", test_print_interp_len);
     ADD_TEST("Test Enum String Representation", test_enum_string_repl);
+    ADD_TEST("Test Enum Iteration", test_enum_iter);
+    ADD_TEST("Test Type Inference (type())", test_type_infer);
+
 }
 
 #endif //MYLO_TEST_GENERATE_LIST_H

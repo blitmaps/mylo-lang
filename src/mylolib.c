@@ -408,6 +408,40 @@ void std_tan(VM *vm) { vm_push(vm, tan(vm_pop(vm)), T_NUM); }
 void std_floor(VM *vm) { vm_push(vm, floor(vm_pop(vm)), T_NUM); }
 void std_ceil(VM *vm) { vm_push(vm, ceil(vm_pop(vm)), T_NUM); }
 
+void std_type(VM* vm) {
+    double val = vm_pop(vm);
+    int type = vm->stack_types[vm->sp + 1];
+
+    int str_id = -1;
+    if (type == T_NUM) {
+        str_id = make_string(vm, "num");
+    } else if (type == T_STR) {
+        str_id = make_string(vm, "str");
+    } else if (type == T_ENUM) {
+        // Shift right 32 bits to grab the Type Name string ID!
+        unsigned long long packed = (unsigned long long)val;
+        int type_str_id = (packed >> 32) & 0xFFFF;
+        str_id = type_str_id;
+    } else if (type == T_OBJ) {
+        double* base = vm_resolve_ptr_safe(vm, val);
+        if (base) {
+            int obj_type = (int)base[0];
+            if (obj_type == TYPE_ARRAY) str_id = make_string(vm, "list");
+            else if (obj_type == TYPE_MAP) str_id = make_string(vm, "map");
+            else if (obj_type == TYPE_BYTES) str_id = make_string(vm, "bytes");
+            else if (obj_type == TYPE_I32_ARRAY) str_id = make_string(vm, "i32[]");
+            else if (obj_type == TYPE_F32_ARRAY) str_id = make_string(vm, "f32[]");
+            else if (obj_type == TYPE_I16_ARRAY) str_id = make_string(vm, "i16[]");
+            else if (obj_type == TYPE_I64_ARRAY) str_id = make_string(vm, "i64[]");
+            else if (obj_type == TYPE_BOOL_ARRAY) str_id = make_string(vm, "bool[]");
+            else str_id = make_string(vm, "struct");
+        } else {
+            str_id = make_string(vm, "null");
+        }
+    }
+    vm_push(vm, (double)str_id, T_STR);
+}
+
 void std_len(VM *vm) {
     double val = vm_pop(vm);
 
@@ -2099,6 +2133,7 @@ void std_web_triangle(VM *vm) {
 }
 
 const StdLibDef std_library[] = {
+    {"type", std_type, "str", 1, {"any"}},
     {"len", std_len, "num", 1, {"any"}},
     {"contains", std_contains, "num", 2, {"any", "any"}},
     {"to_string", std_to_string, "str", 1, {"any"}},
