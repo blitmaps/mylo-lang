@@ -176,6 +176,13 @@ print(f"I'm on the {Transpot::bus}")
 // I'm on the bus.
 ```
 
+They can also be iterated
+```javascript
+for (x in Transport) {
+    print(f"{x}") // car, then bus, then bike
+}
+```
+
 <a name="bools"></a>
 ### Bools
 Truth statements evaluate to 0 for false and 1 for true. These are also codified as `true` and `false`
