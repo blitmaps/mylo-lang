@@ -2164,6 +2164,7 @@ void enum_decl(VM* vm) {
         global_idx = global_count++;
         strcpy(globals[global_idx].name, enum_name);
         globals[global_idx].type_id = 0; // Or TYPE_ANY if defined
+        globals[global_idx].addr = global_idx;
     }
 
     emit(OP_SET);

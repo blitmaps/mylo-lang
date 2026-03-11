@@ -1538,9 +1538,15 @@ inline TestOutput test_enum_iter() {
     "poo,\n"
     "too,\n"
     "}\n"
-    "for (x in GOO) { print(x)}\n";
+    "enum FOO {\n"
+    "zoo,\n"
+    "boo,\n"
+    "}\n"
+    "for (x in GOO) { print(x)}\n"
+    "for (x in FOO) { print(x)}\n";
+
     std::string expected = """"
-    "poo\ntoo\n";
+    "poo\ntoo\nzoo\nboo\n";
 
     return run_source_test(src, expected);
 }

@@ -584,7 +584,7 @@ void print_recursive(VM* vm, double val, int type, int depth, int max_elem) {
         if (depth > 0) print_raw(vm, "\"");
     } 
     else if (type == T_ENUM) {
-        unsigned int packed = (unsigned int)val;
+        unsigned long long packed = (unsigned long long)val;
         int str_id = (packed >> 16) & 0xFFFF;
         if (depth > 0) print_raw(vm, "\"");
         print_raw(vm, vm->string_pool[str_id]);
@@ -999,8 +999,8 @@ static void exec_math_op(VM* vm, int op) {
     bool is_num_b = (tb == T_NUM || tb == T_ENUM);
 
     if (is_num_a && is_num_b) {
-        double val_a = (ta == T_ENUM) ? (double)((unsigned int)a & 0xFFFF) : a;
-        double val_b = (tb == T_ENUM) ? (double)((unsigned int)b & 0xFFFF) : b;
+        double val_a = (ta == T_ENUM) ? (double)((unsigned long long)a & 0xFFFF) : a; // <-- Change here
+        double val_b = (tb == T_ENUM) ? (double)((unsigned long long)b & 0xFFFF) : b; // <-- Change here
         double res = 0;
         if (op == OP_ADD) res = val_a + val_b;
         else if (op == OP_SUB) res = val_a - val_b;
@@ -1157,8 +1157,8 @@ static void exec_compare_op(VM* vm, int op) {
     double a = vm->stack[vm->sp]; int ta = vm->stack_types[vm->sp];
     
     // Extract integer if comparing enums
-    double val_a = (ta == T_ENUM) ? (double)((unsigned int)a & 0xFFFF) : a;
-    double val_b = (tb == T_ENUM) ? (double)((unsigned int)b & 0xFFFF) : b;
+    double val_a = (ta == T_ENUM) ? (double)((unsigned long long)a & 0xFFFF) : a;
+    double val_b = (tb == T_ENUM) ? (double)((unsigned long long)b & 0xFFFF) : b;
 
     double res = 0;
     switch(op) {
@@ -1608,14 +1608,14 @@ static void exec_cast_op(VM* vm, int target_type, bool is_check_only) {
     if (current_type == T_ENUM) {
         if (target_type == TYPE_STR) {
             if (!is_check_only) {
-                int str_id = ((unsigned int)val >> 16) & 0xFFFF;
+                int str_id = ((unsigned long long)val >> 16) & 0xFFFF;
                 vm->stack[vm->sp] = (double)str_id;
                 vm->stack_types[vm->sp] = T_STR;
             }
             return;
         }
         // Extract raw number for integer casts (i32, byte, etc.)
-        val = (double)((unsigned int)val & 0xFFFF);
+        val = (double)((unsigned long long)val & 0xFFFF);
         if (!is_check_only) {
             vm->stack[vm->sp] = val;
             vm->stack_types[vm->sp] = T_NUM;
@@ -1744,12 +1744,12 @@ int vm_step(VM* vm, bool debug_trace) {
             char s1[MAX_STRING_LENGTH], s2[MAX_STRING_LENGTH];
 
             if (at == T_STR) strncpy(s1, vm->string_pool[(int)a], MAX_STRING_LENGTH-1);
-            else if (at == T_ENUM) strncpy(s1, vm->string_pool[((unsigned int)a >> 16) & 0xFFFF], MAX_STRING_LENGTH-1);
+            else if (at == T_ENUM) strncpy(s1, vm->string_pool[((unsigned long long)a >> 16) & 0xFFFF], MAX_STRING_LENGTH-1);
             else snprintf(s1, MAX_STRING_LENGTH, "%g", a);
             s1[MAX_STRING_LENGTH-1] = '\0';
 
             if (bt == T_STR) strncpy(s2, vm->string_pool[(int)b], MAX_STRING_LENGTH-1);
-            else if (bt == T_ENUM) strncpy(s2, vm->string_pool[((unsigned int)b >> 16) & 0xFFFF], MAX_STRING_LENGTH-1);
+            else if (bt == T_ENUM) strncpy(s2, vm->string_pool[((unsigned long long)b >> 16) & 0xFFFF], MAX_STRING_LENGTH-1);
             else snprintf(s2, MAX_STRING_LENGTH, "%g", b);
             s2[MAX_STRING_LENGTH-1] = '\0';
 
