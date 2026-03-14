@@ -584,7 +584,7 @@ void print_recursive(VM* vm, double val, int type, int depth, int max_elem) {
         if (depth > 0) print_raw(vm, "\"");
     } 
     else if (type == T_ENUM) {
-        unsigned int packed = (unsigned int)val;
+        unsigned long long packed = (unsigned long long)val;
         int str_id = (packed >> 16) & 0xFFFF;
         if (depth > 0) print_raw(vm, "\"");
         print_raw(vm, vm->string_pool[str_id]);
@@ -634,7 +634,8 @@ void print_recursive(VM* vm, double val, int type, int depth, int max_elem) {
             if(data) {
                 for (int i = 0; i < limit; i++) {
                     if (i > 0) print_raw(vm, ", ");
-                    print_raw(vm, vm->string_pool[(int)data[i * 2]]);
+                    // Let print_recursive handle the key dynamically
+                    print_recursive(vm, data[i * 2], data_types[i * 2], 0, max_elem);
                     print_raw(vm, ": ");
                     print_recursive(vm, data[i * 2 + 1], data_types[i * 2 + 1], depth + 1, max_elem);
                 }
@@ -998,8 +999,8 @@ static void exec_math_op(VM* vm, int op) {
     bool is_num_b = (tb == T_NUM || tb == T_ENUM);
 
     if (is_num_a && is_num_b) {
-        double val_a = (ta == T_ENUM) ? (double)((unsigned int)a & 0xFFFF) : a;
-        double val_b = (tb == T_ENUM) ? (double)((unsigned int)b & 0xFFFF) : b;
+        double val_a = (ta == T_ENUM) ? (double)((unsigned long long)a & 0xFFFF) : a; // <-- Change here
+        double val_b = (tb == T_ENUM) ? (double)((unsigned long long)b & 0xFFFF) : b; // <-- Change here
         double res = 0;
         if (op == OP_ADD) res = val_a + val_b;
         else if (op == OP_SUB) res = val_a - val_b;
@@ -1156,8 +1157,8 @@ static void exec_compare_op(VM* vm, int op) {
     double a = vm->stack[vm->sp]; int ta = vm->stack_types[vm->sp];
     
     // Extract integer if comparing enums
-    double val_a = (ta == T_ENUM) ? (double)((unsigned int)a & 0xFFFF) : a;
-    double val_b = (tb == T_ENUM) ? (double)((unsigned int)b & 0xFFFF) : b;
+    double val_a = (ta == T_ENUM) ? (double)((unsigned long long)a & 0xFFFF) : a;
+    double val_b = (tb == T_ENUM) ? (double)((unsigned long long)b & 0xFFFF) : b;
 
     double res = 0;
     switch(op) {
@@ -1190,6 +1191,7 @@ static void exec_var_op(VM* vm, int op) {
         vm->stack[fp + arg] = vm->stack[vm->sp];
         vm->stack_types[fp + arg] = vm->stack_types[vm->sp];
         vm->sp--;
+        // Reverted: No boundary shifting for local variables to prevent loop leaks!
     }
 }
 
@@ -1306,8 +1308,9 @@ static void exec_array_op(VM* vm, int op) {
         vm_push(vm, ptr, T_OBJ);
     } else if (op == OP_AGET) {
         CHECK_STACK(2);
-        double key = vm_pop(vm);
+        double key = vm_pop(vm); int kt = vm->stack_types[vm->sp+1];
         double ptr = vm_pop(vm);
+
         double* base = vm_resolve_ptr(vm, ptr);
         int* types = vm_resolve_type(vm, ptr);
         int type = (int)base[HEAP_OFFSET_TYPE];
@@ -1339,7 +1342,8 @@ static void exec_array_op(VM* vm, int op) {
             int* data_types = vm_resolve_type(vm, base[HEAP_OFFSET_DATA]);
             bool found = false;
             for(int i=0; i<count; i++) {
-                if(data[i*2] == key) {
+                // Ensure the types match
+                if(data[i*2] == key && data_types[i*2] == kt) {
                     vm_push(vm, data[i*2 + 1], data_types[i*2 + 1]);
                     found = true; break;
                 }
@@ -1359,7 +1363,7 @@ static void exec_array_op(VM* vm, int op) {
     } else if (op == OP_ASET) {
         CHECK_STACK(3);
         double val = vm_pop(vm); int vt = vm->stack_types[vm->sp+1];
-        double key = vm_pop(vm);
+        double key = vm_pop(vm); int kt = vm->stack_types[vm->sp+1];
         double ptr = vm->stack[vm->sp];
         double* base = vm_resolve_ptr(vm, ptr);
         int* types = vm_resolve_type(vm, ptr);
@@ -1381,7 +1385,8 @@ static void exec_array_op(VM* vm, int op) {
             int* data_types = vm_resolve_type(vm, data_ptr);
             bool found = false;
             for(int i=0; i<count; i++) {
-                if (data[i*2] == key) {
+                // Add `kt` type check so numbers and strings don't collide
+                if (data[i*2] == key && data_types[i*2] == kt) {
                     data[i*2+1] = val; data_types[i*2+1] = vt;
                     found = true; break;
                 }
@@ -1398,9 +1403,20 @@ static void exec_array_op(VM* vm, int op) {
                     base[1] = (double)new_cap;
                     base[3] = new_data_ptr;
                     data = new_data; data_types = new_types;
+
+                    int map_offset = UNPACK_OFFSET(ptr);
+                    for (int s = 0; s < vm->scope_sp; s++) {
+                        // If the scope belongs to this arena AND the map is older than the scope
+                        if (vm->scope_stack[s].arena_id == vm->current_arena &&
+                            vm->scope_stack[s].head > map_offset) {
+
+                            // Shift the scope's rewind point to protect the new allocation
+                            vm->scope_stack[s].head = vm->arenas[vm->current_arena].head;
+                            }
+                    }
                 }
                 data[count*2] = key;
-                data_types[count*2] = T_STR;
+                data_types[count*2] = kt; // Use the actual type instead of T_STR
                 data[count*2+1] = val;
                 data_types[count*2+1] = vt;
                 base[2] = (double)(count+1);
@@ -1592,14 +1608,14 @@ static void exec_cast_op(VM* vm, int target_type, bool is_check_only) {
     if (current_type == T_ENUM) {
         if (target_type == TYPE_STR) {
             if (!is_check_only) {
-                int str_id = ((unsigned int)val >> 16) & 0xFFFF;
+                int str_id = ((unsigned long long)val >> 16) & 0xFFFF;
                 vm->stack[vm->sp] = (double)str_id;
                 vm->stack_types[vm->sp] = T_STR;
             }
             return;
         }
         // Extract raw number for integer casts (i32, byte, etc.)
-        val = (double)((unsigned int)val & 0xFFFF);
+        val = (double)((unsigned long long)val & 0xFFFF);
         if (!is_check_only) {
             vm->stack[vm->sp] = val;
             vm->stack_types[vm->sp] = T_NUM;
@@ -1728,12 +1744,12 @@ int vm_step(VM* vm, bool debug_trace) {
             char s1[MAX_STRING_LENGTH], s2[MAX_STRING_LENGTH];
 
             if (at == T_STR) strncpy(s1, vm->string_pool[(int)a], MAX_STRING_LENGTH-1);
-            else if (at == T_ENUM) strncpy(s1, vm->string_pool[((unsigned int)a >> 16) & 0xFFFF], MAX_STRING_LENGTH-1);
+            else if (at == T_ENUM) strncpy(s1, vm->string_pool[((unsigned long long)a >> 16) & 0xFFFF], MAX_STRING_LENGTH-1);
             else snprintf(s1, MAX_STRING_LENGTH, "%g", a);
             s1[MAX_STRING_LENGTH-1] = '\0';
 
             if (bt == T_STR) strncpy(s2, vm->string_pool[(int)b], MAX_STRING_LENGTH-1);
-            else if (bt == T_ENUM) strncpy(s2, vm->string_pool[((unsigned int)b >> 16) & 0xFFFF], MAX_STRING_LENGTH-1);
+            else if (bt == T_ENUM) strncpy(s2, vm->string_pool[((unsigned long long)b >> 16) & 0xFFFF], MAX_STRING_LENGTH-1);
             else snprintf(s2, MAX_STRING_LENGTH, "%g", b);
             s2[MAX_STRING_LENGTH-1] = '\0';
 
@@ -1785,6 +1801,7 @@ int vm_step(VM* vm, bool debug_trace) {
             vm->scope_stack[vm->scope_sp].arena_id = vm->current_arena;
             vm->scope_stack[vm->scope_sp].head = vm->arenas[vm->current_arena].head;
             vm->scope_stack[vm->scope_sp].fp = vm->fp;
+            //vm->scope_stack[vm->scope_sp].sp_at_entry = vm->sp;
             vm->scope_sp++;
             break;
         }

@@ -16,6 +16,7 @@
 
 typedef enum {
     TK_FN, TK_CFN, TK_VAR, TK_IF, TK_FOR, TK_RET, TK_PRINT, TK_IN, TK_STRUCT, TK_ELSE,
+    TK_ELIF,
     TK_MOD, TK_IMPORT, TK_FOREVER,
     TK_ID, TK_NUM, TK_STR, TK_RANGE,
     TK_LPAREN, TK_RPAREN, TK_LBRACE, TK_RBRACE,
@@ -44,7 +45,7 @@ typedef enum {
 
 // Token Names for pretty printing
 const char *TOKEN_NAMES[] = {
-    "fn", "cfn", "var", "if", "for", "ret", "print", "in", "struct", "else",
+    "fn", "cfn", "var", "if", "for", "ret", "print", "in", "struct", "else", "elif",
     "mod", "import", "forever",
     "Identifier", "Number", "String", "Range (...)",
     "(", ")", "{", "}", "[", "]",
@@ -545,6 +546,7 @@ void next_token() {
         else if (strcmp(curr.text, "var") == 0) curr.type = TK_VAR;
         else if (strcmp(curr.text, "if") == 0) curr.type = TK_IF;
         else if (strcmp(curr.text, "else") == 0) curr.type = TK_ELSE;
+        else if (strcmp(curr.text, "elif") == 0) curr.type = TK_ELIF;
         else if (strcmp(curr.text, "for") == 0) curr.type = TK_FOR;
         else if (strcmp(curr.text, "in") == 0) curr.type = TK_IN;
         else if (strcmp(curr.text, "ret") == 0) curr.type = TK_RET;
@@ -1050,17 +1052,34 @@ void factor() {
 
         int enum_val = find_enum_val(name);
         if (enum_val != -1) {
-            // Extract the short name (e.g., "bar" from "Foo_bar")
-            char* short_name = strchr(name, '_');
-            short_name = short_name ? short_name + 1 : name;
-            
-            int str_id = make_string(compiling_vm, short_name);
-            
-            // Pack the String ID and Integer value into a single unsigned int
-            unsigned int packed = (str_id << 16) | (enum_val & 0xFFFF);
-            
-            int idx = make_const(compiling_vm, (double)packed); 
-            emit(OP_PSH_ENUM); emit(idx); 
+            char type_name[MAX_IDENTIFIER];
+            char short_name[MAX_IDENTIFIER];
+
+            // Extract the Type name and Member name (e.g., "Foo" and "bar" from "Foo_bar")
+            char* underscore_pos = strchr(name, '_');
+            if (underscore_pos) {
+                int type_len = underscore_pos - name;
+                strncpy(type_name, name, type_len);
+                type_name[type_len] = '\0';
+                strcpy(short_name, underscore_pos + 1);
+            } else {
+                // Fallback just in case
+                strcpy(type_name, "unknown");
+                strcpy(short_name, name);
+            }
+
+            // Get String IDs for both
+            int type_str_id = make_string(compiling_vm, type_name);
+            int member_str_id = make_string(compiling_vm, short_name);
+
+            // Pack the Type ID, Member ID, and Integer value into a single 64-bit unsigned long long (using 48 bits)
+            unsigned long long packed = ((unsigned long long)type_str_id << 32) |
+                                        ((unsigned long long)member_str_id << 16) |
+                                        (enum_val & 0xFFFF);
+
+            int idx = make_const(compiling_vm, (double)packed);
+            emit(OP_PSH_ENUM);
+            emit(idx);
             return;
         }
         if (curr.type == TK_LPAREN) {
@@ -1810,6 +1829,7 @@ static void parse_id_statement(Token start_token, char *name) {
         }
     }
 }
+
 static void parse_if() {
     match(TK_IF);
     expression();
@@ -1817,14 +1837,15 @@ static void parse_if() {
     int p1 = compiling_vm->code_size;
     emit(0);
     match(TK_LBRACE);
+
     // --- Track locals for the IF body ---
     int saved_local_count_if = local_count;
     bool is_local_scope = inside_function;
 
     emit(OP_SCOPE_ENTER);
-    current_scope_depth++; // <-- FIX: Track scope entry
+    current_scope_depth++;
 
-    while (curr.type != TK_RBRACE) statement();
+    while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
 
     if (is_local_scope) {
         int vars_to_pop = local_count - saved_local_count_if;
@@ -1833,22 +1854,64 @@ static void parse_if() {
     }
 
     emit(OP_SCOPE_EXIT);
-    current_scope_depth--; // <-- FIX: Track scope exit
+    current_scope_depth--;
     match(TK_RBRACE);
 
+    // Array to track the end-jump for every successful branch
+    int exit_jumps[256];
+    int exit_jump_count = 0;
+
+    // --- PARSE ELIF BLOCKS ---
+    while (curr.type == TK_ELIF) {
+        // Jump to the end if the previous branch succeeded
+        emit(OP_JMP);
+        exit_jumps[exit_jump_count++] = compiling_vm->code_size;
+        emit(0);
+
+        // Patch the previous OP_JZ to jump to THIS condition
+        compiling_vm->bytecode[p1] = compiling_vm->code_size;
+
+        match(TK_ELIF);
+        expression();
+        emit(OP_JZ);
+        p1 = compiling_vm->code_size; // Track new OP_JZ
+        emit(0);
+        match(TK_LBRACE);
+
+        int saved_local_count_elif = local_count;
+        emit(OP_SCOPE_ENTER);
+        current_scope_depth++;
+
+        while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
+
+        if (is_local_scope) {
+            int vars_to_pop = local_count - saved_local_count_elif;
+            for(int k = 0; k < vars_to_pop; k++) emit(OP_POP);
+            local_count = saved_local_count_elif;
+        }
+
+        emit(OP_SCOPE_EXIT);
+        current_scope_depth--;
+        match(TK_RBRACE);
+    }
+
+    // --- PARSE ELSE BLOCK ---
     if (curr.type == TK_ELSE) {
         emit(OP_JMP);
-        int p2 = compiling_vm->code_size;
+        exit_jumps[exit_jump_count++] = compiling_vm->code_size;
         emit(0);
+
+        // Patch the last OP_JZ to jump to THIS else block
         compiling_vm->bytecode[p1] = compiling_vm->code_size;
+
         match(TK_ELSE);
         match(TK_LBRACE);
 
         int saved_local_count_else = local_count;
         emit(OP_SCOPE_ENTER);
-        current_scope_depth++; // <-- FIX: Track scope entry
+        current_scope_depth++;
 
-        while (curr.type != TK_RBRACE) statement();
+        while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
 
         if (is_local_scope) {
             int vars_to_pop = local_count - saved_local_count_else;
@@ -1857,11 +1920,18 @@ static void parse_if() {
         }
 
         emit(OP_SCOPE_EXIT);
-        current_scope_depth--; // <-- FIX: Track scope exit
+        current_scope_depth--;
 
         match(TK_RBRACE);
-        compiling_vm->bytecode[p2] = compiling_vm->code_size;
-    } else compiling_vm->bytecode[p1] = compiling_vm->code_size;
+    } else {
+        // If there's no 'else', the last condition's failure jumps here
+        compiling_vm->bytecode[p1] = compiling_vm->code_size;
+    }
+
+    // Patch all successful branch exit jumps to point to the very end
+    for (int i = 0; i < exit_jump_count; i++) {
+        compiling_vm->bytecode[exit_jumps[i]] = compiling_vm->code_size;
+    }
 }
 
 static void parse_embed() {
@@ -2080,24 +2150,78 @@ void struct_decl() {
     match(TK_RBRACE);
 }
 
-void enum_decl() {
+// Note: Pass VM* vm into this function, or use your compiler's
+// internal global VM pointer if you have one.
+void enum_decl(VM* vm) {
     match(TK_ENUM);
     char enum_name[MAX_IDENTIFIER];
     strcpy(enum_name, curr.text);
     match(TK_ID);
     match(TK_LBRACE);
+
     int val = 0;
+    int member_count = 0;
+
+    // 1. Register the Enum Type Name string for the 48-bit packing
+    int type_str_id = make_string(vm, enum_name);
+
     while (curr.type != TK_RBRACE && curr.type != TK_EOF) {
+        // Grab the member name before we advance the token!
+        char member_name[MAX_IDENTIFIER];
+        strcpy(member_name, curr.text);
+
         char entry_name[MAX_IDENTIFIER * 2];
-        sprintf(entry_name, "%s_%s", enum_name, curr.text);
+        sprintf(entry_name, "%s_%s", enum_name, member_name);
+
         if (enum_entry_count >= MAX_ENUM_MEMBERS) error("Too many enum members");
         strcpy(enum_entries[enum_entry_count].name, entry_name);
-        enum_entries[enum_entry_count].value = val++;
+        enum_entries[enum_entry_count].value = val;
         enum_entry_count++;
+
+        // --- NEW: Generate Runtime Array Elements ---
+        int member_str_id = make_string(vm, member_name);
+
+        // 48-bit Pack: [Type ID (16)] [Member ID (16)] [Value (16)]
+        unsigned long long packed = ((unsigned long long)type_str_id << 32) |
+                                    ((unsigned long long)member_str_id << 16) |
+                                    (val & 0xFFFF);
+
+        int const_idx = make_const(vm, (double)packed);
+
+        // Emit instructions to push this enum value to the stack
+        emit(OP_PSH_ENUM);
+        emit(const_idx);
+
+        val++;
+        member_count++;
+
         match(TK_ID);
         if (curr.type == TK_COMMA) match(TK_COMMA);
     }
     match(TK_RBRACE);
+
+    // --- NEW: Build Array and Assign to Global ---
+    // This turns the enum declaration into a hidden array allocation!
+    emit(OP_ARR);
+    emit(member_count);
+
+    // Find or create global variable matching the Enum's name
+    int global_idx = -1;
+    for (int i = 0; i < global_count; i++) {
+        if (strcmp(globals[i].name, enum_name) == 0) {
+            global_idx = i;
+            break;
+        }
+    }
+    if (global_idx == -1) {
+        global_idx = global_count++;
+        strcpy(globals[global_idx].name, enum_name);
+        globals[global_idx].type_id = 0; // Or TYPE_ANY if defined
+        globals[global_idx].addr = global_idx;
+    }
+
+    emit(OP_SET);
+    emit(global_idx);
 }
 
 void parse_struct_literal(int struct_idx) {
@@ -2207,7 +2331,7 @@ void statement() {
         match(TK_CONTINUE);
         emit_continue();
     } else if (curr.type == TK_ENUM) {
-        enum_decl();
+        enum_decl(compiling_vm);
     } else if (curr.type == TK_MODULE_PATH) {
         match(TK_MODULE_PATH);
         match(TK_LPAREN);

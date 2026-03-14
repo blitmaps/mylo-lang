@@ -20,6 +20,7 @@ The Mylo Standard Library provides essential functions for file I/O, math, and d
     + [`seed() -> None (Random Number Functions)`](#random_numbers)
     + [` noise(x: num, y: num, z: num) -> num`](#noisex-num-y-num-z-num---num)
   * [Utility Functions](#utility-functions)
+    + [`type(value: any) -> str`](#type-any)
     + [`len(collection: any) -> num`](#lencollection-any-num)
     + [`contains(haystack: any, needle: any) -> num`](#containshaystack-any-needle-any-num)
     + [`list(size: num) -> arr`](#listsize-num---arr)
@@ -246,6 +247,26 @@ t = t + 0.01
 
 <!-- TOC --><a name="utility-functions"></a>
 ## Utility Functions
+
+<!-- TOC --><a name="type-any"></a>
+### `type(x: any) -> str`
+
+Returns the string describing the type
+
+**Arguments:**
+* `x`: The variable to be checked
+
+**Returns:**
+* Type as string: num, str, name (if enum), list, map, bytes, i32[], f32[], i16[], i64[], bool[], struct, null
+
+**Example:**
+```javascript
+var x = "Hi"
+print(type(x)) // "str"
+
+var s = 99
+print(type(s)) // "num"
+```
 
 <!-- TOC --><a name="lencollection-any-num"></a>
 ### `len(collection: any) -> num`

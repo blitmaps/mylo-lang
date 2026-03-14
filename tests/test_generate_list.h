@@ -142,6 +142,23 @@ inline TestOutput test_ifs() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_elif() {
+
+    // Note: escape the quote properly for C string "print(\"hello\")"
+    std::string src = """"
+    "var x = 6\n"
+    "if x <= 5 {\n"
+        "print(\"it is less than or equals 5\")\n"
+    "} elif x == 6 {\n"
+        "print(\"Ok\")"
+    "} else { print(2) }";
+
+    std::string expected = """"
+    "Ok\n";
+
+    return run_source_test(src, expected);
+}
+
 inline TestOutput test_fib() {
 
     // Note: escape the quote properly for C string "print(\"hello\")"
@@ -763,6 +780,24 @@ inline TestOutput test_map_iterator() {
     "}";
     std::string expected = """"
     "cat, Glad\ndog, Meg\n";
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_map_passing() {
+
+    std::string src = """"
+    "fn foo() {\n"
+        "var header = {}\n"
+        "for (x in 0...3) {\n"
+            "header[x] = x+1\n"
+        "}\n"
+        "print(header)\n"
+        "ret header\n"
+    "}\n"
+    "var o = foo()\n"
+    "print(o)\n";
+    std::string expected = """"
+    "{0: 1, 1: 2, 2: 3, 3: 4}\n{0: 1, 1: 2, 2: 3, 3: 4}\n";
     return run_source_test(src, expected);
 }
 
@@ -1496,15 +1531,39 @@ inline TestOutput test_enum_string_repl() {
     return run_source_test(src, expected);
 }
 
-inline TestOutput test_std_call() {
+inline TestOutput test_type_infer() {
 
     std::string src = """"
-    "fn my_func(x) {"
-    "print(x+1)\n"
-    "}"
-    "call(\"my_func\",[[2, 3]])\n"; // <--- Note the double brackets here!
+    "enum GOO {\n"
+    "poo,\n"
+    "too,\n"
+    "}\n"
+    "print(type(GOO::poo))\n"
+    "var x = \"hi\"\n"
+    "var y = 99\n"
+    "print(type(x))\n"
+    "print(type(y))\n";
     std::string expected = """"
-    "[3, 4]\n";
+    "GOO\nstr\nnum\n";
+
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_enum_iter() {
+    std::string src = """"
+    "enum GOO {\n"
+    "poo,\n"
+    "too,\n"
+    "}\n"
+    "enum FOO {\n"
+    "zoo,\n"
+    "boo,\n"
+    "}\n"
+    "for (x in GOO) { print(x)}\n"
+    "for (x in FOO) { print(x)}\n";
+
+    std::string expected = """"
+    "poo\ntoo\nzoo\nboo\n";
 
     return run_source_test(src, expected);
 }
@@ -1517,6 +1576,7 @@ inline void test_generate_list() {
     ADD_TEST("Test Change Types", test_change_types);
     ADD_TEST("Test Fib(10)", test_fib);
     ADD_TEST("Test If Statements", test_ifs);
+    ADD_TEST("Test Elseif Statements", test_elif);
     ADD_TEST("Test Ternary Operation", test_ternary);
     ADD_TEST("Test Literal Loop", test_literal_loop);
     ADD_TEST("Test Variable Loop", test_variable_loop);
@@ -1559,6 +1619,7 @@ inline void test_generate_list() {
     ADD_TEST("Test List (add())", test_list_add);
     ADD_TEST("Test List (remove())", test_list_remove);
     ADD_TEST("Test Map Iterator", test_map_iterator);
+    ADD_TEST("Test Map Passing", test_map_passing);
     ADD_TEST("Test Map (remove())", test_map_remove);
     ADD_TEST("Test Vector (add())", test_vector_ops_add);
     ADD_TEST("Test Vector (mul())", test_vector_ops_mul);
@@ -1600,7 +1661,8 @@ inline void test_generate_list() {
     ADD_TEST("Test Conditional Scoping (for)", test_conditional_scoped_var_for);
     ADD_TEST("Test String Interpolation * Long Print", test_print_interp_len);
     ADD_TEST("Test Enum String Representation", test_enum_string_repl);
-    ADD_TEST("Test Call (call('fn'))", test_std_call);
+    ADD_TEST("Test Enum Iteration", test_enum_iter);
+    ADD_TEST("Test Type Inference (type())", test_type_infer);
 
 }
 

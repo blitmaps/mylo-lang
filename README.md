@@ -149,7 +149,7 @@ Mylo supports debugging in the command line using the `--db` flag. The Mylo prog
 Mylo allows functions from C, such as `atoi` below, to be called
 directly by declaring them as a `cfn` (c-function). The input, and return
 types must be provided.
-```
+```javascript
 // 'cfn' defines a c function, in this case
 // the standard library atoi. It *must* also
 // have the correct return type, otherwise it
