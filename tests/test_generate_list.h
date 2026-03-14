@@ -1496,6 +1496,18 @@ inline TestOutput test_enum_string_repl() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_std_call() {
+
+    std::string src = """"
+    "fn my_func(x) {"
+    "print(x+1)\n"
+    "}"
+    "call(\"my_func\",[[2, 3]])\n"; // <--- Note the double brackets here!
+    std::string expected = """"
+    "[3, 4]\n";
+
+    return run_source_test(src, expected);
+}
 
 inline void test_generate_list() {
     ADD_TEST("Test Test", test_test);
@@ -1588,6 +1600,8 @@ inline void test_generate_list() {
     ADD_TEST("Test Conditional Scoping (for)", test_conditional_scoped_var_for);
     ADD_TEST("Test String Interpolation * Long Print", test_print_interp_len);
     ADD_TEST("Test Enum String Representation", test_enum_string_repl);
+    ADD_TEST("Test Call (call('fn'))", test_std_call);
+
 }
 
 #endif //MYLO_TEST_GENERATE_LIST_H

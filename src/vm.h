@@ -186,6 +186,7 @@ void vm_register_function(VM* vm, const char* name, int addr);
 void print_recursive(VM* vm, double val, int type, int depth, int max_elem);
 double vm_evacuate_object(VM* vm, double ptr_val, int target_head);
 void enter_debugger(VM* vm);
+void print_raw(VM* vm, const char* str);
 
 // Expose arena memory allocators
 void init_arena(VM* vm, int id);
@@ -212,5 +213,6 @@ void* get_symbol(void* lib_handle, const char* symbol_name);
 // Helper to construct platform specific names (foo -> foo.dll or libfoo.so)
 void get_lib_name(char* out, const char* base_name);
 
-
+// errors
+void mylo_runtime_error(VM* vm, const char* fmt, ...);
 #endif

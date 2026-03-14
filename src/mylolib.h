@@ -68,6 +68,9 @@ void std_set_region(VM *vm);
 void std_get_region(VM *vm);
 void std_clear_region(VM *vm);
 
+// Call via name
+void std_call(VM *vm);
+
 // Registry Declaration (Extern)
 // We do NOT define it here, only say it exists.
 extern const StdLibDef std_library[];

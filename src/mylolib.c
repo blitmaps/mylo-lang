@@ -2097,6 +2097,96 @@ void std_web_triangle(VM *vm) {
     send_event_sse("TRI", payload);
     web_ret(vm);
 }
+#define RUNTIME_ERROR(fmt, ...) mylo_runtime_error(vm, fmt, ##__VA_ARGS__)
+
+void std_call(VM* vm) {
+    // 1. Pop arguments: call("func_name", [args])
+    double arr_val = vm_pop(vm);
+    int arr_type = vm->stack_types[vm->sp + 1];
+
+    double name_val = vm_pop(vm);
+    int name_type = vm->stack_types[vm->sp + 1];
+
+    if (name_type != T_STR || arr_type != T_OBJ) {
+        RUNTIME_ERROR("call() expects (str, array) as arguments.");
+    }
+
+    const char* func_name = vm->string_pool[(int)name_val];
+
+    double* base = vm_resolve_ptr_safe(vm, arr_val);
+    int* types = vm_resolve_type(vm, arr_val);
+
+    // Verify it is a standard array
+    if (!base || (int)base[HEAP_OFFSET_TYPE] != TYPE_ARRAY) {
+        RUNTIME_ERROR("call() expects a valid array for arguments.");
+    }
+
+    int argc = (int)base[HEAP_OFFSET_LEN];
+
+    // --- 1. Keyword "print" Intercept ---
+    if (strcmp(func_name, "print") == 0) {
+        for (int i = 0; i < argc; i++) {
+            if (i > 0) print_raw(vm, " ");
+            print_recursive(vm, base[HEAP_HEADER_ARRAY + i], types[HEAP_HEADER_ARRAY + i], 0, -1);
+        }
+        print_raw(vm, "\n");
+        vm_push(vm, 0.0, T_NUM); // print returns nothing, default to 0
+        return;
+    }
+
+    // --- 2. Check Standard Library Functions ---
+    int std_idx = -1;
+    for (int i = 0; std_library[i].name != NULL; i++) {
+        if (strcmp(std_library[i].name, func_name) == 0) {
+            std_idx = i;
+            break;
+        }
+    }
+
+    if (std_idx != -1) {
+        // Push arguments back to stack for the native function
+        for (int i = 0; i < argc; i++) {
+            vm_push(vm, base[HEAP_HEADER_ARRAY + i], types[HEAP_HEADER_ARRAY + i]);
+        }
+        if (vm->natives[std_idx]) vm->natives[std_idx](vm);
+        return;
+    }
+
+    // --- 3. Check Mylo Bytecode Functions ---
+    int target_ip = vm_find_function(vm, func_name);
+    if (target_ip != -1) {
+        // Push arguments to stack
+        for (int i = 0; i < argc; i++) {
+            vm_push(vm, base[HEAP_HEADER_ARRAY + i], types[HEAP_HEADER_ARRAY + i]);
+        }
+
+        // Mimic OP_CALL stack framing
+        int args_start = vm->sp - argc + 1;
+
+        // Shift arguments up by 2 to make room for IP and FP pointers
+        for(int i = 0; i < argc; i++) {
+            vm->stack[vm->sp + 2 - i] = vm->stack[vm->sp - i];
+            vm->stack_types[vm->sp + 2 - i] = vm->stack_types[vm->sp - i];
+        }
+
+        // Insert old IP and FP below the arguments
+        vm->stack[args_start] = (double)vm->ip;
+        vm->stack[args_start + 1] = (double)vm->fp;
+        vm->stack_types[args_start] = T_NUM;
+        vm->stack_types[args_start + 1] = T_NUM;
+
+        // Advance pointers and jump!
+        vm->sp += 2;
+        vm->fp = args_start + 2;
+        vm->ip = target_ip;
+        return;
+    }
+
+    // Format the error string safely
+    char err_msg[256];
+    snprintf(err_msg, sizeof(err_msg), "call(): Function '%s' not found", func_name);
+    RUNTIME_ERROR(err_msg);
+}
 
 const StdLibDef std_library[] = {
     {"len", std_len, "num", 1, {"any"}},
@@ -2155,5 +2245,6 @@ const StdLibDef std_library[] = {
     {"set_region", std_set_region, "void", 1, {"num"}},
     {"get_region", std_get_region, "num", 0, {NULL}},
     {"clear_region", std_clear_region, "void", 1, {"num"}},
+    {"call", std_call, "any", 2, {"str", "any"}},
     {NULL, NULL, NULL, 0, {NULL}}
 };

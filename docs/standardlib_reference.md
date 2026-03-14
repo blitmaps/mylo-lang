@@ -61,6 +61,7 @@ The Mylo Standard Library provides essential functions for file I/O, math, and d
     + [`web_circle(x: num, y: num, r: num, color: str) -> any`](#web_circlex-num-y-num-r-num-color-str---any)
     + [`web_line(x1: num, y1: num, x2: num, y2: num, thickness: num, color: str) -> any`](#web_linex1-num-y1-num-x2-num-y2-num-thickness-num-color-str---any)
     + [`web_text(text: str, x: num, y: num, size: num) -> any`](#web_texttext-str-x-num-y-num-size-num---any)
+  * [Metaprogramming and Function Calls](#)
 
 
 <!-- TOC end -->
@@ -1056,4 +1057,26 @@ forever {
     // Render status text
     web_text("System Online", 20, 40, 20)
 }
+```
+
+# Metaprogramming and Function Calls
+
+Mylo has specific functionality to allow dynamic programming by calling functions by their 
+string name, and passing arguments.
+
+### `call(name: str, args: list) -> any`
+Call a function will a list of args, function must unpack the list
+* **name**: The function name
+* **args**: The list of args
+
+#### Example Usage:
+
+```javascript
+fn my_func(x) {
+    print(x + 1)
+}
+
+call("my_func", [[2 , 3]]) // <--- Note the double brackets here!
+
+// prints [3, 4] 
 ```
