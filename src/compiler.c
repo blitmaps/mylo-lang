@@ -16,6 +16,7 @@
 
 typedef enum {
     TK_FN, TK_CFN, TK_VAR, TK_IF, TK_FOR, TK_RET, TK_PRINT, TK_IN, TK_STRUCT, TK_ELSE,
+    TK_ELIF,
     TK_MOD, TK_IMPORT, TK_FOREVER,
     TK_ID, TK_NUM, TK_STR, TK_RANGE,
     TK_LPAREN, TK_RPAREN, TK_LBRACE, TK_RBRACE,
@@ -44,7 +45,7 @@ typedef enum {
 
 // Token Names for pretty printing
 const char *TOKEN_NAMES[] = {
-    "fn", "cfn", "var", "if", "for", "ret", "print", "in", "struct", "else",
+    "fn", "cfn", "var", "if", "for", "ret", "print", "in", "struct", "else", "elif",
     "mod", "import", "forever",
     "Identifier", "Number", "String", "Range (...)",
     "(", ")", "{", "}", "[", "]",
@@ -545,6 +546,7 @@ void next_token() {
         else if (strcmp(curr.text, "var") == 0) curr.type = TK_VAR;
         else if (strcmp(curr.text, "if") == 0) curr.type = TK_IF;
         else if (strcmp(curr.text, "else") == 0) curr.type = TK_ELSE;
+        else if (strcmp(curr.text, "elif") == 0) curr.type = TK_ELIF;
         else if (strcmp(curr.text, "for") == 0) curr.type = TK_FOR;
         else if (strcmp(curr.text, "in") == 0) curr.type = TK_IN;
         else if (strcmp(curr.text, "ret") == 0) curr.type = TK_RET;
@@ -1827,6 +1829,7 @@ static void parse_id_statement(Token start_token, char *name) {
         }
     }
 }
+
 static void parse_if() {
     match(TK_IF);
     expression();
@@ -1834,14 +1837,15 @@ static void parse_if() {
     int p1 = compiling_vm->code_size;
     emit(0);
     match(TK_LBRACE);
+
     // --- Track locals for the IF body ---
     int saved_local_count_if = local_count;
     bool is_local_scope = inside_function;
 
     emit(OP_SCOPE_ENTER);
-    current_scope_depth++; // <-- FIX: Track scope entry
+    current_scope_depth++;
 
-    while (curr.type != TK_RBRACE) statement();
+    while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
 
     if (is_local_scope) {
         int vars_to_pop = local_count - saved_local_count_if;
@@ -1850,22 +1854,64 @@ static void parse_if() {
     }
 
     emit(OP_SCOPE_EXIT);
-    current_scope_depth--; // <-- FIX: Track scope exit
+    current_scope_depth--;
     match(TK_RBRACE);
 
+    // Array to track the end-jump for every successful branch
+    int exit_jumps[256];
+    int exit_jump_count = 0;
+
+    // --- PARSE ELIF BLOCKS ---
+    while (curr.type == TK_ELIF) {
+        // Jump to the end if the previous branch succeeded
+        emit(OP_JMP);
+        exit_jumps[exit_jump_count++] = compiling_vm->code_size;
+        emit(0);
+
+        // Patch the previous OP_JZ to jump to THIS condition
+        compiling_vm->bytecode[p1] = compiling_vm->code_size;
+
+        match(TK_ELIF);
+        expression();
+        emit(OP_JZ);
+        p1 = compiling_vm->code_size; // Track new OP_JZ
+        emit(0);
+        match(TK_LBRACE);
+
+        int saved_local_count_elif = local_count;
+        emit(OP_SCOPE_ENTER);
+        current_scope_depth++;
+
+        while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
+
+        if (is_local_scope) {
+            int vars_to_pop = local_count - saved_local_count_elif;
+            for(int k = 0; k < vars_to_pop; k++) emit(OP_POP);
+            local_count = saved_local_count_elif;
+        }
+
+        emit(OP_SCOPE_EXIT);
+        current_scope_depth--;
+        match(TK_RBRACE);
+    }
+
+    // --- PARSE ELSE BLOCK ---
     if (curr.type == TK_ELSE) {
         emit(OP_JMP);
-        int p2 = compiling_vm->code_size;
+        exit_jumps[exit_jump_count++] = compiling_vm->code_size;
         emit(0);
+
+        // Patch the last OP_JZ to jump to THIS else block
         compiling_vm->bytecode[p1] = compiling_vm->code_size;
+
         match(TK_ELSE);
         match(TK_LBRACE);
 
         int saved_local_count_else = local_count;
         emit(OP_SCOPE_ENTER);
-        current_scope_depth++; // <-- FIX: Track scope entry
+        current_scope_depth++;
 
-        while (curr.type != TK_RBRACE) statement();
+        while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
 
         if (is_local_scope) {
             int vars_to_pop = local_count - saved_local_count_else;
@@ -1874,11 +1920,18 @@ static void parse_if() {
         }
 
         emit(OP_SCOPE_EXIT);
-        current_scope_depth--; // <-- FIX: Track scope exit
+        current_scope_depth--;
 
         match(TK_RBRACE);
-        compiling_vm->bytecode[p2] = compiling_vm->code_size;
-    } else compiling_vm->bytecode[p1] = compiling_vm->code_size;
+    } else {
+        // If there's no 'else', the last condition's failure jumps here
+        compiling_vm->bytecode[p1] = compiling_vm->code_size;
+    }
+
+    // Patch all successful branch exit jumps to point to the very end
+    for (int i = 0; i < exit_jump_count; i++) {
+        compiling_vm->bytecode[exit_jumps[i]] = compiling_vm->code_size;
+    }
 }
 
 static void parse_embed() {

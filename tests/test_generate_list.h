@@ -142,6 +142,23 @@ inline TestOutput test_ifs() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_elif() {
+
+    // Note: escape the quote properly for C string "print(\"hello\")"
+    std::string src = """"
+    "var x = 6\n"
+    "if x <= 5 {\n"
+        "print(\"it is less than or equals 5\")\n"
+    "} elif x == 6 {\n"
+        "print(\"Ok\")"
+    "} else { print(2) }";
+
+    std::string expected = """"
+    "Ok\n";
+
+    return run_source_test(src, expected);
+}
+
 inline TestOutput test_fib() {
 
     // Note: escape the quote properly for C string "print(\"hello\")"
@@ -1559,6 +1576,7 @@ inline void test_generate_list() {
     ADD_TEST("Test Change Types", test_change_types);
     ADD_TEST("Test Fib(10)", test_fib);
     ADD_TEST("Test If Statements", test_ifs);
+    ADD_TEST("Test Elseif Statements", test_elif);
     ADD_TEST("Test Ternary Operation", test_ternary);
     ADD_TEST("Test Literal Loop", test_literal_loop);
     ADD_TEST("Test Variable Loop", test_variable_loop);
