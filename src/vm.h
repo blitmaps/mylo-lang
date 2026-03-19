@@ -101,6 +101,7 @@ typedef struct {
     int arena_id;
     int head;     // The offset in the arena where memory started for this scope
     int fp;       // Frame pointer (safety check)
+    int sp_at_entry;
 } VMScope;
 
 

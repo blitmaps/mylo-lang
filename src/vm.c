@@ -1175,11 +1175,14 @@ static void exec_compare_op(VM* vm, int op) {
 
 static void exec_var_op(VM* vm, int op) {
     int arg = vm->bytecode[vm->ip++];
+    
     if (op == OP_SET) {
         CHECK_STACK(1);
         vm->globals[arg] = vm->stack[vm->sp];
         vm->global_types[arg] = vm->stack_types[vm->sp];
         vm->sp--;
+        // NO GLOBAL PROTECTION: Top-level scripts must cleanly sweep loop memory!
+        
     } else if (op == OP_GET) {
         vm_push(vm, vm->globals[arg], vm->global_types[arg]);
     } else if (op == OP_LVAR) {
@@ -1188,10 +1191,30 @@ static void exec_var_op(VM* vm, int op) {
     } else if (op == OP_SVAR) {
         CHECK_STACK(1);
         int fp = (int)vm->fp;
-        vm->stack[fp + arg] = vm->stack[vm->sp];
-        vm->stack_types[fp + arg] = vm->stack_types[vm->sp];
+        double val = vm->stack[vm->sp];
+        int type = vm->stack_types[vm->sp];
+        int target_idx = fp + arg;
+        
+        vm->stack[target_idx] = val;
+        vm->stack_types[target_idx] = type;
         vm->sp--;
-        // Reverted: No boundary shifting for local variables to prevent loop leaks!
+        
+        // Smart Local Protection
+        if (type == T_OBJ) {
+            int obj_offset = UNPACK_OFFSET(val);
+            for (int s = 0; s < vm->scope_sp; s++) {
+                // Check if the variable (target_idx) was declared BEFORE this scope started
+                // AND ensure the scope belongs to the CURRENT function frame (fp matches)
+                if (vm->scope_stack[s].fp == vm->fp &&
+                    target_idx <= vm->scope_stack[s].sp_at_entry &&
+                    vm->scope_stack[s].arena_id == vm->current_arena &&
+                    obj_offset >= vm->scope_stack[s].head) {
+                    
+                    // Push the scope boundary forward to protect the new allocation
+                    vm->scope_stack[s].head = vm->arenas[vm->current_arena].head;
+                }
+            }
+        }
     }
 }
 
@@ -1801,7 +1824,7 @@ int vm_step(VM* vm, bool debug_trace) {
             vm->scope_stack[vm->scope_sp].arena_id = vm->current_arena;
             vm->scope_stack[vm->scope_sp].head = vm->arenas[vm->current_arena].head;
             vm->scope_stack[vm->scope_sp].fp = vm->fp;
-            //vm->scope_stack[vm->scope_sp].sp_at_entry = vm->sp;
+            vm->scope_stack[vm->scope_sp].sp_at_entry = vm->sp;
             vm->scope_sp++;
             break;
         }
