@@ -4,11 +4,11 @@
 #include "vm.h"
 
 typedef struct {
-    const char *name;
-    NativeFunc func;
-    const char *ret_type;
-    int arg_count;
-    const char *arg_types[MAX_STD_ARGS];
+  const char *name;
+  NativeFunc func;
+  const char *ret_type;
+  int arg_count;
+  const char *arg_types[MAX_STD_ARGS];
 } StdLibDef;
 
 // Implementation functions
@@ -42,7 +42,7 @@ void std_range(VM *vm);
 void std_for_list(VM *vm);
 void std_list_min(VM *vm);
 void std_list_max(VM *vm);
-
+void std_filter(VM *vm);
 // Rand
 void std_seed(VM *vm);
 void std_rand(VM *vm);
