@@ -2485,6 +2485,104 @@ void std_filter(VM *vm) {
   vm_push(vm, res_ptr, T_OBJ);
 }
 
+void std_param_filter(VM *vm) {
+  // Pop in reverse order: param, func_name, list
+  double param_val = vm_pop(vm);
+  int param_type = vm->stack_types[vm->sp + 1];
+
+  double func_val = vm_pop(vm);
+  int func_type = vm->stack_types[vm->sp + 1];
+
+  double list_ref = vm_pop(vm);
+  int list_type = vm->stack_types[vm->sp + 1];
+
+  if (list_type != T_OBJ) {
+    printf("Runtime Error: param_filter() expects an array as the first "
+           "argument.\n");
+    exit(1);
+  }
+  if (func_type != T_STR) {
+    printf("Runtime Error: param_filter() expects a string as the second "
+           "argument.\n");
+    exit(1);
+  }
+
+  double *base = vm_resolve_ptr(vm, list_ref);
+  int *types = vm_resolve_type(vm, list_ref);
+
+  if (!base || (int)base[HEAP_OFFSET_TYPE] != TYPE_ARRAY) {
+    printf("Runtime Error: param_filter() expects a valid array.\n");
+    exit(1);
+  }
+
+  const char *func_name = get_str(vm, func_val);
+  int len = (int)base[HEAP_OFFSET_LEN];
+
+  NativeFunc native_target = NULL;
+  for (int i = 0; std_library[i].name != NULL; i++) {
+    if (strcmp(std_library[i].name, func_name) == 0) {
+      native_target = std_library[i].func;
+      break;
+    }
+  }
+
+  int user_func_addr = -1;
+  if (!native_target) {
+    user_func_addr = vm_find_function(vm, func_name);
+  }
+
+  if (!native_target && user_func_addr == -1) {
+    printf("Runtime Error: param_filter() could not find function '%s'\n",
+           func_name);
+    exit(1);
+  }
+
+  int saved_ip = vm->ip;
+
+  double res_ptr = heap_alloc(vm, len + HEAP_HEADER_ARRAY);
+  double *res_base = vm_resolve_ptr(vm, res_ptr);
+  int *res_types = vm_resolve_type(vm, res_ptr);
+
+  res_base[HEAP_OFFSET_TYPE] = TYPE_ARRAY;
+  int kept_count = 0;
+
+  for (int i = 0; i < len; i++) {
+    double val = base[HEAP_HEADER_ARRAY + i];
+    int type = types[HEAP_HEADER_ARRAY + i];
+
+    if (native_target) {
+      vm_push(vm, val, type);
+      vm_push(vm, param_val, param_type);
+      native_target(vm);
+    } else {
+      // Setup stack frame for a 2-argument Mylo function
+      vm_push(vm, (double)vm->code_size, T_NUM); // Return IP
+      vm_push(vm, (double)vm->fp, T_NUM);        // Return FP
+
+      vm_push(vm, val, type); // Arg 1 (The element)
+      int new_fp = vm->sp;    // FP points to the first argument
+
+      vm_push(vm, param_val, param_type); // Arg 2 (The parameter)
+      vm->fp = new_fp;
+
+      run_vm_from(vm, user_func_addr, false);
+    }
+
+    double res = vm_pop(vm);
+    int res_type = vm->stack_types[vm->sp + 1];
+
+    if (res_type == T_NUM && res != 0.0) {
+      res_base[HEAP_HEADER_ARRAY + kept_count] = val;
+      res_types[HEAP_HEADER_ARRAY + kept_count] = type;
+      kept_count++;
+    }
+  }
+
+  res_base[HEAP_OFFSET_LEN] = (double)kept_count;
+  vm->ip = saved_ip;
+  vm_push(vm, res_ptr, T_OBJ);
+}
+
 const StdLibDef std_library[] = {
     {"type", std_type, "str", 1, {"any"}},
     {"len", std_len, "num", 1, {"any"}},
@@ -2553,4 +2651,5 @@ const StdLibDef std_library[] = {
     {"clear_region", std_clear_region, "void", 1, {"num"}},
     {"call", std_call, "any", 2, {"str", "any"}},
     {"filter", std_filter, "arr", 2, {"arr", "str"}},
+    {"param_filter", std_param_filter, "arr", 3, {"arr", "str", "any"}},
     {NULL, NULL, NULL, 0, {NULL}}};
