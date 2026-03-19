@@ -28,6 +28,7 @@ The Mylo Standard Library provides essential functions for file I/O, math, and d
     + [`remove(collection: any, key: any) -> obj`](#removecollection-any-key-any---obj)
     + [`where(collection: any, item: any) -> num`](#wherecollectionany-itemany-num)
     + [`filter(array: arr, func_name: str) -> arr`](#filter-arr)
+    + [`param_filter(array: arr, func_name: str, param: any) -> arr`](#param-filter)
     + [`range(start: num, step: num, stop: num) -> arr`](#array-range)
     + [`split(source: str, delimiter: str) -> arr`](#splitsourcestr-delimiterstr-arr)
     + [`for_list(func_name: str, list: arr) -> arr`](#for-list-arr)
@@ -386,6 +387,27 @@ var L = [1, 2, 3]
 fn filt(x) { ret x > 1 }
 var o = filter(L, "filt")
 print(o) // [2, 3]
+```
+<a name="param-filter"></a>
+### `param_filter(array: arr, func_name: str, param : any) -> arr`
+
+Applies a function with name func_name to the array, and returns a list
+or elements where the func evaluated to true. Allows an additional parameter
+
+**Arguments:**
+* `array`: The array to filter
+* `func_name`: The function to apply
+* `param` : The additional filter parameter
+
+**Returns:**
+* arr, the filtered array
+
+**Example:**
+```javascript
+var x = [{"ID"=5, "VAL"=9}, {"ID"=9, "VAL"=5}]
+fn filt(x, y) {ret x["ID"] == y}
+var o = param_filter(x, "filt", 5)
+// {"ID"=5, "VAL"=9}
 ```
 
 
