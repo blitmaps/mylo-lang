@@ -27,6 +27,7 @@ The Mylo Standard Library provides essential functions for file I/O, math, and d
     + [`add(array: arr, index: num, value: any) -> arr`](#addarray-arr-index-num-value-any---arr)
     + [`remove(collection: any, key: any) -> obj`](#removecollection-any-key-any---obj)
     + [`where(collection: any, item: any) -> num`](#wherecollectionany-itemany-num)
+    + [`filter(array: arr, func_name: str) -> arr`](#filter-arr)
     + [`range(start: num, step: num, stop: num) -> arr`](#array-range)
     + [`split(source: str, delimiter: str) -> arr`](#splitsourcestr-delimiterstr-arr)
     + [`for_list(func_name: str, list: arr) -> arr`](#for-list-arr)
@@ -342,6 +343,7 @@ for (x in split(word, "")) {
 // ["c", "a", "t"]
 ```
 
+
 <a name="wherecollectionany-itemany-num"></a>
 ### `where(collection: any, item: any) -> num`
 
@@ -365,6 +367,27 @@ print(where(list, "fish")) // -1
 var text = "ohblast"
 print(where(text, "blast")) // 2
 ```
+<a name="filter-arr"></a>
+### `filter(array: arr, func_name: str) -> arr`
+
+Applies a function with name func_name to the array, and returns a list
+or elements where the func evaluated to true. See example
+
+**Arguments:**
+* `array`: The array to filter
+* `func_name`: The function to apply
+
+**Returns:**
+* arr, the filtered array
+
+**Example:**
+```javascript
+var L = [1, 2, 3]
+fn filt(x) { ret x > 1 }
+var o = filter(L, "filt")
+print(o) // [2, 3]
+```
+
 
 <a name="list_minlist-arr-num"></a>
 ### `min_list(list: arr) -> num`
