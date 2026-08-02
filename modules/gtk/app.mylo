@@ -1,0 +1,23 @@
+// app.mylo
+import native "gtk_bridge.mylo"
+
+// --- Business Logic / Signal Handler ---
+fn on_submit_clicked() {
+    // 1. Fetch user input from GTK Entry
+    var user_name = ui_get_text("txt_input")
+    
+    // 2. Execute logic in Mylo
+    var greeting = f"Hello, {user_name}! Processed via Mylo VM."
+    
+    // 3. Update GTK Label
+    ui_set_text("lbl_output", greeting)
+}
+
+// --- Main Program Entry ---
+ui_init("interface.glade")
+
+// Wire up the button click event to our Mylo function
+ui_bind_click("btn_submit", "on_submit_clicked")
+
+// Launch the UI
+ui_run()

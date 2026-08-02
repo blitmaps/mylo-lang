@@ -30,3 +30,19 @@ ELSE()
     target_link_libraries(tests m)
 ENDIF()
 
+option(MODULES "Build standalone Mylo modules" OFF)
+if(MODULES)
+  message(STATUS "Modules build flag enabled. Configuring plugins...")
+
+  # Automatically build the GTK module if the directory exists
+  if(IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/modules/gtk")
+    message(STATUS "Configuring module: GTK3 Bridge")
+
+    # Ensure the module compiles AFTER the main mylo executable is built,
+    # since it relies on the compiler for binding generation!
+    add_subdirectory(modules/gtk)
+    add_dependencies(gtk_bridge mylo)
+  endif()
+else()
+  message(STATUS "Skipping modules. Pass -DMODULES=ON to build them.")
+endif()

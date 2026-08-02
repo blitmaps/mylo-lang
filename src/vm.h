@@ -163,6 +163,10 @@ typedef struct {
     void (*free_ref)(VM*, int);
     NativeFunc* natives_array;
     char (*string_pool)[MAX_STRING_LENGTH];
+
+    // For plugins
+    int (*find_function)(VM*, const char*);
+    void (*exec_vm_from)(VM*, int, bool);
 } MyloAPI;
 
 void vm_init(VM* vm);
