@@ -43,6 +43,14 @@ if(MODULES)
     add_subdirectory(modules/gtk)
     add_dependencies(gtk_bridge mylo)
   endif()
+
+  # RAYLIB Module
+    
+  if(IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/modules/raylib")      
+    message(STATUS "Configuring module: Raylib")
+    add_subdirectory(modules/raylib)
+    add_dependencies(raylib_binding mylo)
+  endif()
 else()
   message(STATUS "Skipping modules. Pass -DMODULES=ON to build them.")
 endif()
