@@ -1918,6 +1918,8 @@ bool load_self_contained(VM* vm, const char* exe_path) {
         api.free_ref = vm_free_ref;
         api.natives_array = vm->natives;
         api.string_pool = vm->string_pool;
+        api.find_function = vm_find_function;
+        api.exec_vm_from = run_vm_from;
 
         for (int i = 0; i < dep_count; i++) {
             printf("Loading ... %s\n", deps[i].name);

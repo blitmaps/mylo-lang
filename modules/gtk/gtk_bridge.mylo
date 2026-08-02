@@ -1,0 +1,77 @@
+// gtk_bridge.mylo
+import C "gtk_state.h"
+
+// 1. Initialize GTK and load the Glade XML file
+fn ui_init(glade_file: str) {
+    C(path: str = glade_file) {
+        gtk_init(NULL, NULL);
+        g_builder = gtk_builder_new_from_file(path);
+        
+        GObject* win = gtk_builder_get_object(g_builder, "window_main");
+        if (win) {
+            g_signal_connect(win, "destroy", G_CALLBACK(gtk_main_quit), NULL);
+        }
+    }
+}
+
+// 2. Helper to set label or entry text
+fn ui_set_text(widget_id: str, text_val: str) {
+    C(id: str = widget_id, txt: str = text_val) {
+        GObject* obj = gtk_builder_get_object(g_builder, id);
+        if (GTK_IS_LABEL(obj)) {
+            gtk_label_set_text(GTK_LABEL(obj), txt);
+        } else if (GTK_IS_ENTRY(obj)) {
+            gtk_entry_set_text(GTK_ENTRY(obj), txt);
+        }
+    }
+}
+
+// 3. Helper to read text from an Entry widget
+fn ui_get_text(widget_id: str) {
+    var result = C(id: str = widget_id) -> str {
+        GObject* obj = gtk_builder_get_object(g_builder, id);
+        if (GTK_IS_ENTRY(obj)) {
+            return (char*)gtk_entry_get_text(GTK_ENTRY(obj));
+        }
+        return "";
+    }
+    ret result
+}
+
+// 4. Bind a GTK Signal (e.g. "clicked") directly to a Mylo function
+// 4. Bind a GTK Signal (e.g. "clicked") directly to a Mylo function
+fn ui_bind_click(button_id: str, mylo_func_name: str) {
+    C(id: str = button_id, func: str = mylo_func_name) {
+        
+        SignalPayload* payload = malloc(sizeof(SignalPayload));
+        payload->vm = vm; 
+        strncpy(payload->func_name, func, 63);
+        
+        // Wire up the execution pointers based on the compilation mode
+        #ifdef MYLO_BINDING_MODE
+            payload->push_func = host_vm_push;
+            payload->find_func = host_vm_find_function;
+            payload->exec_func = host_run_vm_from;
+        #else
+            payload->push_func = vm_push;
+            payload->find_func = vm_find_function;
+            payload->exec_func = run_vm_from;
+        #endif
+
+        GObject* btn = gtk_builder_get_object(g_builder, id);
+        if (btn) {
+            g_signal_connect_data(btn, "clicked", G_CALLBACK(on_gtk_dispatch), 
+                                 payload, (GClosureNotify)free, 0);
+        }
+    }
+}
+// 5. Start the GTK Event Loop
+fn ui_run() {
+    C() {
+        GObject* win = gtk_builder_get_object(g_builder, "window_main");
+        if (win) {
+            gtk_widget_show_all(GTK_WIDGET(win));
+            gtk_main();
+        }
+    }
+}

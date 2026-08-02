@@ -1480,6 +1480,9 @@ static void parse_import() {
             api.free_ref = vm_free_ref;
             api.natives_array = compiling_vm->natives;
             api.string_pool = compiling_vm->string_pool;
+            api.find_function = vm_find_function;
+            api.exec_vm_from = run_vm_from;
+
             binder(compiling_vm, std_count + start_ffi_index, &api);
             bound_ffi_count += added_natives;
 
@@ -2618,7 +2621,8 @@ void generate_binding_c_source(VM* vm, const char *output_filename) {
     fprintf(fp, "void* (*host_vm_get_ref)(VM*, int, const char*);\n");
     fprintf(fp, "void (*host_vm_free_ref)(VM*, int);\n");
     fprintf(fp, "NativeFunc* host_natives_array;\n");
-
+    fprintf(fp, "int (*host_vm_find_function)(VM*, const char*);\n");
+    fprintf(fp, "void (*host_run_vm_from)(VM*, int, bool);\n");
     fprintf(fp, "#define vm_push (*host_vm_push)\n");
     fprintf(fp, "#define vm_pop (*host_vm_pop)\n");
     fprintf(fp, "#define make_string (*host_make_string)\n");
@@ -2627,6 +2631,8 @@ void generate_binding_c_source(VM* vm, const char *output_filename) {
     fprintf(fp, "#define vm_store_copy (*host_vm_store_copy)\n");
     fprintf(fp, "#define vm_store_ptr (*host_vm_store_ptr)\n");
     fprintf(fp, "#define vm_get_ref (*host_vm_get_ref)\n");
+    fprintf(fp, "#define vm_find_function (*host_vm_find_function)\n");
+    fprintf(fp, "#define run_vm_from (*host_run_vm_from)\n");
     fprintf(fp, "#define vm_free_ref (*host_vm_free_ref)\n");
     fprintf(fp, "#define natives host_natives_array\n");
 
@@ -2642,9 +2648,12 @@ void generate_binding_c_source(VM* vm, const char *output_filename) {
     fprintf(
         fp,
         "    host_vm_push = api->push;\n    host_vm_pop = api->pop;\n    host_make_string = api->make_string;\n    host_heap_alloc = api->heap_alloc;\n    host_vm_resolve_ptr = api->resolve_ptr;\n");
+
     fprintf(
         fp,
         "    host_vm_store_copy = api->store_copy;\n    host_vm_store_ptr = api->store_ptr;\n    host_vm_get_ref = api->get_ref;\n    host_vm_free_ref = api->free_ref;\n");
+    fprintf(fp, "    host_vm_find_function = api->find_function;\n");
+    fprintf(fp, "    host_run_vm_from = api->exec_vm_from;\n");
     fprintf(fp, "    host_natives_array = api->natives_array;\n");
     for (int i = 0; i < ffi_count; i++) fprintf(fp, "    host_natives_array[start_index + %d] = __wrapper_%d;\n", i, i);
     fprintf(fp, "}\n");
