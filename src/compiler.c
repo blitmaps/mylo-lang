@@ -1437,37 +1437,60 @@ static void parse_c_block_stmt() {
 }
 static void parse_import() {
     match(TK_IMPORT);
-
     if (curr.type == TK_ID && strcmp(curr.text, "native") == 0) {
         match(TK_ID);
         if (curr.type != TK_STR) error("Expected filename");
         char filename[MAX_STRING_LENGTH];
         strcpy(filename, curr.text);
         match(TK_STR);
+
         int std_count = 0;
         while (std_library[std_count].name != NULL) std_count++;
         int start_ffi_index = ffi_count;
+
         char *c = read_file(filename);
+        char resolved_path[2048];
+        strcpy(resolved_path, filename); // Track true location for .so loading
+
+        // 1. Check module_path entries
         if (!c) {
             for (int i = 0; i < search_path_count; i++) {
                 char tmp[MAX_STRING_LENGTH];
                 sprintf(tmp, "%s/%s", search_paths[i], filename);
                 c = read_file(tmp);
-                if (c) break;
+                if (c) { strcpy(resolved_path, tmp); break; }
             }
         }
+
+        // 2. NEW: Recursive search in `<exe_dir>/modules/`
+        if (!c) {
+            char modules_path[2048];
+            snprintf(modules_path, sizeof(modules_path), "%s/modules", mylo_exe_dir);
+            char* found_path = find_file_recursive(modules_path, filename);
+            if (found_path) {
+                c = read_file(found_path);
+                strcpy(resolved_path, found_path);
+            }
+        }
+
         if (!c) error("Cannot find native import '%s'", filename);
         parse_internal(c, true);
+
         if (!MyloConfig.build_mode) {
             int added_natives = ffi_count - start_ffi_index;
             char lib_name[MAX_STRING_LENGTH];
-            get_lib_name(lib_name, filename);
+
+            // Use the fully resolved path so the .so file is located properly!
+            get_lib_name(lib_name, resolved_path);
+
             if (!MyloConfig.debug_mode) fprintf(stderr, "Mylo: Loading Native Module '%s'...\n", lib_name);
             void *lib = load_library(lib_name);
             if (!lib) error("Could not load native binary '%s'", lib_name);
+
             typedef void (*BindFunc)(VM *, int, MyloAPI *);
             BindFunc binder = (BindFunc) get_symbol(lib, "mylo_bind_lib");
             if (!binder) error("Native module '%s' invalid", lib_name);
+
             MyloAPI api;
             api.push = vm_push;
             api.pop = vm_pop;
@@ -1488,7 +1511,6 @@ static void parse_import() {
 
             if (compiling_vm->dependency_count < MAX_DEPENDENCIES) {
                 Dependency* dep = &compiling_vm->dependencies[compiling_vm->dependency_count++];
-                // Save the calculated library name (lib_name was derived earlier in this function)
                 strcpy(dep->name, lib_name);
                 dep->start_index = std_count + start_ffi_index;
             }
@@ -1569,7 +1591,10 @@ static void parse_import() {
         char f[MAX_STRING_LENGTH];
         strcpy(f, curr.text);
         match(TK_STR);
+
         char *c = read_file(f);
+
+        // 1. Check module_path entries
         if (!c) {
             for (int i = 0; i < search_path_count; i++) {
                 char tmp[MAX_STRING_LENGTH];
@@ -1578,6 +1603,15 @@ static void parse_import() {
                 if (c) break;
             }
         }
+
+        // 2. NEW: Recursive search in `<exe_dir>/modules/`
+        if (!c) {
+            char modules_path[2048];
+            snprintf(modules_path, sizeof(modules_path), "%s/modules", mylo_exe_dir);
+            char* found_path = find_file_recursive(modules_path, f);
+            if (found_path) c = read_file(found_path);
+        }
+
         if (c) parse_internal(c, true);
         else error("Cannot find import '%s'", f);
     }

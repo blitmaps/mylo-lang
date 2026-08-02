@@ -1,5 +1,5 @@
 // app.mylo
-import "gtk_bridge.mylo"
+import native "gtk_bridge.mylo"
 
 // --- Business Logic / Signal Handler ---
 fn on_submit_clicked() {

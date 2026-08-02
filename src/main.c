@@ -378,7 +378,7 @@ int main(int argc, char** argv) {
     }
 
     if (repl_mode) {
-        // start_repl manages its own VM cycle usually, but since we have one, we could pass it or just cleanup and call start_repl
+        get_executable_dir(mylo_exe_dir, sizeof(mylo_exe_dir), argv[0]);        // start_repl manages its own VM cycle usually, but since we have one, we could pass it or just cleanup and call start_repl
         start_repl();
         return 0;
     }
@@ -395,7 +395,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-
+    get_executable_dir(mylo_exe_dir, sizeof(mylo_exe_dir), argv[0]);
     // Apply TUI Debugger settings to VM instance
     vm.source_code = content;
     vm.cli_debug_mode = cli_debug_mode;
