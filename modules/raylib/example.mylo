@@ -1,0 +1,60 @@
+// You may need to copy raylib_binding.so to next to
+// this file during debug
+import native "raylib_binding.mylo"
+
+// Embed the cat 
+embed(cat_var, "cat.png")
+// Example: embed font
+// embed(bros_font, "f.ttf")
+
+
+// Setup Window
+RL::InitWindow(1920, 1080, "Cats!")
+RL::ToggleFullscreen()
+// Sets Max rather than fullscreen
+RL::MaximizeWindow()
+
+var im = RL::LoadImageFromMemory(".png", cat_var) 
+var tx = RL::LoadTextureFromImage(im)
+// Example: Load Font
+// var font = RL::LoadFontFromMemory(".ttf", bros_font, 32)
+
+var X : RL::RGB = {r=255, g=255, b=255}
+
+// Render Target
+var target:num = RL::LoadRenderTexture(800, 600)
+
+forever {
+    if (RL::WindowShouldClose()) {
+        break
+    }
+    RL::BeginTextureMode(target)
+    // Clear Background
+    RL::ClearBackground(RL::WHITE)
+
+    // Draw Cat
+    RL::DrawTexture(tx, 5,5, X)
+    
+    // Shapes
+    RL::DrawCircle(100, 100, 25, RL::GREEN)
+    RL::DrawCircleLines(110, 110, 30, RL::BLUE)
+    RL::DrawRectangle(200, 200, 75, 50, RL::RED)
+    RL::DrawRectangleLines(230, 230, 75, 50, RL::CYAN)
+    RL::DrawTriangle({x=300, y=300}, {x=250, y=350}, {x=350, y=350}, RL::WHITE)
+    RL::DrawTriangleLines({x=300, y=350}, {x=250, y=300}, {x=350, y=300}, RL::CYAN)
+    RL::DrawRectangleRounded(100, 400, 100, 100, .5, RL::GRAY)
+    RL::DrawRectangleRoundedLines(150, 400, 100, 100, .5, RL::CYAN)
+
+    // Example: Draw Font
+    // RL::DrawTextEx(font, "Hello Mylo", 200, 100, 32, 0, X)
+    
+    // FPS and Done
+    RL::DrawFPS(10, 10)
+    RL::EndTextureMode()
+
+    // Draw to screen
+    RL::BeginDrawing()
+    RL::ClearBackground(RL::BLACK)
+    RL::RenderTextureFullscreen(target, 800, 600)
+    RL::EndDrawing()
+}
