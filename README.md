@@ -103,6 +103,14 @@ EXAMPLES:
 > ./tests
 ```
 
+### Using CMake to build all modules
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DMODULES=ON
+cd build
+make -j8
+```
+
+
 ## Debugging in VSCode
 Mylo supports the DAP protocol. This can be used with any tool that supports DAP, using the `--dap` flag. There
 is a VSCode plugin, in `editors/mylo-vscode` that configures Mylo automatically.
